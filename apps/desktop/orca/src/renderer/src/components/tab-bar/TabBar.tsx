@@ -41,6 +41,7 @@ import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import { useDetectedAgents } from '@/hooks/useDetectedAgents'
 import { useAgentDetectionTargetForWorktree } from '@/hooks/useAgentDetectionTarget'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
+import { launchPiAgentSpike } from '@/lib/launch-pi-agent-spike'
 import { normalizeRelativePath } from '@/lib/path'
 import {
   getWindowsTerminalCapabilityOwnerKey,
@@ -609,6 +610,13 @@ function TabBarInner({
       return
     }
     queueNewActiveTerminalFocusAfterNewTabMenuClose()
+  }
+  // Why: spike proof-of-concept for hosting the `pi` (prime-agent) CLI — not a
+  // registered TuiAgent, so it bypasses the catalog and calls the same
+  // terminal-tab + startup-command pipeline directly. See launch-pi-agent-spike.ts.
+  const launchPiAgentFromNewTabEntry = (): void => {
+    const { tabId } = launchPiAgentSpike({ worktreeId, groupId: resolvedGroupId })
+    queueTerminalTabFocusAfterNewTabMenuClose(tabId)
   }
   const runPendingNewTabMenuFocusAfterClose = (): void => {
     const pendingFocus = pendingNewTabMenuFocusRef.current
@@ -1271,6 +1279,19 @@ function TabBarInner({
                 groupId={resolvedGroupId}
                 onFocusTerminal={queueTerminalTabFocusAfterNewTabMenuClose}
               />
+            </>
+          ) : null}
+          {showStaticCreateMenuItems ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={launchPiAgentFromNewTabEntry}
+                className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
+                title="Launch pi (spike) in a new terminal"
+              >
+                <TerminalSquare className="size-4 text-muted-foreground" />
+                <span className="flex-1">pi (spike)</span>
+              </DropdownMenuItem>
             </>
           ) : null}
         </DropdownMenuContent>
