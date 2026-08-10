@@ -14033,6 +14033,23 @@
         "useManualTerminalWorktreeParking": {
           "cannotPark": "These terminals cannot be parked safely."
         }
+      },
+      "pi": {
+        "chat": {
+          "PiChatColumn": {
+            "c98e2d87d6": "pi",
+            "d09f4293d5": "Trabajando…",
+            "bc091e55d8": "Listo",
+            "cc1fb4745e": "pi no pudo iniciarse: {{error}}",
+            "602dc45f05": "El agente pi está listo. Envía un mensaje abajo para iniciar una conversación.",
+            "0ef30e745f": "Pensando…",
+            "8f15ef3d75": "Mensaje a pi…",
+            "c3a72b9e07": "Enviar",
+            "38c30bd5df": "Ejecutando",
+            "a4b5217d8a": "Hecho",
+            "fb64c8e273": "Error"
+          }
+        }
       }
     },
     "i18n": {

@@ -224,6 +224,13 @@ import {
   ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT,
   ORCA_UPDATER_QUIT_AND_INSTALL_STARTED_EVENT
 } from '../shared/updater-renderer-events'
+import {
+  PI_RPC_DISPOSE_CHANNEL,
+  PI_RPC_FRAME_CHANNEL,
+  PI_RPC_SEND_CHANNEL,
+  PI_RPC_START_CHANNEL,
+  type PiRpcCommand
+} from '../shared/pi-rpc'
 import { ORCA_RENDERER_UNLOAD_PREVENTED_EVENT } from '../shared/renderer-shutdown-events'
 import {
   ORCA_INTERNAL_FILE_DRAG_TYPE,
@@ -4108,6 +4115,23 @@ const api = {
       }
       ipcRenderer.on('orca-ui:render', listener)
       return () => ipcRenderer.removeListener('orca-ui:render', listener)
+    }
+  },
+
+  piRpc: {
+    start: (config?: { cwd?: string }): Promise<void> =>
+      ipcRenderer.invoke(PI_RPC_START_CHANNEL, config),
+    send: (command: PiRpcCommand): Promise<void> =>
+      ipcRenderer.invoke(PI_RPC_SEND_CHANNEL, command),
+    dispose: (): Promise<void> => ipcRenderer.invoke(PI_RPC_DISPOSE_CHANNEL),
+    onFrame: (
+      callback: (frame: { kind: 'frame'; payload: unknown }) => void
+    ): (() => void) => {
+      const listener = (_event: unknown, frame: { kind: 'frame'; payload: unknown }): void => {
+        callback(frame)
+      }
+      ipcRenderer.on(PI_RPC_FRAME_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(PI_RPC_FRAME_CHANNEL, listener)
     }
   },
 

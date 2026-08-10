@@ -33,6 +33,7 @@ import type {
   LocalLogTailWatchArgs
 } from '../shared/local-log-tail-types'
 import type { ReadClipboardTextOptions } from '../shared/clipboard-text'
+import type { PiRpcCommand } from '../shared/pi-rpc'
 import type { AppIdentity } from '../shared/app-identity'
 import type {
   WriteTerminalRenderDesyncEvidenceArgs,
@@ -880,6 +881,13 @@ export type OrcaUiApi = {
   getConnectionInfo: () => Promise<{ port: number; token: string } | null>
   getPanels: () => Promise<Record<string, unknown> | null>
   onRender: (callback: (payload: { panelId: string; spec: unknown }) => void) => () => void
+}
+
+export type PiRpcApi = {
+  start: (config?: { cwd?: string }) => Promise<void>
+  send: (command: PiRpcCommand) => Promise<void>
+  dispose: () => Promise<void>
+  onFrame: (callback: (frame: { kind: 'frame'; payload: unknown }) => void) => () => void
 }
 
 export type CoopLearningReviewApi = {
@@ -2670,6 +2678,7 @@ export type PreloadApi = {
   openCodeSdk: OpenCodeSdkApi
   coopBoard?: CoopBoardApi
   orcaUi?: OrcaUiApi
+  piRpc?: PiRpcApi
   coopLearningReview: CoopLearningReviewApi
   nativeChat: NativeChatApi
   fs: {

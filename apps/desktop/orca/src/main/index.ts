@@ -39,6 +39,12 @@ import {
   ORCA_UI_RENDER_CHANNEL,
   type OrcaUiServer
 } from './orca-ui/server'
+import { PiRpcClient } from './pi-rpc/client'
+import {
+  createPiRpcFrameRelay,
+  registerPiRpcIpcHandlers
+} from './pi-rpc/ipc'
+
 import { getTrustedUIRendererWebContents, sendToTrustedUIRenderer } from './ipc/ui'
 import { initObservability, shutdownObservability } from './observability'
 import { registerMobileHandlers } from './ipc/mobile'
@@ -307,6 +313,7 @@ let headlessBrowserDisplayAvailable = false
 
 let starNag: StarNagService | null = null
 let orcaUiServer: OrcaUiServer | null = null
+let piRpcClient: PiRpcClient | null = null
 let agentAwakeService: AgentAwakeService | null = null
 let crashReports: CrashReportStore | null = null
 let unsubscribeAgentAwakeStatusChanges: (() => void) | null = null
@@ -1165,6 +1172,12 @@ function openMainWindow(): BrowserWindow {
     process.env.ORCA_UI_TOKEN = startedServer.token
     console.warn(`[orca-ui] panel server listening on 127.0.0.1:${startedServer.port}`)
   })
+  // Why: spike - host the pi (prime-agent) CLI as an RPC child process and stream
+  // its JSONL frames to the renderer, which shows them as a React conversation
+  // column (no terminal). The client is created eagerly so its IPC handlers can
+  // reach it; it is disposed in will-quit and the child never gets a terminal window.
+  piRpcClient = new PiRpcClient(createPiRpcFrameRelay())
+  registerPiRpcIpcHandlers(() => piRpcClient)
   // Why: Windows Tray construction can block synchronously on Shell_NotifyIcon, so both platforms defer creation to after first paint.
   let trayCreated = false
   const createSystemTrayDeferred = (): void => {
@@ -2816,6 +2829,9 @@ app.on('will-quit', (e) => {
   // Why: close the loopback panel server so its ephemeral port is released on quit
   // (no orphaned port/process). Idempotent; the process exits right after anyway.
   void orcaUiServer?.close()
+  // Why: spike - kill the pi RPC child so it cannot outlive the app.
+  piRpcClient?.dispose()
+  piRpcClient = null
   // Why: cancels relay restart/reinstall timers and kills wsl.exe children deterministically, not via stdio-pipe teardown.
   wslHookRelayManager.disposeAll()
   stats?.flush()
