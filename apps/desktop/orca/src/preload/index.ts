@@ -4097,6 +4097,20 @@ const api = {
       ipcRenderer.invoke('coopBoard:listTasks', args)
   },
 
+  orcaUi: {
+    getConnectionInfo: (): Promise<{ port: number; token: string } | null> =>
+      ipcRenderer.invoke('orca-ui:getConnectionInfo'),
+    getPanels: (): Promise<Record<string, unknown> | null> =>
+      ipcRenderer.invoke('orca-ui:getPanels'),
+    onRender: (callback: (payload: { panelId: string; spec: unknown }) => void): (() => void) => {
+      const listener = (_event: unknown, payload: { panelId: string; spec: unknown }): void => {
+        callback(payload)
+      }
+      ipcRenderer.on('orca-ui:render', listener)
+      return () => ipcRenderer.removeListener('orca-ui:render', listener)
+    }
+  },
+
   coopLearningReview: {
     load: (args?: unknown): Promise<unknown> => ipcRenderer.invoke('coopLearningReview:load', args),
     replay: (args: unknown): Promise<unknown> => ipcRenderer.invoke('coopLearningReview:replay', args),

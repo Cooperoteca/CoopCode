@@ -133,7 +133,16 @@
       "064bd07810": "Volver",
       "ce37cf5279": "Alternar barra lateral ({{value0}})",
       "e4b9e7dff7": "Alternar barra lateral",
-      "pluginCommandFailed": "Could not run the plugin command."
+      "pluginCommandFailed": "Could not run the plugin command.",
+      "coopLearningReview": {
+        "open": "Review corpus-learning candidates"
+      },
+      "coopBoard": {
+        "open": "Open Coop Task Board"
+      },
+      "opencodeSessions": {
+        "open": "Open OpenCode Sessions"
+      }
     },
     "web": {
       "WebConnect": {
@@ -13938,6 +13947,20 @@
                 "named": "Personas en {{orgName}} que pueden colaborar en Orca.",
                 "default": "Personas en tu organización que pueden colaborar en Orca."
               }
+            }
+          }
+        },
+        "ui": {
+          "OrcaUiHost": {
+            "294cb8c6cf": "Close panel"
+          },
+          "panel": {
+            "renderers": {
+              "7216055f41": "{{value0}} cards",
+              "a7640d5b6a": "No columns.",
+              "e5968f09fe": "No cards.",
+              "e73e91a9c8": "{{value0}} rows",
+              "e29cb3bb0e": "No rows."
             }
           }
         }

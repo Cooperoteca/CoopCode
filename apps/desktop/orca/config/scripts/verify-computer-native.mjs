@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dirname, '..', '..')
+// Windows resolves python3 to a Store alias stub that only prints "not found"; hasCommand rejects it.
+const python = hasCommand('python3') ? 'python3' : 'python'
 const checks = [
   {
     name: 'macOS Swift renderer/provider tests',
@@ -15,7 +17,7 @@ const checks = [
   },
   {
     name: 'Linux provider Python syntax',
-    command: 'python3',
+    command: python,
     args: [
       '-c',
       [
@@ -34,7 +36,7 @@ const checks = [
   },
   {
     name: 'Linux provider imports',
-    command: 'python3',
+    command: python,
     args: [
       '-c',
       [
@@ -110,8 +112,13 @@ if (failed) {
 
 function hasCommand(command) {
   if (process.platform === 'win32') {
-    const result = spawnSync('where.exe', [command], { stdio: 'ignore' })
-    return result.status === 0
+    const result = spawnSync('where.exe', [command], { encoding: 'utf8' })
+    if (result.status !== 0) {
+      return false
+    }
+    return result.stdout
+      .split(/\r?\n/)
+      .some((line) => line.trim() && !/\\WindowsApps\\/i.test(line))
   }
   if (existsSync(command)) {
     return true

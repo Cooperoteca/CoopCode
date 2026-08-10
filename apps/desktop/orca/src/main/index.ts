@@ -33,6 +33,13 @@ import { initDaemonPtyProvider, disconnectDaemon, shutdownDaemon } from './daemo
 import { closeAllWatchers } from './ipc/filesystem-watcher'
 import { disposeWorktreeBaseDirectoryWatchers } from './ipc/worktree-base-directory-watcher'
 import { registerCoreHandlers } from './ipc/register-core-handlers'
+import {
+  registerOrcaUiIpcHandlers,
+  startOrcaUiServer,
+  ORCA_UI_RENDER_CHANNEL,
+  type OrcaUiServer
+} from './orca-ui/server'
+import { getTrustedUIRendererWebContents, sendToTrustedUIRenderer } from './ipc/ui'
 import { initObservability, shutdownObservability } from './observability'
 import { registerMobileHandlers } from './ipc/mobile'
 import { initTelemetry, shutdownTelemetry, trackAppOpenedOnce, track } from './telemetry/client'
@@ -299,6 +306,7 @@ let pendingUnpairedDeviceAuthFailure = false
 let headlessBrowserDisplayAvailable = false
 
 let starNag: StarNagService | null = null
+let orcaUiServer: OrcaUiServer | null = null
 let agentAwakeService: AgentAwakeService | null = null
 let crashReports: CrashReportStore | null = null
 let unsubscribeAgentAwakeStatusChanges: (() => void) | null = null
@@ -1131,6 +1139,32 @@ function openMainWindow(): BrowserWindow {
   })
   recordCrashBreadcrumb('main_window_created')
   logStartupMilestone('window-created')
+  // Why: pi (the Prime Agent) runs as a TUI in a pseudo-terminal, so Orca only
+  // sees rendered terminal bytes. This loopback HTTP server gives pi a channel
+  // to draw declarative UI panels inside the Orca window. It is started after
+  // the trusted renderer is registered so the first render can already be
+  // delivered. The port/token env vars are exported for terminal children; the
+  // spike launcher also passes them explicitly per tab (see launch-pi-agent-spike.ts).
+  // Why: openMainWindow is synchronous and returns the BrowserWindow, so the
+  // loopback server is started without awaiting (it binds on 127.0.0.1 an
+  // ephemeral port in a few ms). The IPC handlers read the server lazily, so a
+  // render that arrives before the server is up is simply not delivered yet.
+  void startOrcaUiServer({
+    deliver: (panelId, spec) => {
+      const renderer = getTrustedUIRendererWebContents()
+      if (!renderer) {
+        return false
+      }
+      sendToTrustedUIRenderer(ORCA_UI_RENDER_CHANNEL, { panelId, spec })
+      return true
+    }
+  }).then((startedServer) => {
+    orcaUiServer = startedServer
+    registerOrcaUiIpcHandlers(() => orcaUiServer)
+    process.env.ORCA_UI_PORT = String(startedServer.port)
+    process.env.ORCA_UI_TOKEN = startedServer.token
+    console.warn(`[orca-ui] panel server listening on 127.0.0.1:${startedServer.port}`)
+  })
   // Why: Windows Tray construction can block synchronously on Shell_NotifyIcon, so both platforms defer creation to after first paint.
   let trayCreated = false
   const createSystemTrayDeferred = (): void => {
@@ -2779,6 +2813,9 @@ app.on('will-quit', (e) => {
   pluginService = null
   setUnreadDockBadgeCount(0)
   agentHookServer.stop()
+  // Why: close the loopback panel server so its ephemeral port is released on quit
+  // (no orphaned port/process). Idempotent; the process exits right after anyway.
+  void orcaUiServer?.close()
   // Why: cancels relay restart/reinstall timers and kills wsl.exe children deterministically, not via stdio-pipe teardown.
   wslHookRelayManager.disposeAll()
   stats?.flush()

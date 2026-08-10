@@ -876,6 +876,12 @@ export type CoopBoardApi = {
   listTasks: (args: { repoRoot: string }) => Promise<CoopBoardResult>
 }
 
+export type OrcaUiApi = {
+  getConnectionInfo: () => Promise<{ port: number; token: string } | null>
+  getPanels: () => Promise<Record<string, unknown> | null>
+  onRender: (callback: (payload: { panelId: string; spec: unknown }) => void) => () => void
+}
+
 export type CoopLearningReviewApi = {
   load: (args?: CoopLearningReviewLoadArgs) => Promise<CoopLearningReviewLoadResult>
   replay: (args: CoopLearningReviewReplayArgs) => Promise<ReplayCitationResult>
@@ -2663,6 +2669,7 @@ export type PreloadApi = {
   aiVault: AiVaultApi
   openCodeSdk: OpenCodeSdkApi
   coopBoard?: CoopBoardApi
+  orcaUi?: OrcaUiApi
   coopLearningReview: CoopLearningReviewApi
   nativeChat: NativeChatApi
   fs: {

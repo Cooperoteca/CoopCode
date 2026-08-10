@@ -69,6 +69,7 @@ import CoopBoardScreen, { COOP_BOARD_OPEN_EVENT } from './components/coop-board/
 import CoopLearningReviewScreen, {
   COOP_LEARNING_REVIEW_OPEN_EVENT
 } from './components/coop-learning-review/CoopLearningReviewScreen'
+import { OrcaUiHost } from './components/orca-ui/OrcaUiHost'
 import { StarNagToastHost } from './components/star-nag/StarNagToastHost'
 import { SkillFreshnessNudge } from './components/skills/SkillFreshnessNudge'
 import { SkillFreshnessUpdateDialog } from './components/skills/SkillFreshnessUpdateDialog'
@@ -2689,6 +2690,14 @@ function App(): React.JSX.Element {
               compact
             >
               <CoopLearningReviewScreen />
+            </RecoverableRenderErrorBoundary>
+            <RecoverableRenderErrorBoundary
+              boundaryId="overlay.orca-ui"
+              surface="overlay"
+              resetKey={activeView}
+              compact
+            >
+              <OrcaUiHost />
             </RecoverableRenderErrorBoundary>
             <RecoverableRenderErrorBoundary
               boundaryId="overlay.star-nag-toast"

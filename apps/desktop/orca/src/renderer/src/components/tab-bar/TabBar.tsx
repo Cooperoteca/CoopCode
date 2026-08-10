@@ -614,8 +614,8 @@ function TabBarInner({
   // Why: spike proof-of-concept for hosting the `pi` (prime-agent) CLI — not a
   // registered TuiAgent, so it bypasses the catalog and calls the same
   // terminal-tab + startup-command pipeline directly. See launch-pi-agent-spike.ts.
-  const launchPiAgentFromNewTabEntry = (): void => {
-    const { tabId } = launchPiAgentSpike({ worktreeId, groupId: resolvedGroupId })
+  const launchPiAgentFromNewTabEntry = async (): Promise<void> => {
+    const { tabId } = await launchPiAgentSpike({ worktreeId, groupId: resolvedGroupId })
     queueTerminalTabFocusAfterNewTabMenuClose(tabId)
   }
   const runPendingNewTabMenuFocusAfterClose = (): void => {

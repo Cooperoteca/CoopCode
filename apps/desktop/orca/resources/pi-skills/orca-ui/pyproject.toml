@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "orca-ui"
+version = "0.1.0"
+description = "Draw declarative UI panels inside the Orca window from the pi agent."
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orca_ui"]
