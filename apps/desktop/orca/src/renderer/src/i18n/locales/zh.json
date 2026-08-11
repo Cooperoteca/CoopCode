@@ -14051,6 +14051,11 @@
             "105693b503": "关闭 pi"
           }
         }
+      },
+      "flexshell": {
+        "FlexShellRegion": {
+          "conversa": "对话"
+        }
       }
     },
     "i18n": {

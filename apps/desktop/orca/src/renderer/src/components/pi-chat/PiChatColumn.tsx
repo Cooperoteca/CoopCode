@@ -283,28 +283,3 @@ export function PiChatColumn({ onClose }: { onClose?: () => void }): React.JSX.E
   )
 }
 
-export function PiChatColumnHost(): React.JSX.Element | null {
-  const [open, setOpen] = useState(false)
-
-  useEffect(() => {
-    const onOpen = (): void => setOpen(true)
-    window.addEventListener(PI_CHAT_OPEN_EVENT, onOpen)
-    return () => window.removeEventListener(PI_CHAT_OPEN_EVENT, onOpen)
-  }, [])
-
-  // Why: mounting is opt-in. The column fills the window and its child effect spawns
-  // a pi process, so an always-on mount would both hide the rest of Orca and start an
-  // agent nobody asked for. The web build has no piRpc surface at all.
-  if (!open || !window.api?.piRpc) {
-    return null
-  }
-  return (
-    // pointer-events-none on the full-screen layer: it only positions the column,
-    // and must not swallow clicks aimed at the rest of the app behind it.
-    <div className="pointer-events-none fixed inset-0 z-40 flex justify-end">
-      <div className="pointer-events-auto flex h-full w-full max-w-2xl flex-col">
-        <PiChatColumn onClose={() => setOpen(false)} />
-      </div>
-    </div>
-  )
-}

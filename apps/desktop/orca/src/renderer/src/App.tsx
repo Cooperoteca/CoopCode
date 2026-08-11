@@ -70,7 +70,7 @@ import CoopLearningReviewScreen, {
   COOP_LEARNING_REVIEW_OPEN_EVENT
 } from './components/coop-learning-review/CoopLearningReviewScreen'
 import { OrcaUiHost } from './components/orca-ui/OrcaUiHost'
-import { PiChatColumnHost } from './components/pi-chat/PiChatColumn'
+import { FlexShellRegion } from './components/flex-shell/FlexShellRegion'
 import { StarNagToastHost } from './components/star-nag/StarNagToastHost'
 import { SkillFreshnessNudge } from './components/skills/SkillFreshnessNudge'
 import { SkillFreshnessUpdateDialog } from './components/skills/SkillFreshnessUpdateDialog'
@@ -669,6 +669,7 @@ function App(): React.JSX.Element {
   const shouldMountUpdateCard = shouldMountUpdateCardForStatus(updateStatus)
   const rightSidebarWidth = useAppStore((s) => s.rightSidebarWidth)
   const markdownTocPanelWidth = useAppStore((s) => s.markdownTocPanelWidth)
+  const flexShellLayout = useAppStore((s) => s.flexShellLayout)
   const rightSidebarOpen = useAppStore((s) => s.rightSidebarOpen)
   const rightSidebarTab = useAppStore((s) => s.rightSidebarTab)
   const rightSidebarExplorerView = useAppStore((s) => s.rightSidebarExplorerView)
@@ -1352,6 +1353,7 @@ function App(): React.JSX.Element {
         rightSidebarExplorerView,
         rightSidebarWidth,
         markdownTocPanelWidth,
+        flexShellLayout,
         groupBy,
         sortBy,
         projectOrderBy,
@@ -1386,6 +1388,7 @@ function App(): React.JSX.Element {
     rightSidebarExplorerView,
     rightSidebarWidth,
     markdownTocPanelWidth,
+    flexShellLayout,
     groupBy,
     sortBy,
     projectOrderBy,
@@ -2397,6 +2400,15 @@ function App(): React.JSX.Element {
                               </Suspense>
                             </div>
                           ) : null}
+
+                          <RecoverableRenderErrorBoundary
+                            boundaryId="flex-shell"
+                            surface="overlay"
+                            resetKey={activeView}
+                            compact
+                          >
+                            <FlexShellRegion />
+                          </RecoverableRenderErrorBoundary>
                           <Suspense fallback={null}>
                             <RecoverableRenderErrorBoundary
                               boundaryId={`page.${activeView}`}
@@ -2699,14 +2711,6 @@ function App(): React.JSX.Element {
               compact
             >
               <OrcaUiHost />
-            </RecoverableRenderErrorBoundary>
-            <RecoverableRenderErrorBoundary
-              boundaryId="overlay.pi-chat"
-              surface="overlay"
-              resetKey={activeView}
-              compact
-            >
-              <PiChatColumnHost />
             </RecoverableRenderErrorBoundary>
             <RecoverableRenderErrorBoundary
               boundaryId="overlay.star-nag-toast"

@@ -589,6 +589,9 @@ export type UISlice = {
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
   setSidebarWidth: (width: number) => void
+  /** Serialized flexlayout-react model JSON for the central-column FlexShell; undefined until the user opens the shell. */
+  flexShellLayout: Record<string, unknown> | undefined
+  setFlexShellLayout: (layout: Record<string, unknown>) => void
   agentSendPopoverTargetMode: AgentSendPopoverTargetMode | null
   openAgentSendPopoverTargetMode: (args: OpenAgentSendPopoverTargetModeArgs) => void
   closeAgentSendPopoverTargetMode: (id?: string, instanceId?: string) => void
@@ -992,6 +995,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setSidebarWidth: (width) => set({ sidebarWidth: width }),
+  setFlexShellLayout: (layout) => set({ flexShellLayout: layout }),
+  flexShellLayout: undefined,
   agentSendPopoverTargetMode: null,
   openAgentSendPopoverTargetMode: (args) => {
     const targets = deriveRunningAgentSendTargets(get(), args.worktreeId)
@@ -2416,6 +2421,9 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
           undefined,
           s.markdownTocPanelWidth
         ),
+        // Why: the flexlayout model JSON is normalized defensively by flex-shell-model on use,
+        // so hydration carries it through as-is (undefined when never persisted).
+        flexShellLayout: ui.flexShellLayout,
         rightSidebarOpen: typeof ui.rightSidebarOpen === 'boolean' ? ui.rightSidebarOpen : true,
         rightSidebarTab: rightSidebarRoute.rightSidebarTab,
         rightSidebarExplorerView: rightSidebarRoute.rightSidebarExplorerView,

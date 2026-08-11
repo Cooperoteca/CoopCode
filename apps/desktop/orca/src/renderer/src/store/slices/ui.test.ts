@@ -1228,6 +1228,19 @@ describe('createUISlice hydratePersistedUI', () => {
     expect(store.getState().markdownTocPanelWidth).toBe(200)
   })
 
+  it('hydrates the persisted flex shell layout and persists it via the setter', () => {
+    const store = createUIStore()
+    const layout = { layout: { type: 'row', children: [] } }
+
+    store.getState().hydratePersistedUI(makePersistedUI({ flexShellLayout: layout }))
+
+    expect(store.getState().flexShellLayout).toEqual(layout)
+
+    const next = { layout: { type: 'row', children: [{ type: 'tabset', children: [] }] } }
+    store.getState().setFlexShellLayout(next)
+    expect(store.getState().flexShellLayout).toEqual(next)
+  })
+
   it('preserves right sidebar widths above the former 500px cap', () => {
     const store = createUIStore()
 

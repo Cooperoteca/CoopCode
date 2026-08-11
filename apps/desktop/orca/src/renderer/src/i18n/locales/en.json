@@ -14074,6 +14074,11 @@
             "105693b503": "Close pi"
           }
         }
+      },
+      "flexshell": {
+        "FlexShellRegion": {
+          "conversa": "Conversation"
+        }
       }
     },
     "i18n": {

@@ -3271,6 +3271,8 @@ export type PersistedUIState = {
   rightSidebarExplorerView: RightSidebarExplorerView
   rightSidebarWidth: number
   markdownTocPanelWidth?: number
+  /** Serialized flexlayout-react model JSON for the central-column FlexShell; normalized by the renderer on hydrate. */
+  flexShellLayout?: Record<string, unknown>
   groupBy: 'none' | 'workspace-status' | 'repo' | 'pr-status'
   sortBy: 'name' | 'smart' | 'recent' | 'repo' | 'manual'
   /** Project header ordering in `groupBy: 'repo'`, independent of `sortBy`: 'manual' uses persisted order + header drag, 'recent' by latest visible activity. */
