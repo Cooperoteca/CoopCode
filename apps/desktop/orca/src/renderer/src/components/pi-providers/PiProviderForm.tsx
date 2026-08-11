@@ -11,14 +11,15 @@
 // surface to force a fresh session against the updated registry.
 
 import { useState } from 'react'
-import { Loader2, Plus, Save, Sparkles, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Save, Sparkles } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { translate } from '@/i18n/i18n'
+import { PiProviderModelRows } from './PiProviderModelRows'
+import { ERROR_MESSAGE, K } from './provider-form-copy'
 import type { PiExtensionWriteResult } from '../../../../shared/pi-rpc'
 import {
   emptyProviderModelDraft,
@@ -26,100 +27,10 @@ import {
   toProviderExtensionSpec,
   validateProviderForm,
   type ProviderFormDraft,
-  type ProviderFormErrorCode,
   type ProviderFormErrors,
   type ProviderModelDraft
 } from './provider-form-model'
 
-const K = {
-  title: 'auto.components.pi.providers.PiProviderForm.title',
-  description: 'auto.components.pi.providers.PiProviderForm.description',
-  providerId: 'auto.components.pi.providers.PiProviderForm.providerId',
-  providerIdPlaceholder: 'auto.components.pi.providers.PiProviderForm.providerIdPlaceholder',
-  providerName: 'auto.components.pi.providers.PiProviderForm.providerName',
-  providerNamePlaceholder: 'auto.components.pi.providers.PiProviderForm.providerNamePlaceholder',
-  baseUrl: 'auto.components.pi.providers.PiProviderForm.baseUrl',
-  baseUrlPlaceholder: 'auto.components.pi.providers.PiProviderForm.baseUrlPlaceholder',
-  api: 'auto.components.pi.providers.PiProviderForm.api',
-  apiPlaceholder: 'auto.components.pi.providers.PiProviderForm.apiPlaceholder',
-  credential: 'auto.components.pi.providers.PiProviderForm.credential',
-  credentialPlaceholder: 'auto.components.pi.providers.PiProviderForm.credentialPlaceholder',
-  credentialHint: 'auto.components.pi.providers.PiProviderForm.credentialHint',
-  credentialWarning: 'auto.components.pi.providers.PiProviderForm.credentialWarning',
-  models: 'auto.components.pi.providers.PiProviderForm.models',
-  modelsHint: 'auto.components.pi.providers.PiProviderForm.modelsHint',
-  modelId: 'auto.components.pi.providers.PiProviderForm.modelId',
-  modelIdPlaceholder: 'auto.components.pi.providers.PiProviderForm.modelIdPlaceholder',
-  modelNamePlaceholder: 'auto.components.pi.providers.PiProviderForm.modelNamePlaceholder',
-  modelName: 'auto.components.pi.providers.PiProviderForm.modelName',
-  contextWindow: 'auto.components.pi.providers.PiProviderForm.contextWindow',
-  maxTokens: 'auto.components.pi.providers.PiProviderForm.maxTokens',
-  reasoning: 'auto.components.pi.providers.PiProviderForm.reasoning',
-  addModel: 'auto.components.pi.providers.PiProviderForm.addModel',
-  removeModel: 'auto.components.pi.providers.PiProviderForm.removeModel',
-  save: 'auto.components.pi.providers.PiProviderForm.save',
-  saving: 'auto.components.pi.providers.PiProviderForm.saving',
-  savedTitle: 'auto.components.pi.providers.PiProviderForm.savedTitle',
-  savedDescription: 'auto.components.pi.providers.PiProviderForm.savedDescription',
-  newSessionRequested: 'auto.components.pi.providers.PiProviderForm.newSessionRequested',
-  newSession: 'auto.components.pi.providers.PiProviderForm.newSession',
-  saveFailed: 'auto.components.pi.providers.PiProviderForm.saveFailed',
-  // field error codes
-  'providerId.required': 'auto.components.pi.providers.PiProviderForm.errorProviderIdRequired',
-  'providerId.slug': 'auto.components.pi.providers.PiProviderForm.errorProviderIdSlug',
-  'providerName.required': 'auto.components.pi.providers.PiProviderForm.errorProviderNameRequired',
-  'baseUrl.required': 'auto.components.pi.providers.PiProviderForm.errorBaseUrlRequired',
-  'baseUrl.invalid': 'auto.components.pi.providers.PiProviderForm.errorBaseUrlInvalid',
-  'api.required': 'auto.components.pi.providers.PiProviderForm.errorApiRequired',
-  'credential.required': 'auto.components.pi.providers.PiProviderForm.errorCredentialRequired',
-  'credential.looksLikeKey': 'auto.components.pi.providers.PiProviderForm.errorCredentialLooksLikeKey',
-  'credential.invalidRef': 'auto.components.pi.providers.PiProviderForm.errorCredentialInvalidRef',
-  'model.id.required': 'auto.components.pi.providers.PiProviderForm.errorModelIdRequired',
-  'model.name.required': 'auto.components.pi.providers.PiProviderForm.errorModelNameRequired',
-  'model.contextWindow.positive': 'auto.components.pi.providers.PiProviderForm.errorContextWindowPositive',
-  'model.maxTokens.positive': 'auto.components.pi.providers.PiProviderForm.errorMaxTokensPositive',
-  'models.required': 'auto.components.pi.providers.PiProviderForm.errorModelsRequired'
-} as const
-
-const ERROR_MESSAGE: Record<ProviderFormErrorCode, { key: string; fallback: string }> = {
-  'providerId.required': { key: K['providerId.required'], fallback: 'Provider id is required' },
-  'providerId.slug': {
-    key: K['providerId.slug'],
-    fallback: 'Use only letters, digits, dashes and underscores — safe for a file name'
-  },
-  'providerName.required': { key: K['providerName.required'], fallback: 'Display name is required' },
-  'baseUrl.required': { key: K['baseUrl.required'], fallback: 'Base URL is required' },
-  'baseUrl.invalid': {
-    key: K['baseUrl.invalid'],
-    fallback: 'Enter a valid http(s) URL, e.g. https://api.example.com/v1'
-  },
-  'api.required': { key: K['api.required'], fallback: 'API type is required' },
-  'credential.required': {
-    key: K['credential.required'],
-    fallback: 'Enter the environment variable name or !command that holds the key'
-  },
-  'credential.looksLikeKey': {
-    key: K['credential.looksLikeKey'],
-    fallback:
-      'That looks like a raw API key — the key goes in an environment variable, a !command, or /login inside pi'
-  },
-  'credential.invalidRef': {
-    key: K['credential.invalidRef'],
-    fallback:
-      'Use an environment variable name (like CLINEPASS_API_KEY) or a !command that prints the key'
-  },
-  'model.id.required': { key: K['model.id.required'], fallback: 'Model id is required' },
-  'model.name.required': { key: K['model.name.required'], fallback: 'Model name is required' },
-  'model.contextWindow.positive': {
-    key: K['model.contextWindow.positive'],
-    fallback: 'Context window must be a positive integer'
-  },
-  'model.maxTokens.positive': {
-    key: K['model.maxTokens.positive'],
-    fallback: 'Max tokens must be a positive integer'
-  },
-  'models.required': { key: K['models.required'], fallback: 'Add at least one model' }
-}
 
 function errorText(errors: ProviderFormErrors, field: Exclude<keyof ProviderFormErrors, 'byModel'>): string | null {
   const code = errors[field]
@@ -349,112 +260,12 @@ export function PiProviderForm(): React.JSX.Element {
             <p className="text-xs text-destructive">{errorText(errors, 'models')}</p>
           ) : null}
 
-          <div className="flex flex-col gap-4">
-            {draft.models.map((model, index) => {
-              const rowError = errors.byModel?.[index]
-              return (
-                <div
-                  key={model.key}
-                  className="flex flex-col gap-3 rounded-md border border-border bg-card p-3"
-                >
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="flex flex-col gap-1.5">
-                      <Label htmlFor={`pi-model-id-${index}`}>
-                        {translate(K.modelId, 'Model id')}
-                      </Label>
-                      <Input
-                        id={`pi-model-id-${index}`}
-                        value={model.id}
-                        onChange={(event) => updateModel(index, { id: event.target.value })}
-                        placeholder={translate(K.modelIdPlaceholder, 'e.g. cline-pass/deepseek-v4-flash')}
-                        aria-invalid={Boolean(rowError?.id)}
-                      />
-                      {rowError?.id ? (
-                        <p className="text-xs text-destructive">{translate(ERROR_MESSAGE[rowError.id].key, ERROR_MESSAGE[rowError.id].fallback)}</p>
-                      ) : null}
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <Label htmlFor={`pi-model-name-${index}`}>
-                        {translate(K.modelName, 'Model name')}
-                      </Label>
-                      <Input
-                        id={`pi-model-name-${index}`}
-                        value={model.name}
-                        onChange={(event) => updateModel(index, { name: event.target.value })}
-                        placeholder={translate(K.modelNamePlaceholder, 'e.g. DeepSeek V4 Flash')}
-                        aria-invalid={Boolean(rowError?.name)}
-                      />
-                      {rowError?.name ? (
-                        <p className="text-xs text-destructive">{translate(ERROR_MESSAGE[rowError.name].key, ERROR_MESSAGE[rowError.name].fallback)}</p>
-                      ) : null}
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <Label htmlFor={`pi-model-context-${index}`}>
-                        {translate(K.contextWindow, 'Context window')}
-                      </Label>
-                      <Input
-                        id={`pi-model-context-${index}`}
-                        type="number"
-                        min={1}
-                        value={model.contextWindow}
-                        onChange={(event) =>
-                          updateModel(index, { contextWindow: event.target.value })
-                        }
-                        aria-invalid={Boolean(rowError?.contextWindow)}
-                      />
-                      {rowError?.contextWindow ? (
-                        <p className="text-xs text-destructive">
-                          {translate(ERROR_MESSAGE[rowError.contextWindow].key, ERROR_MESSAGE[rowError.contextWindow].fallback)}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <Label htmlFor={`pi-model-maxtokens-${index}`}>
-                        {translate(K.maxTokens, 'Max tokens')}
-                      </Label>
-                      <Input
-                        id={`pi-model-maxtokens-${index}`}
-                        type="number"
-                        min={1}
-                        value={model.maxTokens}
-                        onChange={(event) => updateModel(index, { maxTokens: event.target.value })}
-                        aria-invalid={Boolean(rowError?.maxTokens)}
-                      />
-                      {rowError?.maxTokens ? (
-                        <p className="text-xs text-destructive">
-                          {translate(ERROR_MESSAGE[rowError.maxTokens].key, ERROR_MESSAGE[rowError.maxTokens].fallback)}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <label
-                      className="flex cursor-pointer items-center gap-2 text-sm"
-                      htmlFor={`pi-model-reasoning-${index}`}
-                    >
-                      <Checkbox
-                        id={`pi-model-reasoning-${index}`}
-                        checked={model.reasoning}
-                        onCheckedChange={(checked) =>
-                          updateModel(index, { reasoning: checked === true })
-                        }
-                      />
-                      {translate(K.reasoning, 'Supports extended thinking (reasoning)')}
-                    </label>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeModel(index)}
-                      aria-label={translate(K.removeModel, 'Remove model')}
-                      disabled={draft.models.length <= 1}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+          <PiProviderModelRows
+            models={draft.models}
+            byModel={errors.byModel}
+            updateModel={updateModel}
+            removeModel={removeModel}
+          />
 
           <div>
             <Button variant="outline" size="sm" onClick={addModel}>

@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 
+import type * as ReactNamespace from 'react'
+
 // Why: exercise the picker's protocol flow (get_state on mount, lazy
 // get_available_models on open, set_model on select) against a fake preload
 // surface and radix primitives, so the component logic is covered without an
@@ -34,7 +36,7 @@ vi.mock('@/components/ui/button', () => ({
 // wires the trigger to toggle it, mirroring how the real primitive controls
 // content mount + click-to-open.
 vi.mock('@/components/ui/dropdown-menu', () => {
-  const React = require('react') as typeof import('react')
+  const React = require('react') as typeof ReactNamespace
   const openRef = { current: false }
   let setter: ((open: boolean) => void) | undefined
 
@@ -103,11 +105,11 @@ type Frame = { kind: 'frame'; payload: Record<string, unknown> }
 
 function makeFakePiRpc(): {
   api: PiRpcApi
-  sent: Array<Record<string, unknown>>
+  sent: Record<string, unknown>[]
   emit: (payload: Record<string, unknown>) => void
 } {
   const listeners = new Set<(frame: Frame) => void>()
-  const sent: Array<Record<string, unknown>> = []
+  const sent: Record<string, unknown>[] = []
   const api = {
     start: vi.fn(async () => undefined),
     send: vi.fn(async (command: Record<string, unknown>) => {
@@ -123,7 +125,7 @@ function makeFakePiRpc(): {
     api,
     sent,
     emit: (payload) => {
-      for (const listener of [...listeners]) {
+      for (const listener of listeners) {
         listener({ kind: 'frame', payload })
       }
     }
@@ -176,7 +178,7 @@ describe('PiChatModelPicker', () => {
     emitGetState(fixture)
 
     fireEvent.click(screen.getByTestId('pi-model-picker-trigger'))
-    const modelsCommand = fixture.sent[fixture.sent.length - 1]
+    const modelsCommand = fixture.sent.at(-1)
     expect(modelsCommand.type).toBe('get_available_models')
 
     const modelsId = String(modelsCommand.id)
@@ -205,7 +207,7 @@ describe('PiChatModelPicker', () => {
     emitGetState(fixture)
 
     fireEvent.click(screen.getByTestId('pi-model-picker-trigger'))
-    const modelsCommand = fixture.sent[fixture.sent.length - 1]
+    const modelsCommand = fixture.sent.at(-1)
     fixture.emit({
       type: 'response',
       id: String(modelsCommand.id),
@@ -217,7 +219,7 @@ describe('PiChatModelPicker', () => {
     const option = await screen.findByText('GPT-4o')
     fireEvent.click(option)
 
-    const setModel = fixture.sent[fixture.sent.length - 1]
+    const setModel = fixture.sent.at(-1)
     expect(setModel.type).toBe('set_model')
     expect(setModel.provider).toBe('openai')
     expect(setModel.modelId).toBe('gpt-4o')
@@ -241,7 +243,7 @@ describe('PiChatModelPicker', () => {
     emitGetState(fixture)
 
     fireEvent.click(screen.getByTestId('pi-model-picker-trigger'))
-    const modelsCommand = fixture.sent[fixture.sent.length - 1]
+    const modelsCommand = fixture.sent.at(-1)
     fixture.emit({
       type: 'response',
       id: String(modelsCommand.id),

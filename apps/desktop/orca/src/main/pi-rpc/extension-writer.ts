@@ -138,17 +138,17 @@ export function buildProviderExtensionContent(spec: PiProviderExtensionSpec): st
     .map((m, index) => {
       const comma = index === spec.models.length - 1 ? '' : ','
       return [
-        TAB.repeat(4) + '{',
-        TAB.repeat(5) + `id: ${JSON.stringify(m.id)},`,
-        TAB.repeat(5) + `name: ${JSON.stringify(m.name)},`,
-        TAB.repeat(5) + `reasoning: ${m.reasoning ? 'true' : 'false'},`,
-        TAB.repeat(5) + 'input: ["text"],',
+        `${TAB.repeat(4)  }{`,
+        `${TAB.repeat(5)  }id: ${JSON.stringify(m.id)},`,
+        `${TAB.repeat(5)  }name: ${JSON.stringify(m.name)},`,
+        `${TAB.repeat(5)  }reasoning: ${m.reasoning ? 'true' : 'false'},`,
+        `${TAB.repeat(5)  }input: ["text"],`,
         // Why: cost copied from clinepass.ts — per-usage pricing is out of scope
         // for this spike, so zero keeps tracking honest until real costs.
-        TAB.repeat(5) + 'cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },',
-        TAB.repeat(5) + `contextWindow: ${m.contextWindow},`,
-        TAB.repeat(5) + `maxTokens: ${m.maxTokens},`,
-        TAB.repeat(4) + `}${comma}`
+        `${TAB.repeat(5)  }cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },`,
+        `${TAB.repeat(5)  }contextWindow: ${m.contextWindow},`,
+        `${TAB.repeat(5)  }maxTokens: ${m.maxTokens},`,
+        `${TAB.repeat(4)  }}${comma}`
       ].join(NL)
     })
     .join(NL)

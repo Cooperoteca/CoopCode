@@ -17,12 +17,12 @@ type Frame = { kind: 'frame'; payload: unknown }
 
 function makeFakeApi(): {
   api: PiRpcSender
-  sent: Array<Record<string, unknown>>
+  sent: Record<string, unknown>[]
   emit: (frame: Frame) => void
   listeners: Set<(frame: Frame) => void>
 } {
   const listeners = new Set<(frame: Frame) => void>()
-  const sent: Array<Record<string, unknown>> = []
+  const sent: Record<string, unknown>[] = []
   const api: PiRpcSender = {
     send: vi.fn(async (command) => {
       sent.push(command as unknown as Record<string, unknown>)
@@ -36,7 +36,7 @@ function makeFakeApi(): {
     api,
     sent,
     emit: (frame) => {
-      for (const listener of [...listeners]) {
+      for (const listener of listeners) {
         listener(frame)
       }
     },
