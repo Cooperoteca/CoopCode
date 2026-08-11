@@ -33,7 +33,12 @@ import type {
   LocalLogTailWatchArgs
 } from '../shared/local-log-tail-types'
 import type { ReadClipboardTextOptions } from '../shared/clipboard-text'
-import type { PiRpcCommand } from '../shared/pi-rpc'
+import type {
+  PiExtensionWriteResult,
+  PiProviderExtensionSpec,
+  PiRpcCommand,
+  PiSessionsListResult
+} from '../shared/pi-rpc'
 import type { AppIdentity } from '../shared/app-identity'
 import type {
   WriteTerminalRenderDesyncEvidenceArgs,
@@ -888,6 +893,14 @@ export type PiRpcApi = {
   send: (command: PiRpcCommand) => Promise<void>
   dispose: () => Promise<void>
   onFrame: (callback: (frame: { kind: 'frame'; payload: unknown }) => void) => () => void
+}
+
+export type PiSessionsApi = {
+  list: () => Promise<PiSessionsListResult>
+}
+
+export type PiExtensionsApi = {
+  writeProvider: (spec: PiProviderExtensionSpec) => Promise<PiExtensionWriteResult>
 }
 
 export type CoopLearningReviewApi = {
@@ -2679,6 +2692,8 @@ export type PreloadApi = {
   coopBoard?: CoopBoardApi
   orcaUi?: OrcaUiApi
   piRpc?: PiRpcApi
+  piSessions?: PiSessionsApi
+  piExtensions?: PiExtensionsApi
   coopLearningReview: CoopLearningReviewApi
   nativeChat: NativeChatApi
   fs: {

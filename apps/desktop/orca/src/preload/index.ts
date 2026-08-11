@@ -224,11 +224,16 @@ import {
   ORCA_UPDATER_QUIT_AND_INSTALL_STARTED_EVENT
 } from '../shared/updater-renderer-events'
 import {
+  PI_EXTENSIONS_WRITE_PROVIDER_CHANNEL,
   PI_RPC_DISPOSE_CHANNEL,
   PI_RPC_FRAME_CHANNEL,
   PI_RPC_SEND_CHANNEL,
   PI_RPC_START_CHANNEL,
-  type PiRpcCommand
+  PI_SESSIONS_LIST_CHANNEL,
+  type PiExtensionWriteResult,
+  type PiProviderExtensionSpec,
+  type PiRpcCommand,
+  type PiSessionsListResult
 } from '../shared/pi-rpc'
 import { ORCA_RENDERER_UNLOAD_PREVENTED_EVENT } from '../shared/renderer-shutdown-events'
 import {
@@ -4132,6 +4137,15 @@ const api = {
       ipcRenderer.on(PI_RPC_FRAME_CHANNEL, listener)
       return () => ipcRenderer.removeListener(PI_RPC_FRAME_CHANNEL, listener)
     }
+  },
+
+  piSessions: {
+    list: (): Promise<PiSessionsListResult> => ipcRenderer.invoke(PI_SESSIONS_LIST_CHANNEL)
+  },
+
+  piExtensions: {
+    writeProvider: (spec: PiProviderExtensionSpec): Promise<PiExtensionWriteResult> =>
+      ipcRenderer.invoke(PI_EXTENSIONS_WRITE_PROVIDER_CHANNEL, spec)
   },
 
   coopLearningReview: {

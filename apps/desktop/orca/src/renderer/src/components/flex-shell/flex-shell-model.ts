@@ -17,6 +17,24 @@ export const SHELL_TAB_COMPONENT = {
 
 export const DEFAULT_SHELL_TAB_ID = 'tab-pi-chat'
 
+// Stable tab ids for the reservable phase-2 extension tabs. Using a fixed id lets
+// the FlexShellRegion open-tab bar select an already-open tab instead of duplicating it.
+export const SHELL_TAB_ID = {
+  piChat: DEFAULT_SHELL_TAB_ID,
+  historico: 'tab-pi-historico',
+  providers: 'tab-pi-providers'
+} as const
+
+// Builds the JSON for one shell tab node. enableClose is on so users can tidy tabs
+// away; the region's open bar can always re-open them.
+export function buildShellTabJson(
+  component: string,
+  tabId: string,
+  name: string
+): IJsonTabNode {
+  return { type: 'tab', id: tabId, component, name, enableClose: true }
+}
+
 // Builds the default single-tab single-tabset shell model.
 export function buildDefaultShellModelJson(tabName: string): IJsonModel {
   const row: IJsonRowNode = {
