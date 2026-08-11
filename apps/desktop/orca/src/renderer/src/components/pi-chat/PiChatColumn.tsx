@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { translate } from '@/i18n/i18n'
 import {
+  appendLocalUserMessage,
   emptyPiChatState,
   reducePiChatState,
   type PiChatState,
@@ -106,6 +107,7 @@ export function PiChatColumn({ onClose }: { onClose?: () => void }): React.JSX.E
     }
     const message = draft.trim()
     setDraft('')
+    setState((previous) => appendLocalUserMessage(previous, message))
     void api.send({ type: 'prompt', message }).catch((error: unknown) => {
       setConnectError(error instanceof Error ? error.message : String(error))
     })
@@ -289,8 +291,10 @@ export function PiChatColumnHost(): React.JSX.Element | null {
     return null
   }
   return (
-    <div className="pointer-events-auto fixed inset-0 z-40 flex justify-end">
-      <div className="flex h-full w-full max-w-2xl flex-col">
+    // pointer-events-none on the full-screen layer: it only positions the column,
+    // and must not swallow clicks aimed at the rest of the app behind it.
+    <div className="pointer-events-none fixed inset-0 z-40 flex justify-end">
+      <div className="pointer-events-auto flex h-full w-full max-w-2xl flex-col">
         <PiChatColumn onClose={() => setOpen(false)} />
       </div>
     </div>

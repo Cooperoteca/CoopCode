@@ -100,6 +100,11 @@ function toolCallsFromContent(content: unknown): ToolCallView[] {
   return calls
 }
 
+/** Shows the prompt immediately on send; pi's echo of it is dropped by the reducer. */
+export function appendLocalUserMessage(state: PiChatState, text: string): PiChatState {
+  return { ...state, items: [...state.items, { kind: 'user', id: makeId('user'), text }] }
+}
+
 /** Pure reducer over one parsed pi RPC frame. Returns a new state object. */
 export function reducePiChatState(state: PiChatState, frame: PiRpcFramePayload): PiChatState {
   const type = frame.type
@@ -107,11 +112,14 @@ export function reducePiChatState(state: PiChatState, frame: PiRpcFramePayload):
   if (type === 'message_start') {
     const role = frame.message?.role
     if (role === 'user') {
-      const id = makeId('user')
-      return {
-        ...state,
-        items: [...state.items, { kind: 'user', id, text: contentText(frame.message?.content) }]
+      const text = contentText(frame.message?.content)
+      // The composer already appended this locally so the message shows on click
+      // instead of after the round-trip; drop pi's echo of it.
+      const last = state.items.at(-1)
+      if (last?.kind === 'user' && last.text === text) {
+        return state
       }
+      return { ...state, items: [...state.items, { kind: 'user', id: makeId('user'), text }] }
     }
     if (role === 'assistant') {
       const id = makeId('assistant')
