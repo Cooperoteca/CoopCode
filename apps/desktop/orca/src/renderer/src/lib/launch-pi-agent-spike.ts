@@ -1,4 +1,5 @@
 import { useAppStore } from '@/store'
+import { findWorktreeById } from '@/store/slices/worktree-helpers'
 
 /**
  * Spike-only launcher for the `pi` (prime-agent) CLI: reuses the existing
@@ -44,6 +45,13 @@ export async function launchPiAgentSpike(args: {
   const tab = store.createTab(args.worktreeId, args.groupId, undefined, {
     quickCommandLabel: 'pi (spike)'
   })
+  // Why: without this the tab inherits the app's cwd, which in a packaged build is
+  // the install dir — agents then run git and file globs against the installed app
+  // instead of the repo. Queue before mount, like launch-agent-in-new-tab does.
+  const worktreePath = findWorktreeById(store.worktreesByRepo, args.worktreeId)?.path
+  if (worktreePath) {
+    store.queueTabInitialCwd(tab.id, worktreePath)
+  }
   store.queueTabStartupCommand(tab.id, { command: PI_LAUNCH_COMMAND, env })
   store.setActiveTabType('terminal')
   return { tabId: tab.id }
