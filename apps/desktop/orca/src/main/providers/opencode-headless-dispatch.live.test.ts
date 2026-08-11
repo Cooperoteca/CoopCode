@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { execFileSync } from 'node:child_process'
 import {
   ensureOpenCodeAgentProfile,
   openCodeAgentFileMatchesPermissions,

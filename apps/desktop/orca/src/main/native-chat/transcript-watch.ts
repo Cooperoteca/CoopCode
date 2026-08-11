@@ -81,7 +81,7 @@ function installDirectoryErrorSubscription(
   try {
     // Why: watch the parent so a directory->file replacement (rename) is
     // visible, mirroring transcript-native-watcher's strategy.
-    watcher = watch(dirname(filePath), (event, changedName) => {
+    watcher = watch(dirname(filePath), (_event, changedName) => {
       if (changedName !== null && changedName.toString() !== watchedName) {
         return
       }

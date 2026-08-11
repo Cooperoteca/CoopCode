@@ -3,7 +3,7 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CoopBoardResult, CoopBoardTask } from '../../../main/ipc/coop-board'
+import type { CoopBoardResult, CoopBoardTask } from '../../../../shared/coop-board-types'
 import CoopBoardScreen, { COOP_BOARD_OPEN_EVENT } from './CoopBoardScreen'
 
 const storeMock = vi.hoisted(() => ({

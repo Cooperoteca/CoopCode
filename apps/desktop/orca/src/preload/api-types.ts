@@ -481,7 +481,7 @@ import type {
 import type {
   OpenCodeSdkListSessionsResult
 } from '../shared/opencode-sdk-types'
-import type { CoopBoardResult } from '../main/ipc/coop-board'
+import type { CoopBoardResult } from '../shared/coop-board-types'
 import type {
   AgentType,
   NativeChatMessage,

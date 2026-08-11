@@ -44,7 +44,8 @@ export class EvidenceSession {
         maxBuffer: 10 * 1024 * 1024,
         windowsHide: true
       })
-      exitCode = result.exitCode ?? 0
+      // promisified execFile only resolves on exit 0; anything else rejects below.
+      exitCode = 0
       stdout = result.stdout
       stderr = result.stderr
     } catch (err: unknown) {

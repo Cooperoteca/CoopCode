@@ -2,60 +2,25 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { ipcMain } from 'electron'
 import { gitExecFileAsync } from '../git/runner'
+import type {
+  CoopBoardResult,
+  CoopBoardTask,
+  CoopTaskAttentionCategory,
+  CoopTaskEvidenceFile,
+  CoopTaskIntegration,
+  CoopTaskState
+} from '../../shared/coop-board-types'
 
 
-export type CoopTaskState = 'draft' | 'ready' | 'working' | 'review' | 'done' | 'blocked'
-
-export type CoopTaskIntegration = {
-  reviewDecision?: string
-  resultSha?: string
-  mergeCommit?: string
-}
-
-export type CoopTaskEvidenceFile = {
-  name: string
-  relativePath: string
-  absolutePath: string
-  size: number
-  extension: string
-  fileType: 'image' | 'text' | 'json' | 'markdown' | 'other'
-}
-
-export type CoopTaskAttentionCategory = 'blocked' | 'rework' | 'loop_stop'
-
-export type CoopTaskAttention = {
-  needed: boolean
-  category?: CoopTaskAttentionCategory
-  reason?: string
-  stalledAt?: number
-}
-
-export type CoopBoardTask = {
-  id: string
-  title: string
-  state: CoopTaskState
-  frontmatterState: CoopTaskState
-  priority: string
-  risk: string
-  dependsOn: string[]
-  blockedOn: string[]
-  blocked: boolean
-  blockingReasons: string[]
-  worktreePath?: string
-  branch?: string
-  integration?: CoopTaskIntegration
-  evidenceFiles: CoopTaskEvidenceFile[]
-  evidenceClaimed: boolean
-  evidenceMissing: boolean
-  attention?: CoopTaskAttention
-  mtimeMs?: number
-}
-
-export type CoopBoardResult = {
-  repoRoot: string
-  tasks: CoopBoardTask[]
-  error?: string
-}
+export type {
+  CoopBoardResult,
+  CoopBoardTask,
+  CoopTaskAttention,
+  CoopTaskAttentionCategory,
+  CoopTaskEvidenceFile,
+  CoopTaskIntegration,
+  CoopTaskState
+} from '../../shared/coop-board-types'
 
 type CoopTaskFrontmatter = {
   id?: unknown

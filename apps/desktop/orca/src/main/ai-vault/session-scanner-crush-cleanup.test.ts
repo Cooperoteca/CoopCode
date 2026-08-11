@@ -1,3 +1,4 @@
+import type { execFileSync as ExecFileSyncFn } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
@@ -102,14 +103,16 @@ function createCrushDbWithSiblings(projectRoot: string): string {
   return dbPath
 }
 
+type MockExecFn = (command: string, args: readonly string[], options?: unknown) => string
+
 function makeMockExecFn(args: {
   tasklistOutput?: string
   powershellOutput?: string
   pgrepOutput?: string
   cmdlineOutput?: string
   psOutput?: string
-}): typeof import('node:child_process').execFileSync {
-  return ((command: string, cmdArgs: readonly string[], _options?: unknown) => {
+}): typeof ExecFileSyncFn {
+  return ((command: string, _cmdArgs: readonly string[], _options?: unknown) => {
     if (command === 'tasklist') {
       return args.tasklistOutput ?? ''
     }
@@ -126,7 +129,7 @@ function makeMockExecFn(args: {
       return args.psOutput ?? ''
     }
     return ''
-  }) as typeof import('node:child_process').execFileSync
+  }) as typeof ExecFileSyncFn
 }
 
 describe('isCrushProcessRunning', () => {
@@ -206,8 +209,10 @@ describe('isCrushProcessRunning', () => {
       if (command === 'cat') {
         throw new Error('ENOENT')
       }
-      return mockExec(command, cmdArgs, options)
-    }) as typeof import('node:child_process').execFileSync
+      return (mockExec as unknown as MockExecFn)(command, cmdArgs, options)
+      // execFileSync's overloads don't accept an `unknown` options bag, so the mock
+      // is described by its own shape and widened once at the boundary.
+    }) as unknown as typeof ExecFileSyncFn
 
     const result = isCrushProcessRunning('/some/project', {
       platform: 'darwin',

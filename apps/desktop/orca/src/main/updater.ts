@@ -29,14 +29,10 @@ import {
   compareVersions,
   isBenignCheckFailure,
   isMissingUpdateManifestFailure,
-  isPrereleaseVersion,
   isReleaseAssetsPublishingFailure,
   statusesEqual
 } from './updater-fallback'
-import {
-  fetchNewerReleaseTagsWithReadiness,
-  getReleaseDownloadUrl
-} from './updater-prerelease-feed'
+import { getReleaseDownloadUrl } from './updater-prerelease-feed'
 import { fetchNudge, shouldApplyNudge } from './updater-nudge'
 import {
   failServeUpdateHandoff,
@@ -50,7 +46,6 @@ type CheckFailureSource = 'event' | 'promise' | 'fallback-promise'
 type MissingManifestPrereleaseFallbackResult = { userInitiated: boolean }
 type PrimaryEventSuppression = { failureKey: string; error: unknown }
 type UpdateCheckVariant = 'default' | 'prerelease' | 'perf'
-type ReleaseFeedPreflightResult = 'ready' | 'not-available'
 export type UpdateInstallMode =
   | 'interactive'
   | 'supervised-headless-serve'
@@ -58,8 +53,6 @@ export type UpdateInstallMode =
 
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 const AUTO_UPDATE_RETRY_INTERVAL_MS = 60 * 60 * 1000
-// Why: a persistently-failing feed used to re-arm the retry at a fixed 1h cadence forever (issue #7576); backoff doubles per failure up to this cap, any completed check resets.
-const MAX_AUTO_UPDATE_RETRY_INTERVAL_MS = 6 * 60 * 60 * 1000
 const NUDGE_POLL_INTERVAL_MS = 30 * 60 * 1000
 const NUDGE_ACTIVATION_COOLDOWN_MS = 5 * 60 * 1000
 const QUIT_AND_INSTALL_DELAY_MS = 100
@@ -73,7 +66,6 @@ let userInitiatedCheck = false
 let onBeforeQuitCleanup: (() => void | Promise<void>) | null = null
 let autoUpdaterInitialized = false
 // Why: modifier-clicking "Check for Updates" targets prerelease manifests; the feed still pins a concrete tag so cancelled prereleases without manifests are skipped.
-let includePrereleaseActive = false
 let availableVersion: string | null = null
 let availableReleaseUrl: string | null = null
 let pendingCheckFailureKey: string | null = null
@@ -89,7 +81,6 @@ let updateInstallCommitted = false
 // Why: recovery must only run after the native quitAndInstall call; pre-native errors must not clear quittingForUpdate or look like install recovery.
 let quitAndInstallNativeInvoked = false
 let persistLastUpdateCheckAt: ((timestamp: number) => void) | null = null
-let _getLastUpdateCheckAt: (() => number | null) | null = null
 let backgroundCheckLaunchPending = false
 // Why: a promoted background check can emit an error event before its promise catch runs; keep the promotion attached to that launch.
 let backgroundCheckPromotedToUserInitiated = false
@@ -300,16 +291,6 @@ function getOptionsForUpdateCheckVariant(variant: UpdateCheckVariant): UpdateChe
   }
 }
 
-function getUpdateCheckVariant(options?: UpdateCheckOptions): UpdateCheckVariant {
-  if (options?.includePerfPrerelease) {
-    return 'perf'
-  }
-  if (options?.includePrerelease) {
-    return 'prerelease'
-  }
-  return 'default'
-}
-
 function launchPendingUserInitiatedCheckAfterInFlight(variant: UpdateCheckVariant): void {
   pendingUserInitiatedCheckAfterInFlight = null
   setTimeout(() => {
@@ -435,13 +416,6 @@ function beginUpdateCheckAttempt(): number {
   // Why: issue #7576 warnings recurred at retry cadence; timestamp each attempt to confirm or rule out the updater.
   writeMainThreadDiagnosticMarker('updater-check-attempt')
   return activeUpdateCheckAttemptId
-}
-
-function rearmActiveUpdateCheckStallTimer(): void {
-  if (activeUpdateCheckAttemptId === null) {
-    return
-  }
-  armUpdateCheckStallTimer(activeUpdateCheckAttemptId)
 }
 
 function getSettledCheckUserInitiated(): boolean | undefined {
@@ -958,8 +932,6 @@ export function installRemoteServerUpdate(runtimeId: string): RemoteServerUpdate
   return result
 }
 
-let consecutiveAutomaticRetrySchedules = 0
-
 function scheduleAutomaticUpdateCheck(_delayMs?: number): void {
   if (autoUpdateCheckTimer) {
     clearTimeout(autoUpdateCheckTimer)
@@ -968,7 +940,6 @@ function scheduleAutomaticUpdateCheck(_delayMs?: number): void {
 }
 
 function recordCompletedUpdateCheck(): void {
-  consecutiveAutomaticRetrySchedules = 0
   persistLastUpdateCheckAt?.(Date.now())
 }
 
@@ -1057,88 +1028,6 @@ function markMissingManifestPrereleaseFallbackPromiseHandled(message: string): v
   )
 }
 
-async function pinDefaultReleaseFeed(
-  variant: UpdateCheckVariant = 'default'
-): Promise<ReleaseFeedPreflightResult> {
-  const autoUpdater = getAutoUpdater()
-  // Why: the latest/download redirect can move between check and download, so pin the concrete tag (prerelease users resolve any channel, stable only stable).
-  const currentVersion = app.getVersion()
-  const isPerfCheck = variant === 'perf'
-  const includePrerelease =
-    isPerfCheck || includePrereleaseActive || isPrereleaseVersion(currentVersion)
-  const releaseTagsResult = await fetchNewerReleaseTagsWithReadiness(
-    currentVersion,
-    includePrerelease ? 2 : 1,
-    {
-      includePrerelease,
-      ...(isPerfCheck ? { releaseFilter: 'perf' as const } : {})
-    }
-  )
-  const newerTag = releaseTagsResult.tags[0] ?? null
-  const fallbackTag = includePrerelease ? (releaseTagsResult.tags[1] ?? null) : null
-  pendingPrereleaseFallback =
-    includePrerelease && newerTag && fallbackTag
-      ? {
-          primaryTag: newerTag,
-          fallbackTag,
-          userInitiated: false,
-          suppressedPrimaryPromiseFailureKey: null,
-          suppressedPrimaryEventFailure: null,
-          suppressedFallbackPromiseFailureKey: null,
-          suppressedFallbackEventFailureKey: null,
-          fallbackResultHandled: false,
-          fallbackCheckingForUpdateSeen: false,
-          retryLaunched: false
-        }
-      : null
-  // Why: console.info is captured by Console.app/--enable-logging — our only field visibility into the updater.
-  if (newerTag) {
-    clearPublishingWindowLastGoodCheck()
-    const url = getReleaseDownloadUrl(newerTag)
-    console.info(
-      `[updater] release feed pinned: current=${currentVersion} includePrerelease=${includePrerelease} → ${url}`
-    )
-    autoUpdater.setFeedURL({ provider: 'generic', url })
-    return 'ready'
-  } else if (releaseTagsResult.state === 'not-ready') {
-    clearPrereleaseFallbackContext()
-    if (releaseTagsResult.lastGoodTag) {
-      // Why: during a publish window the newest tag is unsafe; a verified last-good concrete feed lets electron-updater emit a real result.
-      const url = getReleaseDownloadUrl(releaseTagsResult.lastGoodTag)
-      console.info(
-        `[updater] release feed pinned to last-good: current=${currentVersion} includePrerelease=${includePrerelease} → ${url}`
-      )
-      publishingWindowLastGoodCheck = { lastGoodTag: releaseTagsResult.lastGoodTag }
-      autoUpdater.setFeedURL({ provider: 'generic', url })
-      return 'ready'
-    }
-    clearPublishingWindowLastGoodCheck()
-    console.info(
-      `[updater] release feed deferred: current=${currentVersion} includePrerelease=${includePrerelease}; newest release assets are still publishing`
-    )
-    throw new Error('Latest release assets are still publishing')
-  } else if (isPerfCheck) {
-    clearPrereleaseFallbackContext()
-    clearPublishingWindowLastGoodCheck()
-    if (releaseTagsResult.state === 'no-newer') {
-      console.info(
-        `[updater] perf release not found: current=${currentVersion} includePrerelease=${includePrerelease}`
-      )
-      return 'not-available'
-    }
-    throw new Error('Could not resolve perf update feed')
-  } else {
-    clearPrereleaseFallbackContext()
-    clearPublishingWindowLastGoodCheck()
-    const url = 'https://github.com/stablyai/orca/releases/latest/download'
-    console.info(
-      `[updater] release feed fallback: current=${currentVersion} includePrerelease=${includePrerelease} → ${url}`
-    )
-    autoUpdater.setFeedURL({ provider: 'generic', url })
-    return 'ready'
-  }
-}
-
 function retryPrereleaseFallbackAfterMissingManifest(
   message: string,
   userInitiated: boolean | undefined,
@@ -1212,19 +1101,6 @@ export function checkForUpdates(): void {
     span.setAttribute('updater.outcome', 'launched')
     runBackgroundUpdateCheck()
   })
-}
-
-function enablePrereleaseManifestChecks(): void {
-  getAutoUpdater().allowPrerelease = true
-}
-
-function enableIncludePrerelease(): void {
-  if (includePrereleaseActive) {
-    return
-  }
-  // Why: this flag makes electron-updater accept prerelease manifests; we keep the manifest-probed generic feed over the native GitHub provider because cancelled RCs can appear without assets.
-  enablePrereleaseManifestChecks()
-  includePrereleaseActive = true
 }
 
 /** Menu-triggered check — delegates feedback to renderer toasts via userInitiated flag */
@@ -1398,7 +1274,6 @@ export function setupAutoUpdater(
   mainWindowRef = mainWindow
   onBeforeQuitCleanup = opts?.onBeforeQuit ?? null
   persistLastUpdateCheckAt = opts?.setLastUpdateCheckAt ?? null
-  _getLastUpdateCheckAt = opts?.getLastUpdateCheckAt ?? null
   _getPendingUpdateNudgeId = opts?.getPendingUpdateNudgeId ?? null
   _getDismissedUpdateNudgeId = opts?.getDismissedUpdateNudgeId ?? null
   _setPendingUpdateNudgeId = opts?.setPendingUpdateNudgeId ?? null

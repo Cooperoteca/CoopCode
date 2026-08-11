@@ -166,7 +166,7 @@ describe('headless serve update install handoff', () => {
     killAllPtyMock.mockImplementation(beginSessionCleanup)
 
     vi.stubGlobal('process', { ...process, platform: 'darwin' })
-    const { checkForUpdatesFromMenu, downloadUpdate, quitAndInstall, setupAutoUpdater } =
+    const { checkForUpdatesFromMenu, quitAndInstall, setupAutoUpdater } =
       await import('./updater')
     setupAutoUpdater(
       { webContents: { send } } as never,
