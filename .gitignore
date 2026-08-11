@@ -15,3 +15,4 @@ coverage/
 .agents/skills/
 .claude/skills/
 skills-lock.json
+apps/desktop/orca/resources/pi-skills/**/__pycache__/

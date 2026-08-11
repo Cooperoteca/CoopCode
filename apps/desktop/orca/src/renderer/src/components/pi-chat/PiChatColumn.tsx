@@ -13,6 +13,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { translate } from '@/i18n/i18n'
+import { useAppStore } from '@/store'
+import { findWorktreeById } from '@/store/slices/worktree-helpers'
 import {
   appendLocalUserMessage,
   emptyPiChatState,
@@ -56,6 +58,9 @@ export function PiChatColumn({ onClose }: { onClose?: () => void }): React.JSX.E
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   const api = window.api?.piRpc
+  const cwd = useAppStore((s) =>
+    s.activeWorktreeId ? (findWorktreeById(s.worktreesByRepo, s.activeWorktreeId)?.path ?? null) : null
+  )
 
   useEffect(() => {
     if (!api) {
@@ -73,7 +78,10 @@ export function PiChatColumn({ onClose }: { onClose?: () => void }): React.JSX.E
       }
     })
     void api
-      .start({})
+      // Why the explicit cwd: client.ts falls back to process.cwd(), which in a
+      // packaged build is the install dir (builds\coopcode\current), not a repo —
+      // agents then run git and file globs against the wrong tree.
+      .start(cwd ? { cwd } : {})
       .catch((error: unknown) => {
         if (disposed) {
           return
@@ -87,7 +95,7 @@ export function PiChatColumn({ onClose }: { onClose?: () => void }): React.JSX.E
       // leaves a live agent process behind for the rest of the app session.
       void api.dispose?.()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Why: the piRpc surface is stable for the preload lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Why: the piRpc surface is stable for the preload lifetime, and cwd is captured at mount on purpose — switching worktrees mid-conversation must not restart the agent.
   }, [])
 
   // Auto-scroll to the newest message as streaming text and tool calls land.
