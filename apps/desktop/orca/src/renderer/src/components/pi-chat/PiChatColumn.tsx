@@ -4,12 +4,11 @@
 // with streaming text and collapsible tool calls, and are composed with the
 // house ui primitives so the column reads like native Orca chrome.
 //
-// This is intentionally a spike mount: it renders as a right-edge overlay column
-// whenever the preload exposes `piRpc`, and otherwise renders nothing so the web
-// (browser) build is unaffected.
+// This is intentionally a spike mount: opt-in via PI_CHAT_OPEN_EVENT, rendered as a
+// right-edge overlay column, and absent entirely from the web (browser) build.
 
 import { useEffect, useRef, useState } from 'react'
-import { Bot, ChevronDown, ChevronRight, Loader2, Send, User } from 'lucide-react'
+import { Bot, ChevronDown, ChevronRight, Loader2, Send, User, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -36,6 +35,8 @@ const TOOL_STATE_LABEL: Record<ToolCallView['state'], { key: string; fallback: s
   }
 }
 
+export const PI_CHAT_OPEN_EVENT = 'pi-chat:open'
+
 const HEADER_TITLE_KEY = 'auto.components.pi.chat.PiChatColumn.c98e2d87d6'
 const STATUS_STREAMING_KEY = 'auto.components.pi.chat.PiChatColumn.d09f4293d5'
 const STATUS_IDLE_KEY = 'auto.components.pi.chat.PiChatColumn.bc091e55d8'
@@ -44,8 +45,9 @@ const EMPTY_TITLE_KEY = 'auto.components.pi.chat.PiChatColumn.602dc45f05'
 const THINKING_KEY = 'auto.components.pi.chat.PiChatColumn.0ef30e745f'
 const INPUT_PLACEHOLDER_KEY = 'auto.components.pi.chat.PiChatColumn.8f15ef3d75'
 const SEND_KEY = 'auto.components.pi.chat.PiChatColumn.c3a72b9e07'
+const CLOSE_KEY = 'auto.components.pi.chat.PiChatColumn.105693b503'
 
-export function PiChatColumn(): React.JSX.Element {
+export function PiChatColumn({ onClose }: { onClose?: () => void }): React.JSX.Element {
   const [state, setState] = useState<PiChatState>(emptyPiChatState)
   const [draft, setDraft] = useState('')
   const [connectError, setConnectError] = useState<string | null>(null)
@@ -80,6 +82,9 @@ export function PiChatColumn(): React.JSX.Element {
     return () => {
       disposed = true
       unsubscribe()
+      // Why: closing the column must also kill the pi child, or a closed conversation
+      // leaves a live agent process behind for the rest of the app session.
+      void api.dispose?.()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Why: the piRpc surface is stable for the preload lifetime.
   }, [])
@@ -124,6 +129,16 @@ export function PiChatColumn(): React.JSX.Element {
             ? translate(STATUS_STREAMING_KEY, 'Working…')
             : translate(STATUS_IDLE_KEY, 'Ready')}
         </Badge>
+        {onClose ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={translate(CLOSE_KEY, 'Close pi')}
+            onClick={onClose}
+          >
+            <X className="size-4" />
+          </Button>
+        ) : null}
       </header>
 
       <div
@@ -259,10 +274,25 @@ export function PiChatColumn(): React.JSX.Element {
 }
 
 export function PiChatColumnHost(): React.JSX.Element | null {
-  // Why: only mount the column when the platform exposes the piRpc IPC surface.
-  // The browser (web) build has no pi RPC and should stay unaffected.
-  if (!window.api?.piRpc) {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    const onOpen = (): void => setOpen(true)
+    window.addEventListener(PI_CHAT_OPEN_EVENT, onOpen)
+    return () => window.removeEventListener(PI_CHAT_OPEN_EVENT, onOpen)
+  }, [])
+
+  // Why: mounting is opt-in. The column fills the window and its child effect spawns
+  // a pi process, so an always-on mount would both hide the rest of Orca and start an
+  // agent nobody asked for. The web build has no piRpc surface at all.
+  if (!open || !window.api?.piRpc) {
     return null
   }
-  return <PiChatColumn />
+  return (
+    <div className="pointer-events-auto fixed inset-0 z-40 flex justify-end">
+      <div className="flex h-full w-full max-w-2xl flex-col">
+        <PiChatColumn onClose={() => setOpen(false)} />
+      </div>
+    </div>
+  )
 }

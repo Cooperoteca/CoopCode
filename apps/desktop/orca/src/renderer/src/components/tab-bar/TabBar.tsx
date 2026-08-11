@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { SortableContext } from '@dnd-kit/sortable'
 import {
+  Bot,
   ChevronLeft,
   ChevronRight,
   FilePlus,
@@ -42,6 +43,7 @@ import { useDetectedAgents } from '@/hooks/useDetectedAgents'
 import { useAgentDetectionTargetForWorktree } from '@/hooks/useAgentDetectionTarget'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
 import { launchPiAgentSpike } from '@/lib/launch-pi-agent-spike'
+import { PI_CHAT_OPEN_EVENT } from '@/components/pi-chat/PiChatColumn'
 import { normalizeRelativePath } from '@/lib/path'
 import {
   getWindowsTerminalCapabilityOwnerKey,
@@ -1291,6 +1293,14 @@ function TabBarInner({
               >
                 <TerminalSquare className="size-4 text-muted-foreground" />
                 <span className="flex-1">pi (spike)</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => window.dispatchEvent(new CustomEvent(PI_CHAT_OPEN_EVENT))}
+                className="gap-2 rounded-[7px] px-2 py-1.5 text-[12px] leading-5 font-medium"
+                title="Open the pi RPC conversation column (spike)"
+              >
+                <Bot className="size-4 text-muted-foreground" />
+                <span className="flex-1">pi (RPC)</span>
               </DropdownMenuItem>
             </>
           ) : null}

@@ -48,6 +48,10 @@ export function createJsonlReader(
     }
   }
 
+  // Why: decode on the stream, not per chunk. `chunk.toString('utf8')` corrupts any
+  // multi-byte character that straddles a chunk boundary (á, ç, emoji, U+2028) into
+  // replacement chars — silently, since the JSON still parses.
+  stream.setEncoding('utf8')
   stream.on('data', onData)
   stream.on('end', onEnd)
   stream.on('close', onEnd)

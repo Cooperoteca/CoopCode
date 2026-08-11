@@ -31,6 +31,19 @@ describe('createJsonlReader', () => {
     expect(JSON.parse(received[0])).toEqual({ type: 'message_update', text: 'line\u2028break' })
   })
 
+  it('keeps a multi-byte character intact when it straddles a chunk boundary', async () => {
+    // The real corruption risk: pi writes bytes, and a chunk can end mid-character.
+    // Portuguese accents are 2 bytes and U+2028 is 3, so this is the common case,
+    // not an edge case. Decoding per chunk yields U+FFFD and still parses as JSON.
+    const text = `ação${String.fromCharCode(0x2028)}fim`
+    const record = `${JSON.stringify({ text })}\n`
+    const bytes = Buffer.from(record, 'utf8')
+    const split = bytes.indexOf(0xc3) + 1 // inside the 2-byte 'ç'
+    const received = await linesFrom([bytes.subarray(0, split), bytes.subarray(split)])
+    expect(received).toHaveLength(1)
+    expect(JSON.parse(received[0])).toEqual({ text })
+  })
+
   it('strips a trailing CR from CRLF framing', async () => {
     expect(await linesFrom(['{"a":1}\r\n'])).toEqual(['{"a":1}'])
   })
