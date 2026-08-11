@@ -4,7 +4,7 @@
 // (identical to the model layer, this package owns only the shell chrome); the
 // pi-chat content itself is provided by the caller through `renderers`.
 
-import 'flexlayout-react/style/dark.css'
+import './flex-shell-theme.css'
 import { Layout, type Model, type TabNode } from 'flexlayout-react'
 
 export type FlexShellProps = {

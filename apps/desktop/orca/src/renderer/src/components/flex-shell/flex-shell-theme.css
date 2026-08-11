@@ -1,0 +1,22 @@
+/* flexlayout ships fixed light/dark stylesheets; picking one hardcodes a theme and
+   the tab strip ends up black in a light app. Its colors are CSS variables scoped
+   to .flexlayout__layout, so remapping them onto the app tokens (which already
+   flip with the theme) makes the shell follow the app with no JS. */
+@import 'flexlayout-react/style/light.css';
+
+.flexlayout__layout {
+  --color-text: var(--foreground);
+  --color-background: var(--background);
+  --color-base: var(--background);
+  --color-1: var(--muted);
+  --color-2: var(--accent);
+  --color-3: var(--border);
+  --color-4: var(--border);
+  --color-5: var(--border);
+  --color-6: var(--border);
+  --color-icon: var(--muted-foreground);
+  --color-overflow: var(--muted-foreground);
+  --color-focus: var(--ring);
+  --font-family: inherit;
+  --font-size: 0.8125rem;
+}
