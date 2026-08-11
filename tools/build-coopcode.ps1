@@ -41,6 +41,14 @@ if (-not (Test-Path $opencode)) { throw "OpenCode ARM64 nao encontrado: $opencod
 # ponytail: subst nao resolve, realpath desfaz a unidade virtual e volta ao C:.
 $env:npm_config_virtual_store_dir_max_length = '30'
 
+# O limite acima so vale para instalacoes novas: numa arvore ja instalada o nome
+# longo continua no disco, e o electron-builder forca um rebuild do node-pty que
+# volta a estourar o MSB3491. Sem --force, rebuild-native-deps.mjs sonda se os
+# modulos ja carregam no Electron e so reconstroi se precisar. O guard em
+# electron-builder-native-rebuild.cjs exige plataforma/arch iguais aos do host,
+# entao isso nunca pula um cross-compile. O workflow de PR ja usa o mesmo valor.
+$env:ORCA_REUSE_PREPARED_NATIVE_RUNTIME = '1'
+
 Push-Location $orca
 try {
   if (-not (Test-Path (Join-Path $orca 'node_modules'))) {
@@ -104,6 +112,15 @@ function Invoke-RetryMove {
 New-Item -ItemType Directory -Force -Path $install | Out-Null
 Invoke-RetryRemove $previous
 Invoke-RetryMove $current $previous
+
+# Ambos os fallbacks acima desistem em silencio. Se current sobreviver, o
+# Copy-Item abaixo copia PARA DENTRO dele (current\win-arm64-unpacked\) em vez de
+# criar a pasta, e a build instalada fica quebrada sem erro ate o build.json
+# falhar. Quem costuma segurar a pasta: o Orca/daemon da build anterior e agentes
+# pi com cwd ali dentro.
+if (Test-Path $current) {
+  throw "current ainda existe apos a rotacao: feche o CoopCode e os agentes (Orca.exe, orca-terminal-daemon.exe, node cli.js) e rode de novo."
+}
 
 Copy-Item $unpacked $current -Recurse
 New-Item -ItemType Directory -Force -Path (Join-Path $current 'opencode') | Out-Null
