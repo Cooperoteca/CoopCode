@@ -44,6 +44,8 @@ import {
   createPiRpcFrameRelay,
   registerPiRpcIpcHandlers
 } from './pi-rpc/ipc'
+import { registerPiSessionsIpcHandlers } from './pi-rpc/sessions-ipc'
+import { registerPiExtensionsIpcHandlers } from './pi-rpc/extensions-ipc'
 
 import { getTrustedUIRendererWebContents, sendToTrustedUIRenderer } from './ipc/ui'
 import { initObservability, shutdownObservability } from './observability'
@@ -1178,6 +1180,8 @@ function openMainWindow(): BrowserWindow {
   // reach it; it is disposed in will-quit and the child never gets a terminal window.
   piRpcClient = new PiRpcClient(createPiRpcFrameRelay())
   registerPiRpcIpcHandlers(() => piRpcClient)
+  registerPiSessionsIpcHandlers()
+  registerPiExtensionsIpcHandlers()
   // Why: Windows Tray construction can block synchronously on Shell_NotifyIcon, so both platforms defer creation to after first paint.
   let trayCreated = false
   const createSystemTrayDeferred = (): void => {

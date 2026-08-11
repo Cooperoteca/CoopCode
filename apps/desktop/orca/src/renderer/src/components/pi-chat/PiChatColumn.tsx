@@ -22,6 +22,7 @@ import {
   type PiChatState,
   type ToolCallView
 } from './pi-chat-events'
+import { PiChatModelPicker } from './PiChatModelPicker'
 
 const TOOL_STATE_LABEL: Record<ToolCallView['state'], { key: string; fallback: string }> = {
   running: {
@@ -134,6 +135,8 @@ export function PiChatColumn({ onClose }: { onClose?: () => void }): React.JSX.E
       <header className="flex shrink-0 items-center gap-2 border-b border-border/60 px-4 py-3">
         <Bot className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-semibold">{translate(HEADER_TITLE_KEY, 'pi')}</h2>
+        {api ? <PiChatModelPicker api={api} /> : null}
+        <span aria-hidden="true" className="mx-0.5 h-3.5 w-px bg-border/60" />
         <Badge variant="secondary" className="ml-auto">
           {busy
             ? translate(STATUS_STREAMING_KEY, 'Working…')
