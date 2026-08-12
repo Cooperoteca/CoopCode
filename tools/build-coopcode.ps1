@@ -55,7 +55,12 @@ try {
     & (Join-Path $PSScriptRoot 'pnpm-arm64.cmd') install --frozen-lockfile
     if ($LASTEXITCODE -ne 0) { throw "pnpm install falhou com exit $LASTEXITCODE" }
   }
-  & (Join-Path $PSScriptRoot 'pnpm-arm64.cmd') run build:win -- --arm64 --dir
+  # Sem o separador "--": o pnpm o repassa como argumento literal, e o yargs do
+  # electron-builder o le como fim-de-opcoes, jogando --arm64 e --dir no balde de
+  # posicionais. O --dir entao nao vale, o target volta ao nsis da config e a build
+  # comprime 205 MB em LZMA — o pico que trava a maquina, para gerar um instalador
+  # que este script nem usa (a instalacao sai de win-arm64-unpacked).
+  & (Join-Path $PSScriptRoot 'pnpm-arm64.cmd') run build:win --arm64 --dir
   if ($LASTEXITCODE -ne 0) { throw "build:win falhou com exit $LASTEXITCODE" }
 } finally { Pop-Location }
 if (-not (Test-Path (Join-Path $unpacked 'Orca.exe'))) { throw "Orca.exe nao encontrado em $unpacked" }
