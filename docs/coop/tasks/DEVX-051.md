@@ -37,6 +37,14 @@
     {
       "command": "tools/pnpm-arm64.cmd exec oxlint src/renderer/src/components/flex-shell",
       "purpose": "Zero lint findings in the touched directory, from apps/desktop/orca"
+    },
+    {
+      "command": "tools/pnpm-arm64.cmd exec electron-vite build --mode e2e",
+      "purpose": "Build the out/ tree the e2e harness needs — plain build:win would NOT expose window.__store, from apps/desktop/orca"
+    },
+    {
+      "command": "tools/pnpm-arm64.cmd exec playwright test --config tests/playwright.config.ts --project=electron-headless pi-shell-resize",
+      "purpose": "Prove the drag changes the rendered height, from apps/desktop/orca with SKIP_BUILD=1 and ORCA_E2E_HEADLESS=1"
     }
   ]
 }
@@ -101,9 +109,25 @@ app.
 4. Add keyboard handling on the focusable handle, unit tested. Criterion 5.
 5. Add `tests/e2e/pi-shell-resize.spec.ts` asserting the height changes from the
    DOM after a drag — per `tests/e2e/AGENTS.md`, the final assertion must be
-   user-observable, not a store read.
+   user-observable, not a store read. Criterion 1.
 6. Run the declared gates and write `docs/planning/evidence/DEVX-051-gate.json`
    per `docs/coop/gate-artifact-v1.md`.
+
+## Running the tests
+
+No packaged build is needed. `pnpm run build:win` is irrelevant to every gate
+here and must not be run.
+
+The unit gates (`vitest`, `tsc`, `oxlint`) need no Electron at all. The e2e gate
+needs the `out/` tree built with `--mode e2e`: that mode is what exposes
+`window.__store`, and a tree built any other way makes every spec hang for 30s on
+`waitForFunction(() => Boolean(window.__store))` — see `tests/e2e/AGENTS.md`,
+which warns that this failure looks like a broken harness and is not one. Build
+once, then run with `SKIP_BUILD=1` and `ORCA_E2E_HEADLESS=1`.
+
+The runner exits non-zero on a `global-teardown` `EBUSY` while removing its temp
+repo on Windows, after the tests themselves have passed. Read the `N passed` line
+rather than the exit code alone, and say which you relied on in the evidence.
 
 ## Handoff
 
