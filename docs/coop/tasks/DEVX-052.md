@@ -6,7 +6,7 @@
   "lane": "standard",
   "priority": "P2",
   "risk": "routine",
-  "depends_on": [],
+  "depends_on": ["DEVX-055"],
   "blocked_on": [],
   "capabilities": ["repository-read", "repository-write"],
   "scope": {"allow": [
@@ -81,6 +81,8 @@ survives only where it is literally the command or an identifier, the way
   here would collide in the same locale files.
 - Do not merge, remove or reorder the three pi menu entries. That is DEVX-054.
 - Do not change the pi CLI invocation, its flags, or the RPC protocol.
+- Do not change how the provider form stores anything. DEVX-055 rewrites that
+  path and runs first; this task only relabels what it renders.
 
 ## Sources and decisions
 
