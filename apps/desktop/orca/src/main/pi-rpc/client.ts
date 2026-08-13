@@ -6,14 +6,37 @@ import { createJsonlReader, parseJsonLine, type JsonlReader } from './jsonl'
 export const PI_RPC_CLI_PATH =
   'C:/Dev2026/external_repos/prime-agent/packages/coding-agent/dist/cli.js'
 
-export const PI_RPC_DEFAULT_PROVIDER = 'clinepass'
-export const PI_RPC_DEFAULT_MODEL = 'cline-pass/deepseek-v4-flash'
+/** Optional overrides; unset means pi resolves provider/model from its own config. */
+export const PI_RPC_PROVIDER_ENV = 'ORCA_PI_PROVIDER'
+export const PI_RPC_MODEL_ENV = 'ORCA_PI_MODEL'
 
 export type PiRpcStartOptions = {
   /** Working directory for the child; defaults to the main process cwd. */
   cwd?: string
   provider?: string
   model?: string
+}
+
+/**
+ * Why no default provider: forcing one that the host has not registered makes pi
+ * exit with `Unknown provider`, which the renderer can only report as a request
+ * timeout — a message pointing away from the cause. Omitting the flags lets pi
+ * use its configured default, and falls back to a built-in provider on a machine
+ * with no pi config at all.
+ */
+export function buildPiRpcArgs(
+  options: PiRpcStartOptions = {},
+  env: NodeJS.ProcessEnv = process.env
+): string[] {
+  const provider = options.provider ?? env[PI_RPC_PROVIDER_ENV]
+  const model = options.model ?? env[PI_RPC_MODEL_ENV]
+  return [
+    PI_RPC_CLI_PATH,
+    '--mode',
+    'rpc',
+    ...(provider ? ['--provider', provider] : []),
+    ...(model ? ['--model', model] : [])
+  ]
 }
 
 export type PiRpcFrameListener = (frame: PiRpcFrame) => void
@@ -52,15 +75,7 @@ export class PiRpcClient {
     }
     const child = spawn(
       'node',
-      [
-        PI_RPC_CLI_PATH,
-        '--mode',
-        'rpc',
-        '--provider',
-        options.provider ?? PI_RPC_DEFAULT_PROVIDER,
-        '--model',
-        options.model ?? PI_RPC_DEFAULT_MODEL
-      ],
+      buildPiRpcArgs(options),
       {
         cwd: options.cwd || process.cwd(),
         env: { ...process.env },
