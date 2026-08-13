@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -13,7 +13,6 @@ const projectRoot = resolve(import.meta.dirname, '../..')
 // The env var is only set for tests; production builds never see it.
 let previousMockPath = undefined
 beforeAll(() => {
-  const cacheRoot = join(process.env.LOCALAPPDATA ?? tmpdir(), 'electron-builder', 'Cache')
   function find7za(dir) {
     if (!existsSync(dir)) { return undefined }
     try {
@@ -26,11 +25,27 @@ beforeAll(() => {
     } catch { /* directory walk may fail; fall through */ }
     return undefined
   }
-  const cached = find7za(cacheRoot)
-  if (cached && statSync(cached).isFile()) {
-    previousMockPath = process.env.__ORCA_MOCK_7ZA_PATH
-    process.env.__ORCA_MOCK_7ZA_PATH = cached
+
+  // electron-builder caches the toolset in different locations per platform.
+  // The test walks them in platform order; the first match is used.
+  let cached = undefined
+  if (process.platform === 'win32') {
+    cached = find7za(join(process.env.LOCALAPPDATA ?? tmpdir(), 'electron-builder', 'Cache'))
+  } else if (process.platform === 'darwin') {
+    cached = find7za(join(homedir(), 'Library', 'Caches', 'electron-builder'))
+  } else {
+    cached = find7za(join(process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache'), 'electron-builder'))
   }
+
+  if (!cached) {
+    throw new Error(
+      'resolve-7za-path test requires a cached electron-builder 7za binary. ' +
+      'Run a build that downloads the toolset first, or set __ORCA_MOCK_7ZA_PATH manually.'
+    )
+  }
+
+  previousMockPath = process.env.__ORCA_MOCK_7ZA_PATH
+  process.env.__ORCA_MOCK_7ZA_PATH = cached
 })
 
 afterAll(() => {

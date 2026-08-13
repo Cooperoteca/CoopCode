@@ -178,7 +178,7 @@ describe('PiChatModelPicker', () => {
     emitGetState(fixture)
 
     fireEvent.click(screen.getByTestId('pi-model-picker-trigger'))
-    const modelsCommand = fixture.sent.at(-1)
+    const modelsCommand = fixture.sent.at(-1)!
     expect(modelsCommand.type).toBe('get_available_models')
 
     const modelsId = String(modelsCommand.id)
@@ -207,7 +207,7 @@ describe('PiChatModelPicker', () => {
     emitGetState(fixture)
 
     fireEvent.click(screen.getByTestId('pi-model-picker-trigger'))
-    const modelsCommand = fixture.sent.at(-1)
+    const modelsCommand = fixture.sent.at(-1)!
     fixture.emit({
       type: 'response',
       id: String(modelsCommand.id),
@@ -219,7 +219,7 @@ describe('PiChatModelPicker', () => {
     const option = await screen.findByText('GPT-4o')
     fireEvent.click(option)
 
-    const setModel = fixture.sent.at(-1)
+    const setModel = fixture.sent.at(-1)!
     expect(setModel.type).toBe('set_model')
     expect(setModel.provider).toBe('openai')
     expect(setModel.modelId).toBe('gpt-4o')
@@ -243,7 +243,7 @@ describe('PiChatModelPicker', () => {
     emitGetState(fixture)
 
     fireEvent.click(screen.getByTestId('pi-model-picker-trigger'))
-    const modelsCommand = fixture.sent.at(-1)
+    const modelsCommand = fixture.sent.at(-1)!
     fixture.emit({
       type: 'response',
       id: String(modelsCommand.id),
