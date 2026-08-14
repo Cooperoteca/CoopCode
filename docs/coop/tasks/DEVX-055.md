@@ -164,3 +164,12 @@ Worker and reviewer return evidence to the dispatcher/state owner. This task is
 writer that rewrites instead of merging, or that truncates on failure, destroys
 working configuration rather than failing to add to it. The reviewer must check
 the merge and atomicity tests specifically, not only that the suites are green.
+
+## Review (attempt 1)
+
+- Reviewer: prime-agent (coop-reviewer)
+- Date: 2026-08-14
+- Result SHA reviewed: `6c93b9efd9a09bfebe80298a84c3c47cc8cd474a`
+- Decision: `accept`
+- Findings:
+  - INFO — `apps/desktop/orca/src/main/pi-rpc/models-json-writer.ts` — `readModelsJsonDocument` strips `//` comments/trailing commas on read (matching pi's own `stripJsonComments`), and the writer re-serializes via `JSON.stringify(nextDocument, null, 2)`, so a hand-edited `models.json` with comments is normalized (comments dropped) on the next save. Providers are preserved (merge is correct), so this is cosmetic, not data loss. — criterion: 2 (non-blocking)
