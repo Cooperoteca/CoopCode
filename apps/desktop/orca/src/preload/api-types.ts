@@ -36,6 +36,7 @@ import type { ReadClipboardTextOptions } from '../shared/clipboard-text'
 import type {
   PiExtensionWriteResult,
   PiProviderExtensionSpec,
+  PiProvidersListResult,
   PiRpcCommand,
   PiSessionsListResult
 } from '../shared/pi-rpc'
@@ -901,6 +902,7 @@ export type PiSessionsApi = {
 
 export type PiExtensionsApi = {
   writeProvider: (spec: PiProviderExtensionSpec) => Promise<PiExtensionWriteResult>
+  listProviders: () => Promise<PiProvidersListResult>
 }
 
 export type CoopLearningReviewApi = {

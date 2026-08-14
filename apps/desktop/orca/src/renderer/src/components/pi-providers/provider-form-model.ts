@@ -64,7 +64,7 @@ export type ProviderFormErrors = Partial<{
   byModel?: Record<number, ProviderModelErrors>
 }
 
-/** A provider id usable as both a .ts file base name and registerProvider() id. */
+/** A provider id usable as a models.json `providers` key. */
 export function isValidProviderSlug(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value.trim())
 }

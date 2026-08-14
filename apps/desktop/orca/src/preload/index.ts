@@ -224,6 +224,7 @@ import {
   ORCA_UPDATER_QUIT_AND_INSTALL_STARTED_EVENT
 } from '../shared/updater-renderer-events'
 import {
+  PI_EXTENSIONS_LIST_PROVIDERS_CHANNEL,
   PI_EXTENSIONS_WRITE_PROVIDER_CHANNEL,
   PI_RPC_DISPOSE_CHANNEL,
   PI_RPC_FRAME_CHANNEL,
@@ -232,6 +233,7 @@ import {
   PI_SESSIONS_LIST_CHANNEL,
   type PiExtensionWriteResult,
   type PiProviderExtensionSpec,
+  type PiProvidersListResult,
   type PiRpcCommand,
   type PiSessionsListResult
 } from '../shared/pi-rpc'
@@ -4145,7 +4147,9 @@ const api = {
 
   piExtensions: {
     writeProvider: (spec: PiProviderExtensionSpec): Promise<PiExtensionWriteResult> =>
-      ipcRenderer.invoke(PI_EXTENSIONS_WRITE_PROVIDER_CHANNEL, spec)
+      ipcRenderer.invoke(PI_EXTENSIONS_WRITE_PROVIDER_CHANNEL, spec),
+    listProviders: (): Promise<PiProvidersListResult> =>
+      ipcRenderer.invoke(PI_EXTENSIONS_LIST_PROVIDERS_CHANNEL)
   },
 
   coopLearningReview: {

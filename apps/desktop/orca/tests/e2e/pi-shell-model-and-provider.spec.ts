@@ -1,7 +1,8 @@
 /**
  * The two pi-shell surfaces that unit tests cannot reach: the provider form must
- * really write an extension file through the main-process writer, and the model
- * picker must populate from a live pi child over RPC.
+ * really write a provider entry into ~/.prime/agent/models.json through the
+ * main-process writer, and the model picker must populate from a live pi child
+ * over RPC.
  *
  * Two traps this spec exists to avoid, both hit while writing it:
  *
@@ -27,20 +28,27 @@ import { test, expect } from './helpers/orca-app'
 const PI_CLI = 'C:/Dev2026/external_repos/prime-agent/packages/coding-agent/dist/cli.js'
 const PROVIDER_ID = 'e2e-probe-provider'
 
+/** The isolated HOME as the main process sees it, under the harness profile. */
+async function isolatedHomeDir(electronApp: ElectronApplication): Promise<string> {
+  return electronApp.evaluate(({ app }) => app.getPath('home'))
+}
+
 /** The extensions dir as the main process sees it, under the isolated HOME. */
 async function isolatedExtensionsDir(electronApp: ElectronApplication): Promise<string> {
-  const home = await electronApp.evaluate(({ app }) => app.getPath('home'))
+  const home = await isolatedHomeDir(electronApp)
   return join(home, '.prime', 'agent', 'extensions')
 }
 
 test.describe('pi shell — model picker and provider registration', () => {
   test.skip(!existsSync(PI_CLI), 'pi CLI not present on this machine')
 
-  test('writes a provider extension and refuses a raw key', async ({ orcaPage: page, electronApp }) => {
+  test('writes a provider into models.json and refuses a raw key', async ({ orcaPage: page, electronApp }) => {
     test.setTimeout(180_000)
-    const target = join(await isolatedExtensionsDir(electronApp), `${PROVIDER_ID}.ts`)
-    if (existsSync(target)) {
-      rmSync(target)
+    const home = await isolatedHomeDir(electronApp)
+    const modelsPath = join(home, '.prime', 'agent', 'models.json')
+    const legacyExtensionPath = join(home, '.prime', 'agent', 'extensions', `${PROVIDER_ID}.ts`)
+    if (existsSync(modelsPath)) {
+      rmSync(modelsPath)
     }
 
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('pi-chat:open')))
@@ -60,21 +68,31 @@ test.describe('pi shell — model picker and provider registration', () => {
     await page.getByRole('button', { name: /save provider/i }).click()
     await expect(page.getByText(/provider saved/i)).toBeVisible({ timeout: 30_000 })
 
-    expect(existsSync(target)).toBe(true)
-    const written = readFileSync(target, 'utf8')
-    expect(written).toContain(`registerProvider("${PROVIDER_ID}"`)
-    // The credential must land as the env var NAME, never a key value.
-    expect(written).toContain('apiKey: "E2E_PROBE_API_KEY"')
-    expect(written).toContain('probe/model-a')
+    expect(existsSync(modelsPath)).toBe(true)
+    const written = JSON.parse(readFileSync(modelsPath, 'utf8'))
+    expect(written.providers[PROVIDER_ID]).toMatchObject({
+      name: 'E2E Probe Provider',
+      baseUrl: 'https://api.example.com/v1',
+      // The credential must land as the env var NAME, never a key value.
+      apiKey: 'E2E_PROBE_API_KEY',
+      api: 'openai-completions'
+    })
+    expect(written.providers[PROVIDER_ID].models[0].id).toBe('probe/model-a')
+    // The old extension-emitting path is gone: no .ts file may be generated.
+    expect(existsSync(legacyExtensionPath)).toBe(false)
+    // Reading back is the payoff: the form lists the provider it just wrote.
+    await expect(page.getByTestId(`pi-registered-provider-${PROVIDER_ID}`)).toBeVisible({
+      timeout: 15_000
+    })
 
     // A raw-looking key must be refused, and nothing may be written for it.
-    rmSync(target)
+    rmSync(modelsPath)
     await page.locator('#pi-provider-credential').fill(`sk-${'x'.repeat(48)}`)
     await page.getByRole('button', { name: /save provider/i }).click()
     await expect(page.getByText(/environment variable|never/i).first()).toBeVisible({
       timeout: 15_000
     })
-    expect(existsSync(target)).toBe(false)
+    expect(existsSync(modelsPath)).toBe(false)
   })
 
   test('populates the model picker from a live pi session', async ({ orcaPage: page, electronApp }) => {

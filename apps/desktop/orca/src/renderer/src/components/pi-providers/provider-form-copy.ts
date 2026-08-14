@@ -6,6 +6,8 @@ import type { ProviderFormErrorCode } from './provider-form-model'
 export const K = {
   title: 'auto.components.pi.providers.PiProviderForm.title',
   description: 'auto.components.pi.providers.PiProviderForm.description',
+  registeredProviders: 'auto.components.pi.providers.PiProviderForm.registeredProviders',
+  noProviders: 'auto.components.pi.providers.PiProviderForm.noProviders',
   providerId: 'auto.components.pi.providers.PiProviderForm.providerId',
   providerIdPlaceholder: 'auto.components.pi.providers.PiProviderForm.providerIdPlaceholder',
   providerName: 'auto.components.pi.providers.PiProviderForm.providerName',
