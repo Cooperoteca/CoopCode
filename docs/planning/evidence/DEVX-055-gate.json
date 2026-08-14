@@ -1,0 +1,147 @@
+{
+  "task": "DEVX-055",
+  "attempt": 1,
+  "baseSha": "ee24c39f4296cabb459198aac1c2876ddad655bd",
+  "resultSha": "6c93b9efd9a09bfebe80298a84c3c47cc8cd474a",
+  "platform": "win32",
+  "arch": "arm64",
+  "startedAt": "2026-08-14T12:55:35Z",
+  "finishedAt": "2026-08-14T12:57:44Z",
+  "nodeVersion": "v22.20.0",
+  "gates": [
+    {
+      "command": "node tools/coop-dev/validate-task.mjs docs/coop/tasks/DEVX-055.md",
+      "purpose": "Validate the task contract",
+      "exitCode": 0,
+      "startedAt": "2026-08-14T12:55:35Z",
+      "finishedAt": "2026-08-14T12:55:35Z",
+      "stdout": "OK: DEVX-055 (ready, high-risk, 5 criteria)",
+      "criteria": [
+        {
+          "description": "Task contract is valid per schema",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "command": "node tools/coop-dev/validate-gate-artifact.mjs docs/planning/evidence/DEVX-055-gate.json --result-sha=6c93b9efd9a09bfebe80298a84c3c47cc8cd474a",
+      "purpose": "Prove gate evidence is bound to the result SHA",
+      "exitCode": 0,
+      "startedAt": "2026-08-14T12:57:44Z",
+      "finishedAt": "2026-08-14T12:57:44Z",
+      "stdout": "VALID",
+      "criteria": [
+        {
+          "description": "Gate evidence is bound to result SHA 6c93b9efd9a09bfebe80298a84c3c47cc8cd474a",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "command": "../../../tools/pnpm-arm64.cmd exec vitest run --config config/vitest.config.ts src/main/pi-rpc",
+      "purpose": "Writer unit suite including the merge, atomicity and corruption cases, from apps/desktop/orca",
+      "exitCode": 0,
+      "startedAt": "2026-08-14T12:55:35Z",
+      "finishedAt": "2026-08-14T12:55:37Z",
+      "stdout": "Test Files 4 passed (4). Tests 49 passed (49). models-json-writer.test.ts (25 tests) covers merge, atomicity, refusal of malformed/non-object, overwrite, list and missing-file cases.",
+      "criteria": [
+        {
+          "description": "Merge: file holding two providers + saving a third leaves all three",
+          "passed": true,
+          "detail": "models-json-writer.test.ts 'merges into an existing providers map without rewriting the file from form state'"
+        },
+        {
+          "description": "Atomicity: temp file in same directory renamed over target; failure mid-write leaves original untouched",
+          "passed": true,
+          "detail": "test 'writes atomically: a failure mid-write leaves the original untouched' forces writeFileSync EISDIR and asserts the original bytes survive"
+        },
+        {
+          "description": "Refusal: malformed or non-JSON models.json is never overwritten and the error names the file",
+          "passed": true,
+          "detail": "two refusal tests assert ok:false, error contains the models.json path, and the file bytes are unchanged"
+        }
+      ]
+    },
+    {
+      "command": "../../../tools/pnpm-arm64.cmd exec vitest run --config config/vitest.renderer.config.ts src/renderer/src/components/pi-providers",
+      "purpose": "Form unit suite including the listing read path, from apps/desktop/orca",
+      "exitCode": 0,
+      "startedAt": "2026-08-14T12:55:37Z",
+      "finishedAt": "2026-08-14T12:55:43Z",
+      "stdout": "Test Files 2 passed (2). Tests 17 passed (17). PiProviderForm.test.tsx (4 tests) includes 'lists the providers currently registered in models.json'.",
+      "criteria": [
+        {
+          "description": "Form lists id, display name and model count and refreshes after save",
+          "passed": true,
+          "detail": "test renders pi-registered-provider-acme / pi-registered-provider-beta with names and '2 models' / '1 model' badges"
+        }
+      ]
+    },
+    {
+      "command": "../../../tools/pnpm-arm64.cmd exec tsc --noEmit -p config/tsconfig.node.json",
+      "purpose": "Typecheck, from apps/desktop/orca",
+      "exitCode": 0,
+      "startedAt": "2026-08-14T12:55:43Z",
+      "finishedAt": "2026-08-14T12:55:46Z",
+      "stdout": "tsc --noEmit completed with no errors.",
+      "criteria": [
+        {
+          "description": "No TypeScript errors in the touched node/preload/shared files",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "command": "../../../tools/pnpm-arm64.cmd exec oxlint src/main/pi-rpc src/renderer/src/components/pi-providers",
+      "purpose": "Zero lint findings in the touched directories, from apps/desktop/orca",
+      "exitCode": 0,
+      "startedAt": "2026-08-14T12:55:46Z",
+      "finishedAt": "2026-08-14T12:55:47Z",
+      "stdout": "Found 0 warnings and 0 errors. Finished in 198ms on 17 files with 156 rules using 8 threads.",
+      "criteria": [
+        {
+          "description": "Zero lint findings in src/main/pi-rpc and src/renderer/src/components/pi-providers",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "command": "../../../tools/pnpm-arm64.cmd exec electron-vite build --mode e2e",
+      "purpose": "Build the out/ tree the e2e harness needs, from apps/desktop/orca",
+      "exitCode": 0,
+      "startedAt": "2026-08-14T12:55:47Z",
+      "finishedAt": "2026-08-14T12:56:00Z",
+      "stdout": "built in 7.92s",
+      "criteria": [
+        {
+          "description": "electron-vite e2e build succeeds",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "command": "../../../tools/pnpm-arm64.cmd exec playwright test --config tests/playwright.config.ts --project=electron-headless pi-shell-model-and-provider",
+      "purpose": "Prove the form writes models.json for real, from apps/desktop/orca with SKIP_BUILD=1 and ORCA_E2E_HEADLESS=1",
+      "exitCode": 1,
+      "startedAt": "2026-08-14T12:56:04Z",
+      "finishedAt": "2026-08-14T12:56:42Z",
+      "stdout": "2 passed (35.1s). Both tests ok: 'writes a provider into models.json and refuses a raw key' and 'populates the model picker from a live pi session'.",
+      "stderr": "Runner exit 1 is the documented Windows global-teardown EBUSY while rmSync removes its temp repo after the tests passed (tests/e2e/global-teardown.ts:34).",
+      "criteria": [
+        {
+          "description": "e2e asserts against ~/.prime/agent/models.json instead of extensions/<id>.ts",
+          "passed": true,
+          "detail": "first test reads models.json via the main process and asserts providers['e2e-probe-provider'] with name/baseUrl/apiKey/api and models[0].id 'probe/model-a', plus no legacy .ts file is generated and the form lists the provider back"
+        },
+        {
+          "description": "Model-picker test keeps passing untouched in substance",
+          "passed": true,
+          "detail": "'populates the model picker from a live pi session' passed unchanged; relied on the '2 passed' line rather than the exit code, per the task spec note on the Windows teardown EBUSY"
+        }
+      ]
+    }
+  ],
+  "baseline": "Base ee24c39f4296cabb459198aac1c2876ddad655bd. Prior writer emitted ~/.prime/agent/extensions/<id>.ts; no models.json writer or provider listing existed.",
+  "regressions": "None. Both e2e tests pass ('2 passed'); the runner's exit code 1 is the documented global-teardown EBUSY removing the Windows temp repo after tests pass, not a test failure.",
+  "outOfScopeDiff": "None. All modifications are within scope.allow."
+}
