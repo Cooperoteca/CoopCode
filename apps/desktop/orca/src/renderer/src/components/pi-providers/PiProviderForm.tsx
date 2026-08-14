@@ -1,16 +1,18 @@
 // Why: spike phase 3b - the pi provider/model registration tab of the pi shell.
 // Lets the user register a custom OpenAI-compatible provider for the pi agent by
-// writing a provider extension into ~/.prime/agent/extensions/. Security rule
-// reflected in both this form and the main writer: the form NEVER asks for a raw
-// API key. `credential` is the NAME of an environment variable or a `!command`;
-// anything that looks like a key is refused up front, and the persistent hint
-// documents that an unset env var makes the pi use the string verbatim (=> 401).
+// writing an entry into ~/.prime/agent/models.json, the file pi already defines
+// and validates for exactly this. Security rule reflected in both this form and
+// the main writer: the form NEVER asks for a raw API key. `credential` is the
+// NAME of an environment variable or a `!command`; anything that looks like a
+// key is refused up front, and the persistent hint documents that an unset env
+// var makes the pi use the string verbatim (=> 401).
 //
-// Extensions are only read at the pi child's startup, so after a successful save
-// we offer a button that sends { type:'new_session' } over the existing pi RPC
-// surface to force a fresh session against the updated registry.
+// models.json is only read when pi starts or refreshes its model registry, so
+// after a successful save we offer a button that sends { type:'new_session' }
+// over the existing pi RPC surface to force a fresh session against the updated
+// registry. The form also lists the providers already registered in models.json.
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Loader2, Plus, Save, Sparkles } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,7 +22,7 @@ import { Label } from '@/components/ui/label'
 import { translate } from '@/i18n/i18n'
 import { PiProviderModelRows } from './PiProviderModelRows'
 import { ERROR_MESSAGE, K } from './provider-form-copy'
-import type { PiExtensionWriteResult } from '../../../../shared/pi-rpc'
+import type { PiExtensionWriteResult, PiProvidersListResult } from '../../../../shared/pi-rpc'
 import {
   emptyProviderModelDraft,
   isProviderFormValid,
@@ -60,9 +62,27 @@ export function PiProviderForm(): React.JSX.Element {
   const [saving, setSaving] = useState(false)
   const [saveResult, setSaveResult] = useState<PiExtensionWriteResult | null>(null)
   const [newSessionConfirm, setNewSessionConfirm] = useState(false)
+  const [providers, setProviders] = useState<PiProvidersListResult | null>(null)
 
   const writeProvider = window.api?.piExtensions?.writeProvider
+  const listProviders = window.api?.piExtensions?.listProviders
   const rpcSend = window.api?.piRpc?.send
+
+  const refreshProviders = useCallback(async (): Promise<void> => {
+    if (!listProviders) {
+      setProviders({ providers: [] })
+      return
+    }
+    try {
+      setProviders(await listProviders())
+    } catch {
+      setProviders({ providers: [] })
+    }
+  }, [listProviders])
+
+  useEffect(() => {
+    void refreshProviders()
+  }, [refreshProviders])
 
   function update<K extends keyof ProviderFormDraft>(
     field: K,
@@ -128,6 +148,9 @@ export function PiProviderForm(): React.JSX.Element {
       const result = await writeProvider(toProviderExtensionSpec(draft))
       setSaveResult(result)
       setNewSessionConfirm(false)
+      if (result.ok) {
+        await refreshProviders()
+      }
     } catch (error) {
       setSaveResult({ ok: false, error: error instanceof Error ? error.message : String(error) })
     } finally {
@@ -164,6 +187,36 @@ export function PiProviderForm(): React.JSX.Element {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6 pb-10">
+        <div className="flex flex-col gap-2">
+          <h3 className="text-sm font-medium">
+            {translate(K.registeredProviders, 'Registered providers')}
+          </h3>
+          {providers?.error ? (
+            <p className="text-xs text-amber-700 dark:text-amber-400">{providers.error}</p>
+          ) : null}
+          {providers && providers.providers.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {translate(K.noProviders, 'No providers registered yet.')}
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {providers?.providers.map((provider) => (
+                <li
+                  key={provider.id}
+                  data-testid={`pi-registered-provider-${provider.id}`}
+                  className="flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2"
+                >
+                  <span className="font-medium">{provider.id}</span>
+                  <span className="truncate text-sm text-muted-foreground">{provider.name}</span>
+                  <Badge variant="outline">
+                    {provider.modelCount} {provider.modelCount === 1 ? 'model' : 'models'}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         <div className="grid gap-4 md:grid-cols-2">
           <div className="flex flex-col gap-2">
             <Label htmlFor="pi-provider-id">{translate(K.providerId, 'Provider id')}</Label>
@@ -293,7 +346,7 @@ export function PiProviderForm(): React.JSX.Element {
               <p className="text-xs text-muted-foreground">
                 {translate(
                   K.savedDescription,
-                  'Extensions are loaded when pi starts, so this only applies to new sessions. Start a new session now to pick up the provider.'
+                  'Registered providers are loaded when pi starts or refreshes. Start a new session now to pick up the provider.'
                 )}
               </p>
               <div className="flex gap-2">

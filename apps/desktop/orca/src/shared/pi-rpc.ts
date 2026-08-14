@@ -68,12 +68,14 @@ export type PiSessionProjectGroup = {
 export type PiSessionsListResult = { projects: PiSessionProjectGroup[] }
 
 // ---------------------------------------------------------------------------
-// Provider extension writer (main-process fs write into
-// <homedir>/.prime/agent/extensions/<name>.ts). The renderer never handles raw
-// API keys: `credential` is an environment variable NAME or a `!command`.
+// Provider registration (main-process fs read/write of
+// <homedir>/.prime/agent/models.json, the file pi already validates). The
+// renderer never handles raw API keys: `credential` is an environment variable
+// NAME or a `!command`, stored as `apiKey` in models.json.
 // ---------------------------------------------------------------------------
 
 export const PI_EXTENSIONS_WRITE_PROVIDER_CHANNEL = 'pi-extensions:write-provider'
+export const PI_EXTENSIONS_LIST_PROVIDERS_CHANNEL = 'pi-extensions:list-providers'
 
 export type PiProviderModelSpec = {
   id: string
@@ -84,7 +86,7 @@ export type PiProviderModelSpec = {
 }
 
 export type PiProviderExtensionSpec = {
-  /** Provider id used in registerProvider() and as the .ts file base name. */
+  /** Provider id used as the models.json `providers` key. */
   providerId: string
   /** Display name. */
   providerName: string
@@ -97,3 +99,18 @@ export type PiProviderExtensionSpec = {
 }
 
 export type PiExtensionWriteResult = { ok: true; path: string } | { ok: false; error: string }
+
+/** One provider currently registered in models.json, as the form lists it. */
+export type PiProviderSummary = {
+  id: string
+  /** Display name; falls back to the id when the entry has no name. */
+  name: string
+  /** Number of entries in the provider's `models` array. */
+  modelCount: number
+}
+
+export type PiProvidersListResult = {
+  providers: PiProviderSummary[]
+  /** Present when models.json exists but could not be read/parsed. */
+  error?: string
+}

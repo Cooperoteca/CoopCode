@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PiProviderForm } from './PiProviderForm'
 
 const writeProviderMock = vi.hoisted(() => vi.fn())
+const listProvidersMock = vi.hoisted(() => vi.fn())
 const rpcSendMock = vi.hoisted(() => vi.fn())
 
 function installApiMock(): void {
+  listProvidersMock.mockResolvedValue({ providers: [] })
   ;(window as never as { api: unknown }).api = {
-    piExtensions: { writeProvider: writeProviderMock },
+    piExtensions: { writeProvider: writeProviderMock, listProviders: listProvidersMock },
     piRpc: { send: rpcSendMock }
   } as never
 }
@@ -17,6 +19,7 @@ function installApiMock(): void {
 afterEach(() => {
   cleanup()
   writeProviderMock.mockReset()
+  listProvidersMock.mockReset()
   rpcSendMock.mockReset()
 })
 
@@ -54,9 +57,26 @@ describe('PiProviderForm', () => {
     expect(screen.getByText(/401/i)).toBeTruthy()
   })
 
+  it('lists the providers currently registered in models.json', async () => {
+    installApiMock()
+    listProvidersMock.mockResolvedValue({
+      providers: [
+        { id: 'acme', name: 'Acme AI', modelCount: 2 },
+        { id: 'beta', name: 'Beta', modelCount: 1 }
+      ]
+    })
+    render(<PiProviderForm />)
+
+    expect(await screen.findByTestId('pi-registered-provider-acme')).toBeTruthy()
+    expect(screen.getByTestId('pi-registered-provider-beta')).toBeTruthy()
+    expect(screen.getByText('Acme AI')).toBeTruthy()
+    expect(screen.getByText('2 models')).toBeTruthy()
+    expect(screen.getByText('1 model')).toBeTruthy()
+  })
+
   it('saves a valid provider with an env-var credential and shows the new-session notice', async () => {
     installApiMock()
-    writeProviderMock.mockResolvedValue({ ok: true, path: 'C:\\fake\\extensions\\acme.ts' })
+    writeProviderMock.mockResolvedValue({ ok: true, path: 'C:/fake/models.json' })
     render(<PiProviderForm />)
 
     fireEvent.change(screen.getByLabelText(/Provider id/i), { target: { value: 'acme' } })
