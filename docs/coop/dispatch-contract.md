@@ -45,13 +45,36 @@ aguardando conclusão dentro da mesma volta.
 A cada volta, para cada filho vivo:
 
 1. **Chegou relatório?** Processe e avance a fase.
-2. **Não chegou e o prazo venceu?** Inspecione com `agent_observe`. Descubra a
-   assinatura com `inspect.signature(...)` ou `help(agent_observe)` antes de
-   chamar; não invente parâmetros.
-3. **Progrediu desde a última olhada?** Estenda o prazo **uma vez** e anote a
-   nova evidência. Isto é o que impede matar trabalho legítimo: `agent_observe`
-   distingue "pensando há 20 minutos" de "parado há 20 minutos", e nenhum
-   timeout sozinho faz essa distinção.
+2. **Não chegou e o prazo venceu?** Inspecione:
+
+```python
+children = await rlm.list_subagents()
+child = next((c for c in children if c.active_session_id), None)
+info = await agent_observe.get_agent(child.session_name)
+# info.agent traz: status, streaming state, message count, pending count,
+# cwd, runtime kind e um preview da última mensagem
+recent = await agent_observe.recent_messages(child.session_name, limit=6)
+# limit aceita 1-50; max_chars aceita 80-2000 (padrão 800)
+```
+
+`agent_observe.list_agents()` dá a família inteira — self, pai, irmãos e filhos
+diretos — quando você perdeu a referência de quem está vivo.
+
+3. **Progrediu desde a última olhada?** Compare o **message count** e o
+   **streaming state** com os que você anotou. Contagem subindo, ou streaming
+   ativo, é trabalho em curso: estenda o prazo **uma vez** e anote a nova
+   evidência. Contagem parada com streaming inativo é ocioso de verdade.
+
+   Isto é o que impede matar trabalho legítimo — nenhum timeout sozinho
+   distingue "pensando há 20 minutos" de "parado há 20 minutos", e o
+   `message count` distingue.
+
+   **Limite de uso:** a SKILL.md do `agent_observe` endossa explicitamente
+   *status e previews para orquestração*, mas pede consentimento do usuário
+   antes de **usar o conteúdo observado para steer** outra sessão. Decidir
+   cutucar por ociosidade é orquestração e está dentro do endosso; ler o que o
+   filho estava pensando e usar isso para redirecionar o trabalho dele não está.
+   Se a cutucada precisar do conteúdo, pergunte ao usuário antes.
 4. **Ocioso, ou repetindo o mesmo passo?** **Uma** cutucada, curta e concreta,
    dizendo o próximo artefato esperado:
 
