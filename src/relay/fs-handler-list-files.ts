@@ -16,7 +16,6 @@
  *     denied on a single subdir is expected on home-dir roots)
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { fileListingCancellationError } from '../shared/file-listing-cancellation'
 import {
   buildRgArgsForQuickOpen,
   normalizeQuickOpenRgLine,
@@ -28,13 +27,8 @@ export const LIST_FILES_TIMEOUT_MS = 25_000
 
 export function listFilesWithRg(
   rootPath: string,
-  excludePathPrefixes: readonly string[] = [],
-  options: { signal?: AbortSignal; maxResults?: number } = {}
+  excludePathPrefixes: readonly string[] = []
 ): Promise<string[]> {
-  const { signal, maxResults } = options
-  if (signal?.aborted) {
-    return Promise.reject(fileListingCancellationError(signal))
-  }
   return new Promise((resolve, reject) => {
     const files = new Set<string>()
     let done = false
@@ -67,9 +61,6 @@ export function listFilesWithRg(
         return true
       }
       files.add(relPath)
-      if (maxResults !== undefined && files.size >= maxResults) {
-        finishAtLimit()
-      }
       return true
     }
 
@@ -137,9 +128,6 @@ export function listFilesWithRg(
             if (processLine(passBuf.substring(start, idx))) {
               passFileCount++
             }
-            if (done) {
-              return
-            }
             start = idx + 1
             idx = passBuf.indexOf('\n', start)
           }
@@ -189,7 +177,7 @@ export function listFilesWithRg(
         child.once('close', handleClose)
       })
 
-    const killSurvivors = (reason: string): void => {
+    const killSurvivors = (): void => {
       // Why: when one pass rejects, Promise.all surfaces the error immediately
       // but the sibling rg keeps running up to LIST_FILES_TIMEOUT_MS. Kill it
       // so repeated Quick Open opens don't pile up orphan rg processes on the
@@ -201,49 +189,16 @@ export function listFilesWithRg(
         if (entry.child.exitCode === null && entry.child.signalCode === null) {
           entry.child.kill()
         }
-        entry.reject(new Error(reason))
+        entry.reject(new Error('rg list canceled after sibling failure'))
       }
     }
 
-    function finishAtLimit(): void {
-      if (done) {
-        return
-      }
-      done = true
-      signal?.removeEventListener('abort', onAbort)
-      killSurvivors('rg list reached bounded result limit')
-      resolve(Array.from(files).slice(0, maxResults))
-    }
-
-    // Why: a cancelled scan (workspace switch, superseded request) must stop
-    // its rg children immediately instead of letting them walk the tree to
-    // completion and flood the relay with stdout it will only discard.
-    const onAbort = (): void => {
-      if (done) {
-        return
-      }
-      done = true
-      killSurvivors('rg list cancelled')
-      reject(fileListingCancellationError(signal))
-    }
-    signal?.addEventListener('abort', onAbort, { once: true })
-
-    const passes =
-      maxResults === undefined
-        ? Promise.all([runPass(primary), runPass(ignoredPass)])
-        : // Why: deterministic primary-first budgeting prevents a large ignored
-          // tree from starving ordinary source paths on a remote host.
-          runPass(primary).then(() =>
-            files.size < maxResults ? runPass(ignoredPass) : Promise.resolve()
-          )
-
-    passes
+    Promise.all([runPass(primary), runPass(ignoredPass)])
       .then(() => {
         if (done) {
           return
         }
         done = true
-        signal?.removeEventListener('abort', onAbort)
         resolve(Array.from(files))
       })
       .catch((err) => {
@@ -251,8 +206,7 @@ export function listFilesWithRg(
           return
         }
         done = true
-        signal?.removeEventListener('abort', onAbort)
-        killSurvivors('rg list canceled after sibling failure')
+        killSurvivors()
         reject(err instanceof Error ? err : new Error(String(err)))
       })
   })

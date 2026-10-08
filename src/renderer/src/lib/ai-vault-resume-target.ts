@@ -35,7 +35,7 @@ export function isSupportedAiVaultResumeRepo(
 }
 
 export function isSupportedAiVaultResumeTargetStatus(status: AiVaultResumeTargetStatus): boolean {
-  return status === 'local' || status === 'ssh' || status === 'runtime'
+  return status === 'local' || status === 'ssh'
 }
 
 export function isWslStoredAiVaultSessionFile(sessionFilePath: string | null | undefined): boolean {
@@ -48,20 +48,11 @@ export function canResumeAiVaultSessionOnTarget(args: {
   targetStatus: AiVaultResumeTargetStatus
   targetExecutionHostId?: ExecutionHostId | null
 }): boolean {
-  const sessionExecutionHostId = normalizeExecutionHostId(args.sessionExecutionHostId)
-  const targetExecutionHostId = normalizeExecutionHostId(args.targetExecutionHostId)
-  if (args.targetStatus === 'runtime') {
-    // Runtime session stores live on one paired server; only queue resumes back
-    // onto that exact server host.
-    return Boolean(
-      sessionExecutionHostId &&
-      targetExecutionHostId &&
-      sessionExecutionHostId === targetExecutionHostId
-    )
-  }
   if (!isSupportedAiVaultResumeTargetStatus(args.targetStatus)) {
     return false
   }
+  const sessionExecutionHostId = normalizeExecutionHostId(args.sessionExecutionHostId)
+  const targetExecutionHostId = normalizeExecutionHostId(args.targetExecutionHostId)
   if (sessionExecutionHostId) {
     if (targetExecutionHostId) {
       if (sessionExecutionHostId === targetExecutionHostId) {
@@ -93,8 +84,7 @@ export function canResumeAiVaultSessionOnTarget(args: {
 export function isUnsupportedAiVaultResumeRepo(
   repo: AiVaultResumeRepoOwner | null | undefined
 ): boolean {
-  const status = getAiVaultResumeRepoTargetStatus(repo)
-  return status !== 'unknown' && !isSupportedAiVaultResumeTargetStatus(status)
+  return getAiVaultResumeRepoTargetStatus(repo) === 'runtime'
 }
 
 export function getAiVaultResumeWorktreeTargetStatus(args: {

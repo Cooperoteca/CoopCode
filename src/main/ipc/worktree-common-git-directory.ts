@@ -1,4 +1,3 @@
-import type { Stats } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import type { Repo } from '../../shared/types'
 import {
@@ -8,7 +7,7 @@ import {
 } from '../../shared/cross-platform-path'
 import type { FileStat } from '../providers/types'
 
-type GitDirectoryStat = Stats | FileStat
+type GitDirectoryStat = Awaited<ReturnType<typeof stat>> | FileStat
 
 type GitDirectoryAccess = {
   stat?: (path: string) => Promise<GitDirectoryStat>

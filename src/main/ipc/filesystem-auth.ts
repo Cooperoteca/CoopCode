@@ -1,4 +1,6 @@
-/* eslint-disable max-lines -- Why: keeps the filesystem-auth security boundary auditable end to end. */
+/* eslint-disable max-lines -- Why: filesystem authorization keeps root
+discovery, canonicalization, and registered-worktree cache checks together so
+the security boundary is auditable end to end. */
 import { resolve, relative, dirname, basename, isAbsolute, sep } from 'node:path'
 import { realpathSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
@@ -11,8 +13,6 @@ import type { FolderWorkspace, ProjectGroup, Repo } from '../../shared/types'
 
 export const PATH_ACCESS_DENIED_MESSAGE =
   'Access denied: path resolves outside allowed directories. If this blocks a legitimate workflow, please file a GitHub issue.'
-// Why: authorized external paths accumulate all session; LRU-bound the set. Safe to evict because every caller re-authorizes before operating.
-export const AUTHORIZED_EXTERNAL_PATHS_MAX = 4096
 const authorizedExternalPaths = new Set<string>()
 const registeredWorktreeRoots = new Set<string>()
 const registeredWorktreeRootsByRepo = new Map<string, Set<string>>()
@@ -23,38 +23,28 @@ const AUTHORIZED_ROOTS_REBUILD_CONCURRENCY = 8
 type FolderScopeStore = Pick<Store, 'getRepos'> &
   Partial<Pick<Store, 'getProjectGroups' | 'getFolderWorkspaces'>>
 
-function rememberAuthorizedExternalPath(path: string): void {
-  // Delete-then-add makes re-authorized paths most-recent so LRU eviction sheds only the oldest untouched entries.
-  authorizedExternalPaths.delete(path)
-  authorizedExternalPaths.add(path)
-  while (authorizedExternalPaths.size > AUTHORIZED_EXTERNAL_PATHS_MAX) {
-    const oldest = authorizedExternalPaths.keys().next().value
-    if (oldest === undefined) {
-      break
-    }
-    authorizedExternalPaths.delete(oldest)
-  }
-}
-
 export function authorizeExternalPath(targetPath: string): void {
   const resolvedTarget = resolve(targetPath)
-  rememberAuthorizedExternalPath(resolvedTarget)
+  authorizedExternalPaths.add(resolvedTarget)
   try {
     // Why: macOS canonicalizes /tmp to /private/tmp during read authorization.
-    rememberAuthorizedExternalPath(realpathSync(resolvedTarget))
+    authorizedExternalPaths.add(realpathSync(resolvedTarget))
   } catch {}
 }
 
 export function invalidateAuthorizedRootsCache(): void {
   registeredWorktreeRootsDirty = true
-  // Why: dirty roots can't be trusted for auth short-circuits; fresh worktrees:list seeds safe per-repo roots before a full rebuild.
+  // Why: dirty roots cannot be trusted for auth short-circuits. Fresh
+  // worktrees:list results will seed safe per-repo roots before a full rebuild.
   registeredWorktreeRoots.clear()
   registeredWorktreeRootsByRepo.clear()
   registeredWorktreeRootRepoIds.clear()
 }
 
 function getLocalRepos(store: Store) {
-  // Why: SSH repo paths are remote-host paths; treating them as local roots could authorize unrelated local folders or probe SSH-only paths.
+  // Why: SSH repo paths are meaningful on the remote host. Treating them as
+  // local roots can both authorize unrelated local folders and probe paths
+  // that Orca should only touch through the SSH provider.
   return store.getRepos().filter((repo) => !repo.connectionId)
 }
 
@@ -136,8 +126,11 @@ export function isDescendantOrEqual(resolvedTarget: string, resolvedBase: string
     return true
   }
   const rel = relative(resolvedBase, resolvedTarget)
-  // Security: reject "..", "../…" or an absolute rel — on Windows relative() returns absolute across drives, which would bypass drive-traversal checks.
-  // Use isAbsolute, not rejoin+compare: Windows path.relative() ignores drive/root casing, so rejoining would deny valid c:\repo under C:\Repo.
+  // rel must not be ".."/"../..." or an absolute path (e.g. different drive on Windows)
+  // [Security Fix]: Added !isAbsolute(rel) to prevent drive traversal bypasses on Windows
+  // where relative('D:\\repo', 'C:\\etc\\passwd') returns absolute path 'C:\\etc\\passwd'
+  // Why: Windows path.relative() already treats drive/root casing as equivalent;
+  // rejoining and comparing strings would deny valid `c:\repo` descendants of `C:\Repo`.
   return rel !== '' && !(rel === '..' || rel.startsWith(`..${sep}`)) && !isAbsolute(rel)
 }
 
@@ -176,8 +169,15 @@ export function isPathAllowed(targetPath: string, store: Store): boolean {
 }
 
 export async function rebuildAuthorizedRootsCache(store: Store): Promise<void> {
-  // Why: bounded parallelism keeps the Windows speedup without one git process per repo.
-  // Why no realpath here: canonicalizing every root on invalidation would trigger macOS TCC prompts; handlers still canonicalize the target before any operation.
+  // Why: repos are processed with bounded parallelism so the cache rebuild
+  // keeps the Windows speedup without spawning one git process per repo.
+  //
+  // Why no realpath() here: this rebuild runs on repo/worktree invalidation,
+  // so canonicalizing every repo root would repeatedly touch TCC-protected
+  // folders on macOS even when the user is idle. The actual
+  // file handlers still canonicalize the specific target path before any
+  // destructive or read/write operation, so the security boundary remains
+  // enforced where it matters.
   const repos = getLocalRepos(store)
   const perProjectResults = await mapWithConcurrency(
     repos,
@@ -191,7 +191,10 @@ export async function rebuildAuthorizedRootsCache(store: Store): Promise<void> {
           roots.push(resolve(worktree.path))
         }
       } catch (error) {
-        // Why: one inaccessible repo (EACCES/EIO) must not break the whole rebuild and disable File Explorer/Quick Open for the rest; skip it.
+        // Why: a single inaccessible repo (EACCES, EIO, etc.) must not break
+        // the entire cache rebuild — that would disable File Explorer and
+        // Quick Open for all other repos. We skip the failing repo and let
+        // the rest proceed.
         console.warn(`[filesystem-auth] skipping repo ${repo.path} during cache rebuild:`, error)
       }
       return { repoId: repo.id, roots }
@@ -281,7 +284,11 @@ export function isENOENT(error: unknown): boolean {
 
 export type ResolveAuthorizedPathOptions = {
   /**
-   * Canonicalize the parent but preserve the leaf so delete/rename target the symlink itself, not its destination (which may live outside allowed roots).
+   * When true, canonicalize the parent directory but preserve the leaf so
+   * operations target the symlink itself rather than its destination. Required
+   * for delete and rename — following the symlink would trash or rename the
+   * target file (which can live outside allowed roots, or be another tracked
+   * file a symlink inside the worktree happens to point at).
    */
   preserveSymlink?: boolean
 }
@@ -297,7 +304,9 @@ export async function resolveAuthorizedPath(
   }
 
   if (options.preserveSymlink) {
-    // Canonicalize the parent so ancestor symlinks can't redirect outside allowed roots, but keep the leaf so delete/rename act on the link itself.
+    // Canonicalize the parent so symlinks in ancestors cannot redirect us
+    // outside allowed roots, but keep the final segment untouched so callers
+    // (delete/rename) act on the link itself.
     let realParent: string
     try {
       realParent = await realpath(dirname(resolvedTarget))
@@ -319,7 +328,8 @@ export async function resolveAuthorizedPath(
   }
 
   try {
-    // Why: Windows/WSL realpath can return UNC-shaped paths; re-resolve to compare against this module's allow-list roots.
+    // Why: Windows/WSL realpath can return UNC-shaped paths that still need to
+    // compare against the resolved allow-list roots used by this module.
     const realTarget = resolve(await realpath(resolvedTarget))
     if (
       !(await isPathAllowedIncludingRegisteredWorktrees(realTarget, store, {
@@ -361,7 +371,9 @@ async function resolveAuthorizedMissingPath(resolvedTarget: string, store: Store
       if (parent === existingAncestor) {
         throw error
       }
-      // Why: create/copy make missing parents after auth; canonicalize nearest existing ancestor to catch symlink escapes without rejecting nested paths.
+      // Why: create/copy callers intentionally create missing parents after
+      // auth. Canonicalize the nearest existing ancestor so symlink escapes are
+      // still caught without rejecting legitimate nested paths.
       missingSegments.unshift(basename(existingAncestor))
       existingAncestor = parent
     }
@@ -391,7 +403,9 @@ async function isPathAllowedIncludingRegisteredWorktrees(
 
   await ensureAuthorizedRootsCache(store)
 
-  // Why: linked worktrees are already git-trusted; reuse the cached root index so reads don't spawn `git worktree list` each time.
+  // Why: external linked worktrees are already trusted for git operations.
+  // Cache their normalized roots once and reuse that index so quick-open and
+  // file explorer do not spawn `git worktree list` on every filesystem read.
   return (
     isRegisteredWorktreePath(targetPath) ||
     (await isPathAllowedByCanonicalRegisteredRoot(targetPath, options.canonicalSourcePath))
@@ -401,13 +415,16 @@ async function isPathAllowedIncludingRegisteredWorktrees(
 /**
  * Resolve and verify that a worktree path belongs to a registered repo.
  *
- * Why not resolveAuthorizedPath: linked worktrees can live outside repo/workspace roots; git trusts exact `git worktree list` registration, not containment.
+ * Why this doesn't use resolveAuthorizedPath: linked worktrees can live outside
+ * repo/workspace roots. Git operations trust exact worktree registration from
+ * `git worktree list`, not directory containment.
  */
 export async function resolveRegisteredWorktreePath(
   worktreePath: string,
   store: Store
 ): Promise<string> {
-  // Reject malformed paths (null byte) early to prevent probing via realpath.
+  // Reject obviously malformed paths early — mirrors the null-byte check in
+  // validateGitRelativeFilePath and prevents probing via realpath.
   if (!worktreePath || worktreePath.includes('\0')) {
     throw new Error('Access denied: invalid worktree path')
   }
@@ -425,7 +442,8 @@ export async function resolveRegisteredWorktreePath(
     return resolvedTarget
   }
 
-  // Resolve symlinks only after the cheap registered-root check: on macOS realpath() can trigger TCC prompts.
+  // Resolve through symlinks only after the cheap registered-root check.
+  // On macOS, realpath() can itself trigger TCC prompts for protected roots.
   const normalizedTarget = await normalizeExistingPath(resolvedTarget)
   if (registeredWorktreeRoots.has(normalizedTarget)) {
     return normalizedTarget
@@ -465,7 +483,8 @@ async function isPathAllowedByCanonicalAllowedRoot(
     if (!isDescendantOrEqual(sourcePath, resolvedRoot)) {
       continue
     }
-    // Why: macOS resolves /var→/private/var; canonicalize only the matched root, not the whole repo set.
+    // Why: active file operations may resolve `/var` to `/private/var` on
+    // macOS. Canonicalize only the matched root instead of the whole repo set.
     const canonicalRoot = await normalizeExistingPath(resolvedRoot)
     if (isDescendantOrEqual(targetPath, canonicalRoot)) {
       return true
@@ -498,7 +517,9 @@ async function isPathAllowedByCanonicalRegisteredRoot(
   if (!isDescendantOrEqual(targetPath, canonicalRoot)) {
     return false
   }
-  // Why: #1524 stopped realpath'ing every root (macOS privacy prompts); cache only the actively-accessed root so /var→/private/var aliases resolve.
+  // Why: #1524 stopped realpath'ing every worktree root during background
+  // refreshes to avoid macOS privacy prompts. Cache only the root the user is
+  // actively accessing so /var→/private/var aliases work without broad probes.
   registeredWorktreeRoots.add(canonicalRoot)
   return true
 }

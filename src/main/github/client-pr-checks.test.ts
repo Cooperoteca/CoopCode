@@ -8,9 +8,8 @@ const {
   gitExecFileAsyncMock,
   extractExecErrorMock,
   getRateLimitMock,
-  repositoryRateLimitGuardMock,
-  noteRepositoryRateLimitSpendMock,
-  spendsSharedGitHubComQuotaMock,
+  rateLimitGuardMock,
+  noteRateLimitSpendMock,
   acquireMock,
   releaseMock
 } = vi.hoisted(() => ({
@@ -30,11 +29,8 @@ const {
     return { stderr: String(err), stdout: '' }
   }),
   getRateLimitMock: vi.fn(),
-  repositoryRateLimitGuardMock: vi.fn(() => ({ blocked: false })),
-  noteRepositoryRateLimitSpendMock: vi.fn(),
-  spendsSharedGitHubComQuotaMock: vi.fn<
-    (repository?: { host?: string } | null, options?: { wslDistro?: string }) => boolean
-  >(() => true),
+  rateLimitGuardMock: vi.fn(() => ({ blocked: false })),
+  noteRateLimitSpendMock: vi.fn(),
   acquireMock: vi.fn(),
   releaseMock: vi.fn()
 }))
@@ -57,16 +53,6 @@ vi.mock('./gh-utils', () => ({
   }),
   getOwnerRepo: getOwnerRepoMock,
   getIssueOwnerRepo: getIssueOwnerRepoMock,
-  // Why: origin repository resolution calls getOwnerRepoForRemote, not getOwnerRepo.
-  getOwnerRepoForRemote: (
-    repoPath: string,
-    remoteName: string,
-    connectionId?: string | null,
-    localGitOptions?: unknown
-  ) =>
-    remoteName === 'origin'
-      ? getOwnerRepoMock(repoPath, connectionId, localGitOptions)
-      : Promise.resolve(null),
   extractExecError: extractExecErrorMock,
   acquire: acquireMock,
   release: releaseMock,
@@ -79,20 +65,11 @@ vi.mock('../git/runner', () => ({
 
 vi.mock('./rate-limit', () => ({
   getRateLimit: getRateLimitMock,
-  repositoryRateLimitGuard: repositoryRateLimitGuardMock,
-  noteRepositoryRateLimitSpend: noteRepositoryRateLimitSpendMock,
-  spendsSharedGitHubComQuota: spendsSharedGitHubComQuotaMock
+  rateLimitGuard: rateLimitGuardMock,
+  noteRateLimitSpend: noteRateLimitSpendMock
 }))
 
 import { getPRChecks, rerunPRChecks, _resetOwnerRepoCache } from './client'
-
-import { _resetOriginGitHubApiRepositoryCache } from './github-api-repository'
-
-// The origin-repository cache is module-level state; reset it so slugs
-// resolved by one test cannot leak into the next.
-beforeEach(() => {
-  _resetOriginGitHubApiRepositoryCache()
-})
 
 function graphQLChecksResponse({
   contexts = [],
@@ -217,14 +194,9 @@ describe('getPRChecks', () => {
     extractExecErrorMock.mockClear()
     getRateLimitMock.mockReset()
     getRateLimitMock.mockResolvedValue({ resources: {} })
-    repositoryRateLimitGuardMock.mockReset()
-    repositoryRateLimitGuardMock.mockReturnValue({ blocked: false })
-    noteRepositoryRateLimitSpendMock.mockReset()
-    spendsSharedGitHubComQuotaMock.mockReset()
-    spendsSharedGitHubComQuotaMock.mockImplementation(
-      (repository?: { host?: string } | null, options?: { wslDistro?: string }) =>
-        (!repository?.host || repository.host.toLowerCase() === 'github.com') && !options?.wslDistro
-    )
+    rateLimitGuardMock.mockReset()
+    rateLimitGuardMock.mockReturnValue({ blocked: false })
+    noteRateLimitSpendMock.mockReset()
     acquireMock.mockReset()
     releaseMock.mockReset()
     acquireMock.mockResolvedValue(undefined)
@@ -441,12 +413,12 @@ describe('getPRChecks', () => {
     expect(ghExecFileAsyncMock).toHaveBeenNthCalledWith(
       2,
       ['api', '--cache', '60s', 'repos/acme/widgets/commits/head-oid/check-runs?per_page=100'],
-      { cwd: '/repo-root', host: 'github.com' }
+      { cwd: '/repo-root' }
     )
     expect(ghExecFileAsyncMock).toHaveBeenNthCalledWith(
       3,
       ['api', '--cache', '60s', 'repos/acme/widgets/commits/head-oid/status?per_page=100'],
-      { cwd: '/repo-root', host: 'github.com' }
+      { cwd: '/repo-root' }
     )
     expect(checks).toEqual([
       {
@@ -524,7 +496,7 @@ describe('getPRChecks', () => {
     expect(ghExecFileAsyncMock).toHaveBeenNthCalledWith(
       3,
       ['pr', 'checks', '42', '--json', 'name,state,link', '--repo', 'acme/widgets'],
-      { cwd: '/repo-root', host: 'github.com' }
+      { cwd: '/repo-root' }
     )
     expect(checks).toEqual([
       {
@@ -561,11 +533,7 @@ describe('getPRChecks', () => {
     expect(ghExecFileAsyncMock).toHaveBeenNthCalledWith(
       2,
       ['api', '-X', 'POST', 'repos/acme/widgets/actions/runs/77/rerun-failed-jobs'],
-      {
-        cwd: '/repo-root',
-        env: { ...process.env, GH_PROMPT_DISABLED: '1' },
-        host: 'github.com'
-      }
+      { cwd: '/repo-root', env: { ...process.env, GH_PROMPT_DISABLED: '1' } }
     )
   })
 
@@ -613,12 +581,6 @@ describe('getPRChecks', () => {
         env: expect.objectContaining({ GH_PROMPT_DISABLED: '1' })
       })
     )
-    expect(getRateLimitMock).not.toHaveBeenCalled()
-    expect(repositoryRateLimitGuardMock).toHaveBeenCalledWith(
-      { owner: 'acme', repo: 'widgets', host: 'github.com' },
-      'graphql',
-      expect.objectContaining({ cwd: '/repo-root', wslDistro: 'Ubuntu', host: 'github.com' })
-    )
   })
 
   it('uses explicit PR repo for rollup and gh pr checks fallback', async () => {
@@ -629,18 +591,14 @@ describe('getPRChecks', () => {
         stdout: JSON.stringify([{ name: 'lint', state: 'PASS', link: 'https://example.com/lint' }])
       })
 
-    await getPRChecks('/repo-root', 42, undefined, {
-      owner: 'acme',
-      repo: 'widgets',
-      host: 'github.com'
-    })
+    await getPRChecks('/repo-root', 42, undefined, { owner: 'acme', repo: 'widgets' })
 
     expect(getOwnerRepoMock).not.toHaveBeenCalled()
     expectGraphQLRollupCall()
     expect(ghExecFileAsyncMock).toHaveBeenNthCalledWith(
       2,
       ['pr', 'checks', '42', '--json', 'name,state,link', '--repo', 'acme/widgets'],
-      { cwd: '/repo-root', host: 'github.com' }
+      { cwd: '/repo-root' }
     )
   })
 

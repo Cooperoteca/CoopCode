@@ -1,6 +1,5 @@
 import type { AppState } from '@/store/types'
 import { resolveRuntimePaneTitleLeafId } from '@/lib/runtime-pane-title-leaf-id'
-import type { AgentStatusState } from '../../../../shared/agent-status-types'
 import type { AiVaultSession } from '../../../../shared/ai-vault-types'
 import { parseLegacyNumericPaneKey, parsePaneKey } from '../../../../shared/stable-pane-id'
 import type { TerminalLayoutSnapshot, TerminalPaneLayoutNode } from '../../../../shared/types'
@@ -12,7 +11,7 @@ export type AiVaultOriginalPaneTarget = {
   leafId: string
 }
 
-export type OriginalPaneState = Pick<
+type OriginalPaneState = Pick<
   AppState,
   | 'agentStatusByPaneKey'
   | 'retainedAgentsByPaneKey'
@@ -87,10 +86,10 @@ function entryPromptCandidates(entry: {
   return [...candidates]
 }
 
-export function promptsMatchSession(
+function promptsMatchSession(
   session: AiVaultSession,
   entry: Parameters<typeof entryPromptCandidates>[0]
-): boolean {
+) {
   const sessionCandidates = sessionPromptCandidates(session)
   if (sessionCandidates.length === 0) {
     return false
@@ -134,7 +133,7 @@ function getTabOwnerWorktreeId(
   return null
 }
 
-export function resolveOriginalPaneTarget(args: {
+function resolveOriginalPaneTarget(args: {
   state: OriginalPaneState
   paneKey: string
   worktreeIdHint?: string
@@ -170,32 +169,6 @@ export function resolveOriginalPaneTarget(args: {
     return null
   }
   return { paneKey, worktreeId, tabId: legacy.tabId, leafId }
-}
-
-/**
- * The hook-reported live state of the agent currently running this session,
- * or null when the session is not live in any pane. Matches by provider
- * session id first; falls back to a prompt match only when it is unambiguous.
- */
-export function findAiVaultSessionLiveState(
-  state: Pick<AppState, 'agentStatusByPaneKey'>,
-  session: AiVaultSession
-): AgentStatusState | null {
-  const promptMatchedStates: AgentStatusState[] = []
-
-  for (const entry of Object.values(state.agentStatusByPaneKey)) {
-    if (!agentMatches(session, entry.agentType)) {
-      continue
-    }
-    if (providerSessionMatches(session, entry.providerSession?.id)) {
-      return entry.state
-    }
-    if (entry.providerSession === undefined && promptsMatchSession(session, entry)) {
-      promptMatchedStates.push(entry.state)
-    }
-  }
-
-  return promptMatchedStates.length === 1 ? promptMatchedStates[0] : null
 }
 
 export function findOriginalAiVaultSessionPane(

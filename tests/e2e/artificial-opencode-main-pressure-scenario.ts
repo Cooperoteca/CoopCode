@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { rmSync } from 'node:fs'
 import path from 'node:path'
 import { sendToTerminal } from './helpers/terminal'
-import { writePressureOutputScript } from './artificial-opencode-hidden-pressure-script'
+import { writePressureOutputScript } from './artificial-opencode-hidden-pressure-scenario'
 import {
   annotateScrollMeasurement,
   getResponsiveScrollPath,
@@ -42,7 +42,6 @@ type MainPressureSchedulerSnapshot = {
 // Why: peak queued chars is noisy at the byte level on CI, but a coarse cap
 // still catches renderer queue growth that dropped-backlog/latency checks miss.
 const MAX_RENDERER_SCHEDULER_QUEUED_CHARS = 5 * 1024 * 1024
-const MAIN_RENDERER_PRESSURE_TARGET_CHARS = 2 * 1024 * 1024
 
 type MainPressureDeps<
   TMeasurement,
@@ -125,7 +124,7 @@ export async function runMainPressureScenario<
   const pressureScriptPath = path.join(testRepoPath, `.orca-opencode-pressure-load-${runId}.mjs`)
   await seedActiveTerminalScrollback(orcaPage, typingPane.ptyId, scrollRunId)
   deps.writeInteractivePromptScript(typingScriptPath, runId)
-  writePressureOutputScript(pressureScriptPath, runId, 'tui')
+  writePressureOutputScript(pressureScriptPath, runId)
   await deps.resetTerminalPtyOutputDebug(orcaPage)
   await deps.holdTerminalAckGate(
     orcaPage,
@@ -273,9 +272,7 @@ function expectMainPressureAndTyping<TMeasurement extends MainPressureMeasuremen
 }): void {
   expect(pressureBeforeTyping.peakPendingChars).toBeGreaterThan(0)
   expect(pressureBeforeTyping.ackGatedFlushSkipCount).toBeGreaterThan(0)
-  expect(mainPressure?.peakRendererInFlightChars ?? 0).toBeGreaterThanOrEqual(
-    MAIN_RENDERER_PRESSURE_TARGET_CHARS
-  )
+  expect(mainPressure?.peakRendererInFlightChars ?? 0).toBeGreaterThanOrEqual(8 * 1024 * 1024)
   expect(ackGate?.heldAckChars ?? 0).toBeGreaterThan(0)
   expect(scheduler?.droppedBacklogCount ?? Number.POSITIVE_INFINITY).toBe(0)
   expect(scheduler?.peakQueuedChars ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(

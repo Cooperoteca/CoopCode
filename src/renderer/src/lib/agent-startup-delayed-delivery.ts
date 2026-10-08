@@ -1,13 +1,6 @@
 import { useAppStore } from '@/store'
 import type { AgentStartupPlan } from '@/lib/tui-agent-startup'
 import { parsePaneKey } from '../../../shared/stable-pane-id'
-import {
-  agentStartupDeliveryKey as deliveryKey,
-  clearConsumedAgentStartupDeliveriesForTests,
-  isAgentStartupDeliveryConsumed,
-  markAgentStartupDeliveryConsumed,
-  releaseAgentStartupDeliveryConsumed
-} from './agent-startup-delivery-guards'
 
 type AppStoreSnapshot = ReturnType<typeof useAppStore.getState>
 
@@ -20,6 +13,7 @@ type PendingAgentStartupDelivery = {
 }
 
 const pendingAgentStartupDeliveries = new Map<string, PendingAgentStartupDelivery>()
+const consumedAgentStartupDeliveries = new Set<string>()
 const staleStartupRecheckTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>()
 let unsubscribePendingAgentStartupDeliveries: (() => void) | null = null
 
@@ -90,33 +84,7 @@ function ensurePendingAgentStartupSubscription(): void {
   if (unsubscribePendingAgentStartupDeliveries) {
     return
   }
-  const initial = useAppStore.getState()
-  // Capture the individual references so the gate stays allocation-free and
-  // remains correct even if a subscribe adapter reuses its state object.
-  let previousTabs = initial.tabsByWorktree
-  let previousPendingStartups = initial.pendingStartupByTabId
-  let previousLaunchConfigs = initial.agentLaunchConfigByPaneKey
-  let previousPtyIds = initial.ptyIdsByTabId
-  let previousLayouts = initial.terminalLayoutsByTabId
-  unsubscribePendingAgentStartupDeliveries = useAppStore.subscribe((state) => {
-    // Why: a background workspace can stay unmounted indefinitely. Only these
-    // five immutable slices can change delivery eligibility; unrelated title,
-    // status, focus, and usage ticks must not rescan every launch registration.
-    if (
-      state.tabsByWorktree === previousTabs &&
-      state.pendingStartupByTabId === previousPendingStartups &&
-      state.agentLaunchConfigByPaneKey === previousLaunchConfigs &&
-      state.ptyIdsByTabId === previousPtyIds &&
-      state.terminalLayoutsByTabId === previousLayouts
-    ) {
-      return
-    }
-    // Update before flushing because delivery can synchronously write the store.
-    previousTabs = state.tabsByWorktree
-    previousPendingStartups = state.pendingStartupByTabId
-    previousLaunchConfigs = state.agentLaunchConfigByPaneKey
-    previousPtyIds = state.ptyIdsByTabId
-    previousLayouts = state.terminalLayoutsByTabId
+  unsubscribePendingAgentStartupDeliveries = useAppStore.subscribe(() => {
     flushPendingAgentStartupDeliveries()
   })
 }
@@ -131,7 +99,7 @@ function stopPendingAgentStartupSubscriptionIfIdle(): void {
 
 export function queuePendingAgentStartupDelivery(delivery: PendingAgentStartupDelivery): void {
   const key = deliveryKey(delivery)
-  if (isAgentStartupDeliveryConsumed(key)) {
+  if (consumedAgentStartupDeliveries.has(key)) {
     return
   }
   pendingAgentStartupDeliveries.set(key, delivery)
@@ -141,7 +109,7 @@ export function queuePendingAgentStartupDelivery(delivery: PendingAgentStartupDe
 
 export function resetAgentStartupDelayedDeliveryForTests(): void {
   pendingAgentStartupDeliveries.clear()
-  clearConsumedAgentStartupDeliveriesForTests()
+  consumedAgentStartupDeliveries.clear()
   for (const timer of staleStartupRecheckTimers.values()) {
     globalThis.clearTimeout(timer)
   }
@@ -156,10 +124,10 @@ export function beginAgentStartupDeliveryAttempt(args: {
   launchToken: string
 }): boolean {
   const key = deliveryKey(args)
-  if (isAgentStartupDeliveryConsumed(key)) {
+  if (consumedAgentStartupDeliveries.has(key)) {
     return false
   }
-  markAgentStartupDeliveryConsumed(key)
+  consumedAgentStartupDeliveries.add(key)
   pendingAgentStartupDeliveries.delete(key)
   clearStaleStartupRecheck(key)
   return true
@@ -170,7 +138,13 @@ export function releaseAgentStartupDeliveryAttempt(args: {
   tabId: string
   launchToken: string
 }): void {
-  releaseAgentStartupDeliveryConsumed(deliveryKey(args))
+  consumedAgentStartupDeliveries.delete(deliveryKey(args))
+}
+
+function deliveryKey(
+  delivery: Pick<PendingAgentStartupDelivery, 'worktreeId' | 'tabId' | 'launchToken'>
+): string {
+  return `${delivery.worktreeId}\0${delivery.tabId}\0${delivery.launchToken}`
 }
 
 function flushPendingAgentStartupDeliveries(): void {

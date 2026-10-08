@@ -49,7 +49,7 @@ function splitLayout(): TerminalLayoutSnapshot {
   }
 }
 
-function createTerminalTab(id: string, ptyId: string | null, shellOverride?: string): TerminalTab {
+function createTerminalTab(id: string, ptyId: string | null): TerminalTab {
   return {
     id,
     ptyId,
@@ -59,15 +59,13 @@ function createTerminalTab(id: string, ptyId: string | null, shellOverride?: str
     customTitle: null,
     color: null,
     sortOrder: 1,
-    createdAt: 1,
-    ...(shellOverride !== undefined ? { shellOverride } : {})
+    createdAt: 1
   }
 }
 
 function createStore(
   layout: TerminalLayoutSnapshot = splitLayout(),
-  targetTabOrder: string[] = [EXISTING_TAB_1, EXISTING_TAB_2],
-  sourceShellOverride = 'powershell.exe'
+  targetTabOrder: string[] = [EXISTING_TAB_1, EXISTING_TAB_2]
 ): TerminalPaneTabDetachStore {
   const store = {
     createTab: vi.fn((_worktreeId, _targetGroupId, _shellOverride, options) => {
@@ -109,9 +107,6 @@ function createStore(
       }
     }),
     syncPaneDetachPtyOwnership: vi.fn(),
-    tabsByWorktree: {
-      [WORKTREE_ID]: [createTerminalTab(SOURCE_TAB_ID, 'pty-left', sourceShellOverride)]
-    },
     terminalLayoutsByTabId: {
       [SOURCE_TAB_ID]: layout
     }
@@ -247,7 +242,7 @@ describe('detachTerminalPaneToTab', () => {
 
     expect(result?.ptyId).toBe('remote:env-1@@terminal-1')
     expect(manager.detachPaneForExternalMove).toHaveBeenCalledWith(2)
-    expect(store.createTab).toHaveBeenCalledWith(WORKTREE_ID, TARGET_GROUP_ID, 'powershell.exe', {
+    expect(store.createTab).toHaveBeenCalledWith(WORKTREE_ID, TARGET_GROUP_ID, undefined, {
       activate: true,
       initialPtyId: 'remote:env-1@@terminal-1',
       recordInteraction: true
@@ -267,7 +262,6 @@ describe('detachTerminalPaneToTab', () => {
       titlesByLeafId: { [LEAF_2]: 'remote shell' }
     })
     expect(store.syncPaneDetachPtyOwnership).toHaveBeenCalledWith({
-      detachedLeafId: LEAF_2,
       detachedPtyId: 'remote:env-1@@terminal-1',
       sourceLayout: {
         root: { type: 'leaf', leafId: LEAF_1 },
@@ -282,35 +276,6 @@ describe('detachTerminalPaneToTab', () => {
     expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
     expect(persistLayoutSnapshot).toHaveBeenCalled()
   })
-
-  it.each(['powershell.exe', 'wsl.exe'])(
-    'preserves the moved PTY shell override when the source uses %s',
-    (shellOverride) => {
-      const store = createStore(splitLayout(), [EXISTING_TAB_1], shellOverride)
-      const manager = {
-        getPanes: vi.fn(() => [{ id: 1 }, { id: 2 }]),
-        getLeafId: vi.fn(() => LEAF_1),
-        detachPaneForExternalMove: vi.fn(() => true)
-      }
-
-      detachTerminalPaneToTab({
-        getStore: () => store,
-        manager,
-        persistLayoutSnapshot: vi.fn(),
-        sourcePaneId: 1,
-        sourceTabId: SOURCE_TAB_ID,
-        targetGroupId: TARGET_GROUP_ID,
-        worktreeId: WORKTREE_ID
-      })
-
-      expect(store.createTab).toHaveBeenCalledWith(
-        WORKTREE_ID,
-        TARGET_GROUP_ID,
-        shellOverride,
-        expect.objectContaining({ initialPtyId: 'pty-left' })
-      )
-    }
-  )
 
   it('syncs PTY ownership when the primary source pane is detached', () => {
     const store = createStore()
@@ -340,7 +305,6 @@ describe('detachTerminalPaneToTab', () => {
       titlesByLeafId: { [LEAF_2]: 'remote shell' }
     })
     expect(store.syncPaneDetachPtyOwnership).toHaveBeenCalledWith({
-      detachedLeafId: LEAF_1,
       detachedPtyId: 'pty-left',
       sourceLayout: {
         root: { type: 'leaf', leafId: LEAF_2 },

@@ -2,7 +2,7 @@ import { useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
 import { GitBranch } from 'lucide-react'
 import type { NestedRepoScanResult } from '../../../../shared/types'
 import { cn } from '@/lib/utils'
-import { getRepoDisplayLabelKey, getRepoDisplayLabelsByPath } from '@/lib/repo-display-labels'
+import { getRepoDisplayLabelsByPath } from '@/lib/repo-display-labels'
 import { translate } from '@/i18n/i18n'
 
 function NestedRepoSelectAllRow({
@@ -118,7 +118,7 @@ export function NestedRepoChecklist({
                   selectedPaths.has(repo.path) ? 'text-foreground' : 'text-muted-foreground'
                 )}
               >
-                {displayLabelsByPath.get(getRepoDisplayLabelKey(repo)) ?? repo.displayName}
+                {displayLabelsByPath.get(repo.path) ?? repo.displayName}
               </span>
             </label>
           </li>

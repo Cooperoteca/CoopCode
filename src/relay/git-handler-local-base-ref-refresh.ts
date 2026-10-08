@@ -1,11 +1,9 @@
 import type { GitExec } from './git-handler-ops'
 import { areRelayWorktreePathsEqual, readRelayWorktreeList } from './git-handler-worktree-ops'
-import type { GitCapabilityCache } from '../shared/git-capability-cache'
 
 export async function refreshLocalBaseRefForWorktreeCreateOp(
   git: GitExec,
-  params: Record<string, unknown>,
-  capabilities: GitCapabilityCache
+  params: Record<string, unknown>
 ): Promise<void> {
   const repoPath = params.repoPath as string
   const fullRef = params.fullRef as string
@@ -44,7 +42,7 @@ export async function refreshLocalBaseRefForWorktreeCreateOp(
     throw new Error('Local base ref is not a fast-forward update.')
   }
 
-  const worktrees = await readRelayWorktreeList(git, repoPath, capabilities)
+  const worktrees = await readRelayWorktreeList(git, repoPath)
   const ownerWorktree = worktrees.find((worktree) => worktree.branch === fullRef)
   if (ownerWorktree) {
     if (ownerWorktreePath && !areRelayWorktreePathsEqual(ownerWorktree.path, ownerWorktreePath)) {

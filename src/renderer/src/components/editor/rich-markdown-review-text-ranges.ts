@@ -1,25 +1,23 @@
 import type { Editor } from '@tiptap/react'
 import type { RichMarkdownAnnotationHighlightRange } from './rich-markdown-annotation-highlight'
-import { forEachRichMarkdownVisibleTextSegment } from './rich-markdown-visible-text-map'
-
-type TextPosition = { from: number; to: number } | null
 
 type NormalizedTextChar = {
   value: string
-  pos: TextPosition
+  pos: number | null
 }
 
 type MatchState = {
   readonly needle: string
   readonly prefixTable: number[]
-  recentPositions: TextPosition[]
+  recentPositions: (number | null)[]
   recentPositionWriteIndex: number
   matchLength: number
-  positions: TextPosition[] | null
+  positions: (number | null)[] | null
 }
 
 type NormalizationState = {
   previousWasWhitespace: boolean
+  emittedAnyText: boolean
 }
 
 export function findRichMarkdownSelectedTextRanges({
@@ -47,32 +45,31 @@ export function findRichMarkdownSelectedTextRanges({
     positions: null
   }
   const normalizationState: NormalizationState = {
-    previousWasWhitespace: false
+    previousWasWhitespace: false,
+    emittedAnyText: false
   }
 
-  forEachRichMarkdownVisibleTextSegment(
-    editor.state.doc,
-    from ?? 0,
-    to ?? editor.state.doc.content.size,
-    (segment) => {
-      for (let index = 0; index < segment.text.length && !matchState.positions; index += 1) {
-        processRawTextChar(
-          {
-            value: segment.text.charAt(index),
-            pos:
-              segment.kind === 'separator'
-                ? null
-                : segment.kind === 'read-only-atom'
-                  ? { from: segment.from, to: segment.to }
-                  : { from: segment.from + index, to: segment.from + index + 1 }
-          },
-          normalizationState,
-          matchState
-        )
-      }
-      return !matchState.positions
+  // Why: review text can come from large pasted selections; stream the editor
+  // text instead of building per-character haystack/needle arrays.
+  editor.state.doc.nodesBetween(from ?? 0, to ?? editor.state.doc.content.size, (node, pos) => {
+    if (matchState.positions || !node.isText) {
+      return
     }
-  )
+    const nodeText = node.text
+    if (!nodeText) {
+      return
+    }
+    if (normalizationState.emittedAnyText) {
+      processRawTextChar({ value: ' ', pos: null }, normalizationState, matchState)
+    }
+    for (let index = 0; index < nodeText.length && !matchState.positions; index += 1) {
+      processRawTextChar(
+        { value: nodeText.charAt(index), pos: pos + index },
+        normalizationState,
+        matchState
+      )
+    }
+  })
 
   return matchState.positions ? positionsToRanges(matchState.positions) : []
 }
@@ -104,6 +101,7 @@ function processRawTextChar(
   if (isRichMarkdownWhitespace(code)) {
     if (!normalizationState.previousWasWhitespace) {
       processNormalizedTextChar({ value: ' ', pos: char.pos }, matchState)
+      normalizationState.emittedAnyText = true
     }
     normalizationState.previousWasWhitespace = true
     return
@@ -111,6 +109,7 @@ function processRawTextChar(
 
   processNormalizedTextChar(char, matchState)
   normalizationState.previousWasWhitespace = false
+  normalizationState.emittedAnyText = true
 }
 
 function processNormalizedTextChar(char: NormalizedTextChar, matchState: MatchState): void {
@@ -129,7 +128,7 @@ function processNormalizedTextChar(char: NormalizedTextChar, matchState: MatchSt
   }
 }
 
-function recordRecentPosition(pos: TextPosition, matchState: MatchState): void {
+function recordRecentPosition(pos: number | null, matchState: MatchState): void {
   if (matchState.recentPositions.length < matchState.needle.length) {
     matchState.recentPositions.push(pos)
     matchState.recentPositionWriteIndex =
@@ -142,8 +141,8 @@ function recordRecentPosition(pos: TextPosition, matchState: MatchState): void {
     (matchState.recentPositionWriteIndex + 1) % matchState.needle.length
 }
 
-function readRecentPositions(matchState: MatchState): TextPosition[] {
-  const positions: TextPosition[] = []
+function readRecentPositions(matchState: MatchState): (number | null)[] {
+  const positions: (number | null)[] = []
   for (let index = 0; index < matchState.needle.length; index += 1) {
     const bufferIndex = (matchState.recentPositionWriteIndex + index) % matchState.needle.length
     positions.push(matchState.recentPositions[bufferIndex] ?? null)
@@ -169,26 +168,26 @@ function buildPrefixTable(value: string): number[] {
   return table
 }
 
-function positionsToRanges(positions: TextPosition[]): RichMarkdownAnnotationHighlightRange[] {
+function positionsToRanges(positions: (number | null)[]): RichMarkdownAnnotationHighlightRange[] {
   const ranges: RichMarkdownAnnotationHighlightRange[] = []
   let rangeFrom: number | null = null
   let rangeTo: number | null = null
-  for (const position of positions) {
-    if (position === null) {
+  for (const pos of positions) {
+    if (pos === null) {
       continue
     }
     if (rangeFrom === null || rangeTo === null) {
-      rangeFrom = position.from
-      rangeTo = position.to
+      rangeFrom = pos
+      rangeTo = pos + 1
       continue
     }
-    if (position.from <= rangeTo) {
-      rangeTo = Math.max(rangeTo, position.to)
+    if (pos === rangeTo) {
+      rangeTo += 1
       continue
     }
     ranges.push({ from: rangeFrom, to: rangeTo })
-    rangeFrom = position.from
-    rangeTo = position.to
+    rangeFrom = pos
+    rangeTo = pos + 1
   }
   if (rangeFrom !== null && rangeTo !== null) {
     ranges.push({ from: rangeFrom, to: rangeTo })

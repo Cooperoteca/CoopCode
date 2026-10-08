@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Why: git RPC methods share one dispatcher fixture, and keeping the contract cases together makes method coverage easy to audit. */
 import { describe, expect, it, vi } from 'vitest'
 import { RpcDispatcher } from '../dispatcher'
 import type { RpcRequest } from '../core'
@@ -16,9 +17,7 @@ describe('git RPC methods', () => {
         entries: [],
         conflictOperation: 'unknown',
         branch: 'main',
-        head: 'abc',
-        didHitLimit: true,
-        statusLength: 1_001
+        head: 'abc'
       })
     } as unknown as OrcaRuntimeService
     const dispatcher = new RpcDispatcher({ runtime, methods: GIT_METHODS })
@@ -28,7 +27,7 @@ describe('git RPC methods', () => {
     expect(runtime.getRuntimeGitStatus).toHaveBeenCalledWith('id:wt-1')
     expect(response).toMatchObject({
       ok: true,
-      result: { entries: [], branch: 'main', didHitLimit: true, statusLength: 1_001 }
+      result: { entries: [], branch: 'main' }
     })
   })
 
@@ -79,28 +78,6 @@ describe('git RPC methods', () => {
     expect(response).toMatchObject({
       ok: true,
       result: { entries: [] }
-    })
-  })
-
-  it('forwards line-stat reuse and request cancellation for status requests', async () => {
-    const controller = new AbortController()
-    const runtime = {
-      getRuntimeId: () => 'test-runtime',
-      getRuntimeGitStatus: vi.fn().mockResolvedValue({
-        entries: [],
-        conflictOperation: 'unknown'
-      })
-    } as unknown as OrcaRuntimeService
-    const dispatcher = new RpcDispatcher({ runtime, methods: GIT_METHODS })
-
-    await dispatcher.dispatch(
-      makeRequest('git.status', { worktree: 'id:wt-1', reuseLineStats: true }),
-      { signal: controller.signal }
-    )
-
-    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledWith('id:wt-1', {
-      reuseLineStats: true,
-      signal: controller.signal
     })
   })
 

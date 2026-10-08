@@ -97,43 +97,7 @@ describe('registerLinearHandlers', () => {
       workspaceId: 'workspace-1'
     })
 
-    expect(listIssuesMock).toHaveBeenCalledWith('all', 216, 'workspace-1', {
-      attributeFilter: undefined
-    })
-  })
-
-  it('parses attribute filters and rejects malformed payloads before listIssues', async () => {
-    listIssuesMock.mockResolvedValue({ items: [], hasMore: false })
-    registerLinearHandlers()
-
-    await handlers['linear:listIssues'](null, {
-      filter: 'all',
-      limit: 20,
-      workspaceId: 'workspace-1',
-      attributeFilter: {
-        stateIds: ['state-1'],
-        priorities: [1],
-        assignee: { kind: 'unassigned' },
-        labelIds: []
-      }
-    })
-    expect(listIssuesMock).toHaveBeenCalledWith('all', 20, 'workspace-1', {
-      attributeFilter: {
-        stateIds: ['state-1'],
-        priorities: [1],
-        assignee: { kind: 'unassigned' },
-        labelIds: []
-      }
-    })
-
-    listIssuesMock.mockClear()
-    await expect(
-      handlers['linear:listIssues'](null, {
-        filter: 'all',
-        attributeFilter: { stateIds: [] }
-      })
-    ).rejects.toThrow(/required/)
-    expect(listIssuesMock).not.toHaveBeenCalled()
+    expect(listIssuesMock).toHaveBeenCalledWith('all', 216, 'workspace-1')
   })
 
   it('forwards expanded Linear project issue limits through local IPC', async () => {

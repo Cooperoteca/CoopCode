@@ -103,7 +103,7 @@ export function OnboardingInlineCommandTerminal({
     return () => {
       // Why: inline setup panels can disappear after detection succeeds; close
       // the backing tab so installer shells do not keep running invisibly.
-      closeTab(tab.id, { recordInteraction: false, reason: 'cleanup' })
+      closeTab(tab.id, { recordInteraction: false })
     }
   }, [
     closeTab,
@@ -294,12 +294,11 @@ export function OnboardingInlineCommandTerminal({
               cwd={cwd}
               isActive
               isVisible
-              showSplitButton={false}
               onPtyExit={() => {
                 onTerminalExit?.()
-                closeTab(tabId, { recordInteraction: false, reason: 'pty-exit' })
+                closeTab(tabId, { recordInteraction: false })
               }}
-              onCloseTab={() => closeTab(tabId, { recordInteraction: false, reason: 'cleanup' })}
+              onCloseTab={() => closeTab(tabId, { recordInteraction: false })}
             />
           ) : (
             <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">

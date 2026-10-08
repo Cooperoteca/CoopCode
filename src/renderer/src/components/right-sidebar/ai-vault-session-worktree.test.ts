@@ -31,10 +31,7 @@ const baseSession: AiVaultSession = {
   messageCount: 2,
   totalTokens: 42,
   previewMessages: [],
-  queuedMessageCount: 0,
-  subagentTranscriptCount: 0,
-  resumeCommand: "codex resume 'session-1'",
-  subagent: null
+  resumeCommand: "codex resume 'session-1'"
 }
 
 function makeWorktree(overrides: Partial<Worktree> = {}): Worktree {

@@ -1,7 +1,9 @@
 import type { DashboardAgentRow } from '@/components/dashboard/useDashboardData'
-import { formatAgentTypeLabel, isClaudeManagementTitle } from '@/lib/agent-status'
-import { containsBrailleSpinner } from '../../../../shared/agent-title-core'
-import { classifyTitleActivity, resolveTitleActivityLabel } from '@/lib/pane-agent-evidence'
+import {
+  detectAgentStatusFromTitle,
+  getAgentLabel,
+  isClaudeManagementTitle
+} from '@/lib/agent-status'
 import { tabHasLivePty } from '@/lib/tab-has-live-pty'
 import type {
   AgentStatusEntry,
@@ -133,8 +135,8 @@ function buildTitleDerivedAgentRow(args: {
   // Why: `claude agents` is a live Claude Code Agent Teams surface, but the
   // shared detector keeps it neutral so runtime liveness probes do not treat
   // the management/list screen as active work.
-  const status = isClaudeAgentsTitle ? 'idle' : classifyTitleActivity(title)
-  const label = isClaudeAgentsTitle ? 'Claude Code' : resolveTitleActivityLabel(title)
+  const status = isClaudeAgentsTitle ? 'idle' : detectAgentStatusFromTitle(title)
+  const label = isClaudeAgentsTitle ? 'Claude Code' : getAgentLabel(title)
   if (!status || !label) {
     return null
   }
@@ -143,20 +145,10 @@ function buildTitleDerivedAgentRow(args: {
   }
   const paneKey = makePaneKey(args.tab.id, args.leafId)
   const orchestration = args.runtimeAgentOrchestrationByPaneKey?.[paneKey]
-  const titleAgentType = isClaudeAgentsTitle ? 'claude' : resolveTitleDerivedAgentType(title, label)
-  // Why: a braille spinner proves activity, not identity, so the resolver drops
-  // it. Hook-less agents over SSH (Codex, #8711) surface only spinner+cwd titles;
-  // fall back to the tab's launch identity instead of hiding the pane. Gated on
-  // the spinner on purpose — unlike the hook path's unconditional launchAgent
-  // fallback (resolveRowAgentType), this path manufactures agent-ness from a
-  // title alone, so a non-agent title must never become a row. Residual: a split
-  // pane whose own title carries a braille glyph is still attributed to launchAgent.
-  const agentType =
-    titleAgentType ?? (containsBrailleSpinner(title) ? (args.tab.launchAgent ?? null) : null)
+  const agentType = isClaudeAgentsTitle ? 'claude' : resolveTitleDerivedAgentType(title, label)
   if (!agentType) {
     return null
   }
-  const rowLabel = titleAgentType ? label : formatAgentTypeLabel(agentType)
   const rowState = titleStatusToRowState(status)
   const secondary =
     status === 'permission' ? 'Needs input' : status === 'working' ? 'Running' : 'Idle'
@@ -164,7 +156,7 @@ function buildTitleDerivedAgentRow(args: {
   const entry: AgentStatusEntry = {
     paneKey,
     state: entryState,
-    prompt: rowLabel,
+    prompt: label,
     updatedAt: args.now,
     stateStartedAt: args.now,
     stateHistory: [],
@@ -207,7 +199,7 @@ export function resolveAgentTypeFromTerminalTitle(
     return null
   }
   const normalizedTitle = normalizeCompatibleAgentTitleForOwner(title, ownerAgentType)
-  const label = resolveTitleActivityLabel(normalizedTitle)
+  const label = getAgentLabel(normalizedTitle)
   return label
     ? (resolveCompatibleAgentTypeForOwner(
         resolveTitleDerivedAgentType(normalizedTitle, label),

@@ -1,21 +1,35 @@
 import { recognizeAgentProcessFromCommandLine } from '../../shared/agent-process-recognition'
-import { resolveOuterWrapperForegroundProcess } from '../../shared/foreground-wrapper-agent'
+import { getProcessTableSnapshot } from '../../shared/process-table-snapshot'
 import {
-  getFreshProcessTableSnapshot,
-  getProcessTableSnapshot,
-  type ProcessTableRow
-} from '../../shared/process-table-snapshot'
-import {
-  resolveWindowsAgentForegroundProcessWithAvailability,
+  resolveWindowsAgentForegroundProcess,
   shouldInspectWindowsAgentForeground,
   type AgentForegroundResolutionOptions
 } from './windows-agent-foreground-process'
 
 export type { AgentForegroundResolutionOptions } from './windows-agent-foreground-process'
 
-export type AgentForegroundProcessResolution = {
-  available: boolean
-  processName: string | null
+type ProcessRow = {
+  pid: number
+  ppid: number
+  stat: string
+  command: string
+}
+
+function parsePsRows(stdout: string): ProcessRow[] {
+  const rows: ProcessRow[] = []
+  for (const line of stdout.split('\n')) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/)
+    if (!match) {
+      continue
+    }
+    rows.push({
+      pid: Number(match[1]),
+      ppid: Number(match[2]),
+      stat: match[3],
+      command: match[4]
+    })
+  }
+  return rows
 }
 
 function collectDescendants<Row extends { pid: number; ppid: number }>(
@@ -41,7 +55,7 @@ function collectDescendants<Row extends { pid: number; ppid: number }>(
   return descendants
 }
 
-function candidateScore(row: ProcessTableRow & { depth: number }): number {
+function candidateScore(row: ProcessRow & { depth: number }): number {
   // Why: foreground descendants carry `+` in `ps stat` on Unix PTYs. Prefer
   // them, then prefer leaf/deeper wrappers so `node /path/bin/codex` beats the
   // parent shell but still lets the native child confirm the same identity.
@@ -53,64 +67,33 @@ export async function resolveAgentForegroundProcess(
   fallbackProcess: string | null,
   options: AgentForegroundResolutionOptions = {}
 ): Promise<string | null> {
-  return (await resolveAgentForegroundProcessWithAvailability(shellPid, fallbackProcess, options))
-    .processName
-}
-
-export async function resolveAgentForegroundProcessWithAvailability(
-  shellPid: number | null | undefined,
-  fallbackProcess: string | null,
-  options: AgentForegroundResolutionOptions = {}
-): Promise<AgentForegroundProcessResolution> {
   if (!shellPid) {
-    return { available: false, processName: fallbackProcess }
+    return fallbackProcess
   }
 
   if (process.platform === 'win32') {
-    if (
-      !fallbackProcess ||
-      (!shouldInspectWindowsAgentForeground(fallbackProcess) && !options.forceProcessScan)
-    ) {
-      return { available: true, processName: fallbackProcess }
+    if (!fallbackProcess || !shouldInspectWindowsAgentForeground(fallbackProcess)) {
+      return fallbackProcess
     }
-    const resolution = await resolveWindowsAgentForegroundProcessWithAvailability(
-      shellPid,
-      fallbackProcess,
-      options
+    return (
+      (await resolveWindowsAgentForegroundProcess(shellPid, fallbackProcess, options)) ??
+      fallbackProcess
     )
-    return {
-      available: resolution.available,
-      // Why: a forced confirmation scan that no longer sees the recognized
-      // fallback is authoritative evidence that the agent exited meanwhile.
-      processName:
-        resolution.processName ??
-        (options.forceProcessScan && recognizeAgentProcessFromCommandLine(fallbackProcess)
-          ? null
-          : fallbackProcess)
-    }
   }
 
   try {
-    const rows = options.fresh
-      ? await getFreshProcessTableSnapshot()
-      : await getProcessTableSnapshot()
-    if (options.fresh && !rows.some((row) => row.pid === shellPid)) {
-      return { available: false, processName: fallbackProcess }
-    }
-    return {
-      available: true,
-      processName: resolveAgentForegroundProcessFromPs(rows, shellPid) ?? fallbackProcess
-    }
+    const stdout = await getProcessTableSnapshot()
+    return resolveAgentForegroundProcessFromPs(stdout, shellPid) ?? fallbackProcess
   } catch {
-    // Why: a failed scan cannot prove fallback ownership; callers retain the last recognized agent.
-    return { available: false, processName: fallbackProcess }
+    // Fall through to node-pty's process name. Foreground process inspection is
+    // best-effort because terminal identity should never break PTY operation.
   }
+
+  return fallbackProcess
 }
 
-function resolveAgentForegroundProcessFromPs(
-  rows: ProcessTableRow[],
-  shellPid: number
-): string | null {
+function resolveAgentForegroundProcessFromPs(stdout: string, shellPid: number): string | null {
+  const rows = parsePsRows(stdout)
   const shellRow = rows.find((row) => row.pid === shellPid)
   const candidates = collectDescendants(rows, shellPid).sort(
     (a, b) => candidateScore(b) - candidateScore(a)
@@ -127,9 +110,7 @@ function resolveAgentForegroundProcessFromPs(
     }
     const recognized = recognizeAgentProcessFromCommandLine(candidate.command)
     if (recognized) {
-      // Why: return the outer wrapper (omp) rather than the deeper wrapped child
-      // (pi) of a shell→omp→pi tree — see resolveOuterWrapperForegroundProcess.
-      return resolveOuterWrapperForegroundProcess(recognized, candidate, candidates)
+      return recognized.processName
     }
   }
   return null

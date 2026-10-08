@@ -114,12 +114,9 @@ function getActionPresentation(option: ActiveOption): {
       showDetail: true
     }
   }
-  if (classification.kind === 'existing-file' || classification.kind === 'absolute-file') {
+  if (classification.kind === 'existing-file') {
     return {
-      detail:
-        classification.kind === 'absolute-file'
-          ? classification.filePath
-          : classification.relativePath,
+      detail: classification.relativePath,
       icon: <FileText className="size-3.5 shrink-0" aria-hidden="true" />,
       label: translate('auto.components.tab.bar.TabBarCreateEntry.25dc1cd653', 'Open file'),
       showDetail: true

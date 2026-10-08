@@ -33,7 +33,7 @@ export function getLinearOrganizationUrlKeyFromIssueUrl(issueUrl?: string | null
     if (parsed.hostname !== 'linear.app') {
       return null
     }
-    return parsed.pathname.split('/').find(Boolean) ?? null
+    return parsed.pathname.split('/').filter(Boolean)[0] ?? null
   } catch {
     return null
   }

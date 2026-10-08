@@ -88,21 +88,14 @@ export type RawAttachmentsResponse = {
   } | null
 }
 
-export type RawRelationNode = {
-  id: string
-  type?: string | null
-  issue?: RawIssue | null
-  relatedIssue?: RawIssue | null
-}
-
 export type RawRelationsResponse = {
   issue?: {
     relations?: {
-      nodes?: RawRelationNode[]
-      pageInfo?: RawPageInfo
-    } | null
-    inverseRelations?: {
-      nodes?: RawRelationNode[]
+      nodes?: {
+        id: string
+        type?: string | null
+        relatedIssue?: RawIssue | null
+      }[]
       pageInfo?: RawPageInfo
     } | null
   } | null
@@ -195,22 +188,6 @@ export const RELATIONS_QUERY = `
         nodes {
           id
           type
-          relatedIssue { id identifier title url }
-        }
-        pageInfo { hasNextPage endCursor }
-      }
-    }
-  }
-`
-
-export const INVERSE_RELATIONS_QUERY = `
-  query OrcaAgentLinearIssueInverseRelations($id: String!, $first: Int, $after: String) {
-    issue(id: $id) {
-      inverseRelations(first: $first, after: $after) {
-        nodes {
-          id
-          type
-          issue { id identifier title url }
           relatedIssue { id identifier title url }
         }
         pageInfo { hasNextPage endCursor }

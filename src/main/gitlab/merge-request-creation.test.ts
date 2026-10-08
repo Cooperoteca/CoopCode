@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Why: MR creation tests share glab and SSH filesystem mocks across CLI, template, and duplicate-detection paths. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {

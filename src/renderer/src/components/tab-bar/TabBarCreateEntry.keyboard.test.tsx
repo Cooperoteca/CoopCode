@@ -10,9 +10,7 @@ import type { TabAgentLaunchOption } from './tab-agent-launch-options'
 // keyboard behavior under test only needs a controllable option list.
 const entryOptionsMock = vi.hoisted(() => ({ options: [] as TabEntryOption[] }))
 vi.mock('./tab-create-entry-action', () => ({
-  getTabEntryOptions: () => entryOptionsMock.options,
-  createTabEntryAllowAbsolutePathsSelector: () => () => true,
-  isTabEntryAbsolutePathLike: () => false
+  getTabEntryOptions: () => entryOptionsMock.options
 }))
 vi.mock('../quick-open-file-list', () => ({
   useRuntimeFileListForWorktree: () => ({ files: [], loading: false, loadError: null })
@@ -90,26 +88,6 @@ afterEach(() => {
 })
 
 describe('TabBarCreateEntry keyboard navigation', () => {
-  it('publishes the query from the typing event without an extra effect commit', () => {
-    const onQueryChange = vi.fn()
-    mount(
-      <TabBarCreateEntry
-        worktreeId="wt"
-        groupId="g"
-        menuOpen
-        onOpenEntry={vi.fn()}
-        onQueryChange={onQueryChange}
-      />
-    )
-
-    expect(onQueryChange).not.toHaveBeenCalled()
-
-    setQuery('src/app.ts')
-
-    expect(onQueryChange).toHaveBeenCalledTimes(1)
-    expect(onQueryChange).toHaveBeenCalledWith('src/app.ts')
-  })
-
   it('intercepts ArrowDown on a single-option list so it does not leak (guards >0 vs >1)', () => {
     entryOptionsMock.options = [fileOption('src/only-match.ts')]
     const onOpenEntry = vi.fn().mockResolvedValue(undefined)

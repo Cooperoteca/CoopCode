@@ -135,6 +135,8 @@ export async function refreshClaudeOauthCredentials(
     probeUrl: OAUTH_TOKEN_URL
   }).catch(() => {})
 
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS)
   try {
     // Why: the `claude` CLI posts grant_type=refresh_token as
     // application/x-www-form-urlencoded with the public client id. net.fetch
@@ -147,7 +149,7 @@ export async function refreshClaudeOauthCredentials(
         refresh_token: refreshToken,
         client_id: OAUTH_CLIENT_ID
       }).toString(),
-      signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS)
+      signal: controller.signal
     })
     if (!res.ok) {
       // Why: surface the status (never the token) so a throttle (429) or a
@@ -166,5 +168,7 @@ export async function refreshClaudeOauthCredentials(
       error instanceof Error ? error.message : error
     )
     return null
+  } finally {
+    clearTimeout(timer)
   }
 }

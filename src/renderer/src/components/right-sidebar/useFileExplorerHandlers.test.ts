@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import { useAppStore } from '@/store'
 import type { TreeNode } from './file-explorer-types'
 import { activateFileExplorerNode } from './useFileExplorerHandlers'
 
@@ -17,12 +16,7 @@ describe('activateFileExplorerNode', () => {
     relativePath: 'linked-docs',
     isDirectory: false,
     isSymlink: true,
-    depth: 0,
-    operationOwner: {
-      kind: 'runtime',
-      environmentId: 'runtime-env-1',
-      executionHostId: 'runtime:runtime-env-1'
-    }
+    depth: 0
   }
 
   it('selects filtered folders without mutating persisted expansion', async () => {
@@ -74,18 +68,6 @@ describe('activateFileExplorerNode', () => {
 
   it('falls back to opening a symlink as a file when directory loading fails', async () => {
     const openFile = vi.fn()
-    useAppStore.setState({
-      worktreesByRepo: {
-        'repo-1': [
-          {
-            id: 'wt-1',
-            repoId: 'repo-1',
-            path: '/repo',
-            hostId: 'runtime:runtime-env-1'
-          } as never
-        ]
-      }
-    })
 
     await activateFileExplorerNode({
       node: symlinkNode,
@@ -108,7 +90,7 @@ describe('activateFileExplorerNode', () => {
         language: expect.any(String),
         mode: 'edit'
       },
-      { preview: true, focusEditor: true, suppressActiveRuntimeFallback: false }
+      { preview: true, suppressActiveRuntimeFallback: false }
     )
   })
 
@@ -118,15 +100,9 @@ describe('activateFileExplorerNode', () => {
       path: '/repo/README.md',
       relativePath: 'README.md',
       isDirectory: false,
-      depth: 0,
-      operationOwner: { kind: 'local' }
+      depth: 0
     }
     const openFile = vi.fn()
-    useAppStore.setState({
-      worktreesByRepo: {
-        'repo-1': [{ id: 'wt-1', repoId: 'repo-1', path: '/repo', hostId: 'local' } as never]
-      }
-    })
 
     await activateFileExplorerNode({
       node: fileNode,
@@ -145,7 +121,7 @@ describe('activateFileExplorerNode', () => {
         filePath: '/repo/README.md',
         runtimeEnvironmentId: undefined
       }),
-      { preview: true, focusEditor: true, suppressActiveRuntimeFallback: true }
+      { preview: true, suppressActiveRuntimeFallback: true }
     )
   })
 })

@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- Why: the script editor, advanced/Command Source disclosure, issue-command override, and YAML state surfaces share tightly coupled state and persistence; splitting them across files would scatter prop drilling. */
 /* oxlint-disable react-doctor/no-adjust-state-on-prop-change -- Why: repository hook saves and issue-command overrides synchronize debounced persistence state with external repo settings. */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   HookCommandSourcePolicy,
   OrcaHooks,
@@ -24,7 +24,6 @@ import { getRepositoryLocalCommandsSectionId } from './repository-settings-targe
 import { matchesSettingsSearch } from './settings-search'
 import { translate } from '@/i18n/i18n'
 import { getRepositoryHookScriptTextareaRows } from '@/lib/script-textarea-rows'
-import { getRepoExecutionHostId, parseExecutionHostId } from '../../../../shared/execution-host'
 
 type RepositoryHooksSectionProps = {
   repo: Repo
@@ -441,7 +440,7 @@ function ExampleTemplateCard({
   return (
     <div className="space-y-2">
       <p className="text-[10px] tracking-[0.18em] text-muted-foreground">
-        {translate('auto.components.settings.RepositoryHooksSection.175daba180', 'Example')}{' '}
+        {translate('auto.components.settings.RepositoryHooksSection.175daba180', 'Example')}
         <code className="rounded bg-muted px-1 py-0.5">
           {translate('auto.components.settings.RepositoryHooksSection.39da2ae12f', 'orca.yaml')}
         </code>{' '}
@@ -665,7 +664,7 @@ function ScriptEditor({
               </span>
             </span>
             <span className="text-[11px] text-muted-foreground">
-              {translate('auto.components.settings.RepositoryHooksSection.b113344b6a', 'Edit')}{' '}
+              {translate('auto.components.settings.RepositoryHooksSection.b113344b6a', 'Edit')}
               <code className="rounded bg-muted px-1 py-0.5">
                 {translate(
                   'auto.components.settings.RepositoryHooksSection.39da2ae12f',
@@ -750,15 +749,8 @@ export function RepositoryHooksSection({
   // Why: this component uses the lightweight translate() helper; subscribe here
   // so render-time option/copy builders refresh when the UI language changes.
   useTranslation()
+  const settings = useAppStore((s) => s.settings)
   const settingsSearchQuery = useAppStore((s) => s.settingsSearchQuery)
-  const selectedHostId = getRepoExecutionHostId(repo)
-  const repoHostIdentity = `${selectedHostId}\0${repo.id}`
-  const hookRuntimeSettings = useMemo(() => {
-    const parsedHost = parseExecutionHostId(selectedHostId)
-    return {
-      activeRuntimeEnvironmentId: parsedHost?.kind === 'runtime' ? parsedHost.environmentId : null
-    }
-  }, [selectedHostId])
   const yamlState = yamlHooks
     ? 'loaded'
     : hasHooksFile
@@ -772,7 +764,7 @@ export function RepositoryHooksSection({
   )
   const hookSettingsDraftRef = useRef(hookSettingsDraft)
   hookSettingsDraftRef.current = hookSettingsDraft
-  const localCommandsRepoIdentityRef = useRef(repoHostIdentity)
+  const localCommandsRepoIdRef = useRef(repo.id)
   const localCommandsDraftDirtyRef = useRef(false)
   const localCommandsAutosaveTimerRef = useRef<number | null>(null)
   const persistRef = useRef(onUpdateHookSettings)
@@ -886,7 +878,7 @@ export function RepositoryHooksSection({
   // dirty draft through the previous repo's captured updater.
   useEffect(() => {
     const next = getHookSettingsDraft(repo.hookSettings)
-    const isSameRepo = localCommandsRepoIdentityRef.current === repoHostIdentity
+    const isSameRepo = localCommandsRepoIdRef.current === repo.id
 
     if (isSameRepo) {
       localCommandsPersistForRepoRef.current = onUpdateHookSettings
@@ -897,17 +889,11 @@ export function RepositoryHooksSection({
     }
 
     flushScriptDraft(localCommandsPersistForRepoRef.current)
-    localCommandsRepoIdentityRef.current = repoHostIdentity
+    localCommandsRepoIdRef.current = repo.id
     localCommandsPersistForRepoRef.current = onUpdateHookSettings
     hookSettingsDraftRef.current = next
     setHookSettingsDraft(next)
-  }, [
-    flushScriptDraft,
-    onUpdateHookSettings,
-    repo.hookSettings,
-    repoHostIdentity,
-    syncHookSettingsDraft
-  ])
+  }, [flushScriptDraft, onUpdateHookSettings, repo.id, repo.hookSettings, syncHookSettingsDraft])
 
   useEffect(() => {
     let cancelled = false
@@ -917,9 +903,7 @@ export function RepositoryHooksSection({
     setHasSharedIssueCommand(false)
     setIssueCommandSaveError(null)
 
-    // Why: the pane can show a host other than the globally focused runtime;
-    // route both runtime RPC and local/SSH IPC by the selected repo owner.
-    void readRuntimeIssueCommand(hookRuntimeSettings, repoId, selectedHostId)
+    void readRuntimeIssueCommand(settings, repoId)
       .then((result) => {
         if (cancelled) {
           return
@@ -941,20 +925,18 @@ export function RepositoryHooksSection({
       cancelled = true
       const draft = issueCommandDraftRef.current.trim()
       if (draft !== lastCommittedIssueCommandRef.current) {
-        void writeRuntimeIssueCommand(hookRuntimeSettings, repoId, draft, selectedHostId).catch(
-          (err) => {
-            console.error('[RepositoryHooksSection] Failed to save issue command on unmount:', err)
-          }
-        )
+        void writeRuntimeIssueCommand(settings, repoId, draft).catch((err) => {
+          console.error('[RepositoryHooksSection] Failed to save issue command on unmount:', err)
+        })
       }
     }
-  }, [hookRuntimeSettings, repo.id, repoHostIdentity, selectedHostId])
+  }, [repo.id, settings])
 
   const commitIssueCommand = useCallback(async (): Promise<void> => {
     const trimmed = issueCommandDraft.trim()
     setIssueCommandDraft(trimmed)
     try {
-      await writeRuntimeIssueCommand(hookRuntimeSettings, repo.id, trimmed, selectedHostId)
+      await writeRuntimeIssueCommand(settings, repo.id, trimmed)
       lastCommittedIssueCommandRef.current = trimmed
       setIssueCommandSaveError(null)
     } catch (err) {
@@ -963,7 +945,7 @@ export function RepositoryHooksSection({
       setIssueCommandSaveError(message)
       toast.error(message)
     }
-  }, [hookRuntimeSettings, issueCommandDraft, repo.id, selectedHostId])
+  }, [issueCommandDraft, repo.id, settings])
 
   const sharedSetupScript = yamlHooks?.scripts.setup
   const sharedArchiveScript = yamlHooks?.scripts.archive
@@ -1308,7 +1290,7 @@ export function RepositoryHooksSection({
                   {translate(
                     'auto.components.settings.RepositoryHooksSection.ac9038d2cc',
                     'When both'
-                  )}{' '}
+                  )}
                   <code className="rounded bg-muted px-1 py-0.5">
                     {translate(
                       'auto.components.settings.RepositoryHooksSection.39da2ae12f',

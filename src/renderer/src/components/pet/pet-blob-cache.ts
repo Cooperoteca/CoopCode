@@ -10,7 +10,6 @@ import { detectFramesFromImageData, type DetectedFrame } from './sprite-frame-de
 // cache means switching back and forth between images in the same session
 // doesn't re-fetch from main.
 export const blobUrlCache = new Map<string, string>()
-export const CUSTOM_PET_BLOB_CACHE_MAX = 16
 
 export type DetectedSpriteCacheEntry = {
   frames: DetectedFrame[]
@@ -26,39 +25,6 @@ export const detectedSpriteCache = new Map<string, DetectedSpriteCacheEntry>()
 const customPetBlobUrlLoads = new Map<string, Promise<string | null>>()
 const customPetBlobCacheEpoch = new Map<string, number>()
 const customPetBlobActiveLoadCounts = new Map<string, number>()
-const customPetBlobRetainCounts = new Map<string, number>()
-
-export function retainCustomPetBlobCacheEntry(id: string): () => void {
-  customPetBlobRetainCounts.set(id, (customPetBlobRetainCounts.get(id) ?? 0) + 1)
-  let retained = true
-  return () => {
-    if (!retained) {
-      return
-    }
-    retained = false
-    const nextCount = (customPetBlobRetainCounts.get(id) ?? 1) - 1
-    if (nextCount > 0) {
-      customPetBlobRetainCounts.set(id, nextCount)
-      return
-    }
-    customPetBlobRetainCounts.delete(id)
-    evictInactiveCustomPetBlobUrls()
-  }
-}
-
-export function peekCustomPetBlobUrl(id: string): string | null {
-  return blobUrlCache.get(id) ?? null
-}
-
-export function readCustomPetBlobUrl(id: string): string | null {
-  const cached = peekCustomPetBlobUrl(id)
-  if (!cached) {
-    return null
-  }
-  blobUrlCache.delete(id)
-  blobUrlCache.set(id, cached)
-  return cached
-}
 
 export async function loadCustomBlobUrl(
   id: string,
@@ -68,7 +34,7 @@ export async function loadCustomBlobUrl(
   spriteFps?: number,
   hasManifestSprite?: boolean
 ): Promise<string | null> {
-  const cached = readCustomPetBlobUrl(id)
+  const cached = blobUrlCache.get(id)
   if (cached) {
     return cached
   }
@@ -168,26 +134,6 @@ function cacheCustomPetBlobUrl(
   blobUrlCache.set(id, url)
   if (detected) {
     detectedSpriteCache.set(id, detected)
-  }
-  evictInactiveCustomPetBlobUrls()
-}
-
-function evictInactiveCustomPetBlobUrls(): void {
-  // Why: users can import many custom pets; inactive blob URLs and sprite
-  // bitmaps should not stay resident for the whole renderer session.
-  while (blobUrlCache.size > CUSTOM_PET_BLOB_CACHE_MAX) {
-    let evicted = false
-    for (const id of blobUrlCache.keys()) {
-      if (customPetBlobRetainCounts.has(id)) {
-        continue
-      }
-      clearCustomPetBlobCacheEntry(id)
-      evicted = true
-      break
-    }
-    if (!evicted) {
-      return
-    }
   }
 }
 

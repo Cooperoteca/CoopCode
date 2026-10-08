@@ -126,12 +126,9 @@ describe('DevinHookService', () => {
     Object.defineProperty(process, 'platform', { value: 'win32' })
     try {
       const scriptPath = 'C:\\Users\\Ada Lovelace\\.orca\\agent-hooks\\devin-hook.cmd'
-      const command = getDevinManagedCommand(scriptPath)
-      const encoded = command.match(/ -EncodedCommand (\S+)$/)?.[1]
-      expect(encoded).toBeDefined()
-      const decoded = Buffer.from(encoded!, 'base64').toString('utf16le')
-      expect(decoded).toContain(`Test-Path -LiteralPath '${scriptPath}' -PathType Leaf`)
-      expect(decoded).toContain('[Console]::In.ReadToEnd() | Out-Null')
+      expect(getDevinManagedCommand(scriptPath)).toBe(
+        'cmd /d /s /c ""C:\\Users\\Ada Lovelace\\.orca\\agent-hooks\\devin-hook.cmd""'
+      )
     } finally {
       Object.defineProperty(process, 'platform', { value: previous })
     }

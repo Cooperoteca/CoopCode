@@ -3,20 +3,20 @@ import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
-import { createIsolatedMarkdownExtensionForTests } from './isolated-markdown-extension-for-tests'
+import { Markdown } from '@tiptap/markdown'
 import { createRichMarkdownKeyHandler, type KeyHandlerContext } from './rich-markdown-key-handler'
 
+const extensions = [
+  StarterKit,
+  TaskList,
+  TaskItem.configure({ nested: true }),
+  Markdown.configure({ markedOptions: { gfm: true } })
+]
+
 function createEditor(content: object): Editor {
-  // Why: each Editor needs its own marked registry; sharing one module-scoped
-  // extension accumulates tokenizer state across tests.
   return new Editor({
     element: null,
-    extensions: [
-      StarterKit,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      createIsolatedMarkdownExtensionForTests()
-    ],
+    extensions,
     content
   })
 }
@@ -60,9 +60,6 @@ function createContext(editor: Editor): KeyHandlerContext {
     editorRef: { current: editor },
     rootRef: { current: null },
     lastCommittedMarkdownRef: { current: '' },
-    originalSourceRef: { current: '' },
-    baseCanonicalRef: { current: '' },
-    reconcileRoundTripRef: { current: () => null },
     onContentChangeRef: { current: vi.fn() },
     onSaveRef: { current: vi.fn() },
     isEditingLinkRef: { current: false },
@@ -77,19 +74,6 @@ function createContext(editor: Editor): KeyHandlerContext {
     typedEmptyOrderedListMarkerRef: { current: false },
     flushPendingSerialization: vi.fn(),
     openSearchRef: { current: vi.fn() },
-    linkBubbleOwnerId: 'test-owner',
-    htmlSuperscriptLinkContext: {
-      getSnapshot: () => ({
-        sourceFilePath: '/repo/README.md',
-        worktreeId: 'worktree-1',
-        worktreeRoot: '/repo',
-        sourceOwner: { kind: 'local' as const },
-        version: 0
-      }),
-      subscribe: () => () => {},
-      update: () => {}
-    },
-    openAnnotationPopoverRef: { current: vi.fn() },
     setIsEditingLink: vi.fn(),
     setLinkBubble: vi.fn(),
     setSelectedCommandIndex: vi.fn(),

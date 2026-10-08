@@ -41,7 +41,7 @@ export function buildRateLimitBucket(b: {
     name: getBucketName(b.modelId),
     usedPercent,
     windowMinutes: 60,
-    resetsAt: !Number.isNaN(resetsAtTime) ? resetsAtTime : null,
+    resetsAt: !isNaN(resetsAtTime) ? resetsAtTime : null,
     resetDescription: null
   }
 }

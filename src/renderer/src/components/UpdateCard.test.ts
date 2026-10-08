@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- Why: the update-card behavior is easiest to verify as one
+   lifecycle-oriented suite because the store caching and visibility rules interact directly. */
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDefaultUIState } from '../../../shared/constants'

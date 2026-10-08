@@ -13,13 +13,13 @@ export function hydratePersistedUIAfterStartupRead({
 }: {
   persistedUI: PersistedUIState
   cancelled: boolean
-  hydratePersistedUI: (ui: PersistedUIState, source?: 'startup' | 'sync') => void
+  hydratePersistedUI: (ui: PersistedUIState) => void
 }): boolean {
   if (cancelled) {
     return false
   }
 
-  hydratePersistedUI(persistedUI, 'startup')
+  hydratePersistedUI(persistedUI)
   return true
 }
 
@@ -34,7 +34,6 @@ export function getStartupErrorFallbackUI(uiHydrated: boolean): PersistedUIState
   return {
     lastActiveRepoId: null,
     lastActiveWorktreeId: null,
-    activeView: 'terminal',
     sidebarWidth: 280,
     rightSidebarOpen: true,
     rightSidebarTab: 'explorer',
@@ -48,8 +47,6 @@ export function getStartupErrorFallbackUI(uiHydrated: boolean): PersistedUIState
     hideSleepingWorkspaces: DEFAULT_HIDE_SLEEPING_WORKSPACES,
     showSleepingWorkspaces: DEFAULT_SHOW_SLEEPING_WORKSPACES,
     hideDefaultBranchWorkspace: false,
-    hideCliCreatedWorkspaces: false,
-    hideDetachedHeadWorkspaces: false,
     hideAutomationGeneratedWorkspaces: false,
     filterRepoIds: [],
     collapsedGroups: [],

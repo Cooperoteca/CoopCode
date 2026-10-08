@@ -6,21 +6,13 @@ import {
   type EditorConfigParams
 } from './rich-markdown-editor-config'
 
+const richMarkdownExtensions = createRichMarkdownExtensions({ includePlaceholder: true })
+
 export function useRichMarkdownEditorInstance(params: EditorConfigParams): Editor | null {
-  const extensions = useMemo(
-    () =>
-      createRichMarkdownExtensions({
-        codec: params.codec,
-        includePlaceholder: true,
-        htmlSuperscriptLinks: true,
-        htmlSuperscriptLinkContext: params.htmlSuperscriptLinkContext
-      }),
-    [params.codec, params.htmlSuperscriptLinkContext]
-  )
   const editor = useEditor(
     useMemo(
       () => ({
-        extensions,
+        extensions: richMarkdownExtensions,
         ...createRichMarkdownEditorConfig(params)
       }),
       // Dependencies are the same as the params object keys

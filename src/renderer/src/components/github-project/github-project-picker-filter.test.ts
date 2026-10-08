@@ -10,12 +10,10 @@ function project(
   owner: string,
   number: number,
   title: string,
-  ownerType: GitHubProjectSummary['ownerType'] = 'organization',
-  host?: string
+  ownerType: GitHubProjectSummary['ownerType'] = 'organization'
 ): GitHubProjectSummary {
   return {
     id: `${owner}-${number}`,
-    ...(host ? { host } : {}),
     owner,
     ownerType,
     number,
@@ -73,20 +71,6 @@ describe('github-project-picker-filter', () => {
         query: '42'
       })
     ).toEqual([projects[0]])
-  })
-
-  it('does not hide a GHES project behind a same-named github.com pin', () => {
-    const dotCom = project('acme', 1, 'Dotcom')
-    const enterprise = project('acme', 1, 'Enterprise', 'organization', 'ghe.example')
-
-    expect(
-      filterGitHubProjectPickerProjects({
-        projects: [dotCom, enterprise],
-        pinned: [{ owner: 'acme', ownerType: 'organization', number: 1 }],
-        recent: [],
-        query: ''
-      })
-    ).toEqual([enterprise])
   })
 
   it('enforces the query budget by UTF-8 byte length', () => {

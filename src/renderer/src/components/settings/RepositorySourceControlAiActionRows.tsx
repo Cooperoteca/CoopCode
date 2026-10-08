@@ -51,8 +51,7 @@ type RepositorySourceControlAiActionRowsProps = {
   onActionTemplateChange: (actionId: SourceControlActionId, value: string) => void
   onActionAgentArgsChange: (actionId: SourceControlActionId, value: string) => void
   onAppendVariable: (actionId: SourceControlActionId, variable: string) => void
-  /** Per-action saving state for CLI args + command template (matches global recipes). */
-  savingActionIds: Partial<Record<SourceControlActionId, boolean>>
+  isSaving: boolean
   actionDirtyById: Record<SourceControlActionId, boolean>
   onActionDiscard: (actionId: SourceControlActionId) => void
   onActionSave: (actionId: SourceControlActionId) => void
@@ -68,7 +67,7 @@ export function RepositorySourceControlAiActionRows({
   onActionTemplateChange,
   onActionAgentArgsChange,
   onAppendVariable,
-  savingActionIds,
+  isSaving,
   actionDirtyById,
   onActionDiscard,
   onActionSave
@@ -104,7 +103,6 @@ export function RepositorySourceControlAiActionRows({
         const agentWarningText = getSourceControlActionAgentWarningText(actionId, effectiveAgent)
         const agentSupportText = getSourceControlActionAgentSupportText(actionId)
         const actionDirty = actionDirtyById[actionId]
-        const isSavingAction = savingActionIds[actionId] === true
         return (
           <div
             key={actionId}
@@ -251,15 +249,15 @@ export function RepositorySourceControlAiActionRows({
               </div>
             </div>
             {hasOverride ? (
-              <div className="mt-3 flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
                 <p className="text-[11px] text-muted-foreground">
                   {actionDirty
                     ? translate(
-                        'auto.components.settings.SourceControlAiActionRecipeDefaults.817128d94e',
+                        'auto.components.settings.RepositorySourceControlAiSection.e57dde9d93',
                         'Unsaved changes'
                       )
                     : translate(
-                        'auto.components.settings.SourceControlAiActionRecipeDefaults.9d3cc627f8',
+                        'auto.components.settings.RepositorySourceControlAiSection.ccb07dd027',
                         'Saved'
                       )}
                 </p>
@@ -270,10 +268,10 @@ export function RepositorySourceControlAiActionRows({
                       variant="ghost"
                       size="xs"
                       onClick={() => onActionDiscard(actionId)}
-                      disabled={isSavingAction}
+                      disabled={isSaving}
                     >
                       {translate(
-                        'auto.components.settings.SourceControlAiActionRecipeDefaults.b3914ecbbc',
+                        'auto.components.settings.RepositorySourceControlAiSection.67b3ff5467',
                         'Discard'
                       )}
                     </Button>
@@ -283,15 +281,15 @@ export function RepositorySourceControlAiActionRows({
                     variant="secondary"
                     size="xs"
                     onClick={() => onActionSave(actionId)}
-                    disabled={!actionDirty || isSavingAction}
+                    disabled={!actionDirty || isSaving}
                   >
-                    {isSavingAction
+                    {isSaving
                       ? translate(
-                          'auto.components.settings.SourceControlAiActionRecipeDefaults.4f549a5fa8',
+                          'auto.components.settings.RepositorySourceControlAiSection.57e6e9d4b1',
                           'Saving...'
                         )
                       : translate(
-                          'auto.components.settings.SourceControlAiActionRecipeDefaults.d18d665e12',
+                          'auto.components.settings.RepositorySourceControlAiSection.152268c295',
                           'Save'
                         )}
                   </Button>

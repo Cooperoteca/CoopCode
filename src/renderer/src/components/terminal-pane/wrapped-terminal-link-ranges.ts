@@ -1,13 +1,4 @@
 import type { IBufferLine, IBufferRange } from '@xterm/xterm'
-import {
-  canStartHardWrappedPath,
-  getHardWrappedPathPrefix,
-  getHardWrappedPathSuffix,
-  isHardWrappedPathContinuation,
-  isHardWrappedPathFragment,
-  isIncompleteHardWrappedPathStart,
-  type HardWrappedPathFragmentRow
-} from './hard-wrapped-terminal-path-fragments'
 
 type TerminalBufferLineWithColumns = IBufferLine & {
   translateToString(
@@ -21,7 +12,6 @@ type TerminalBufferLineWithColumns = IBufferLine & {
 type WrappedLogicalRow = {
   y: number
   text: string
-  sourceText: string
   columns: number[]
   startIndex: number
   isWrapped: boolean
@@ -65,7 +55,7 @@ function translateLineWithCells(line: IBufferLine): { text: string; columns: num
   return { text, columns }
 }
 
-export function translateLineWithColumns(line: IBufferLine): { text: string; columns: number[] } {
+function translateLineWithColumns(line: IBufferLine): { text: string; columns: number[] } {
   const columns: number[] = []
   const text = (line as TerminalBufferLineWithColumns).translateToString(
     false,
@@ -89,7 +79,7 @@ export function translateLineWithColumns(line: IBufferLine): { text: string; col
   }
 }
 
-function trimHardWrappedPathRow(line: IBufferLine): HardWrappedPathFragmentRow | null {
+function trimHardWrappedPathRow(line: IBufferLine): { text: string; columns: number[] } | null {
   const translated = translateLineWithColumns(line)
   const startIndex = translated.text.search(/\S/)
   if (startIndex === -1) {
@@ -103,39 +93,22 @@ function trimHardWrappedPathRow(line: IBufferLine): HardWrappedPathFragmentRow |
 
   return {
     text: translated.text.slice(startIndex, endIndex),
-    sourceText: translated.text,
-    columns: translated.columns.slice(startIndex, endIndex + 1),
-    isWrapped: line.isWrapped,
-    lineLength: line.length
+    columns: translated.columns.slice(startIndex, endIndex + 1)
   }
 }
 
-function toWrappedLogicalRow(
-  row: HardWrappedPathFragmentRow,
-  y: number,
-  startIndex: number
-): WrappedLogicalRow {
-  return {
-    y,
-    text: row.text,
-    sourceText: row.sourceText,
-    columns: row.columns,
-    startIndex,
-    isWrapped: row.isWrapped,
-    lineLength: row.lineLength
+const HARD_WRAPPED_PATH_FRAGMENT_PATTERN = /^[A-Za-z0-9._~@%+=:,/\\-]+$/
+
+function isHardWrappedPathFragment(text: string): boolean {
+  return HARD_WRAPPED_PATH_FRAGMENT_PATTERN.test(text) && /[A-Za-z0-9]/.test(text)
+}
+
+function canStartHardWrappedPath(text: string): boolean {
+  if (!isHardWrappedPathFragment(text)) {
+    return /(?:^|[\s•*>-])(?:\/|\.{1,2}\/|[A-Za-z0-9._-]+\/)[A-Za-z0-9._~@%+=:,/\\-]*$/.test(text)
   }
-}
 
-function getWrappedRowsFingerprint(rows: WrappedLogicalRow[]): string {
-  return rows
-    .map(
-      (row) => `${row.y}:${row.isWrapped ? 1 : 0}:${row.lineLength}:${row.sourceText}\0${row.text}`
-    )
-    .join('\n')
-}
-
-function toWrappedLogicalLine(rows: WrappedLogicalRow[], text: string): WrappedLogicalLine {
-  return { text, rows: [...rows], fingerprint: getWrappedRowsFingerprint(rows) }
+  return /(?:\/|\\)/.test(text)
 }
 
 export function buildWrappedLogicalLine(
@@ -182,7 +155,6 @@ export function buildWrappedLogicalLine(
     rows.push({
       y: rowY,
       text: translated.text,
-      sourceText: translated.text,
       columns: translated.columns,
       startIndex: text.length,
       isWrapped: line.isWrapped,
@@ -191,7 +163,10 @@ export function buildWrappedLogicalLine(
     text += translated.text
   }
 
-  return toWrappedLogicalLine(rows, text)
+  const fingerprint = rows
+    .map((row) => `${row.y}:${row.isWrapped ? 1 : 0}:${row.lineLength}:${row.text}`)
+    .join('\n')
+  return { text, rows, fingerprint }
 }
 
 export function buildHardWrappedPathLogicalLineCandidates(
@@ -211,90 +186,38 @@ export function buildHardWrappedPathLogicalLineCandidates(
   for (let startY = currentY; startY >= minY; startY--) {
     const startLine = buffer.getLine(startY)
     const start = startLine ? trimHardWrappedPathRow(startLine) : null
-    if (!start) {
-      continue
-    }
-    const canStartWholeRow = canStartHardWrappedPath(start.text)
-    const startSuffix = getHardWrappedPathSuffix(start)
-    const canStartBoundary = Boolean(
-      startSuffix &&
-      (canStartHardWrappedPath(startSuffix.text) ||
-        isIncompleteHardWrappedPathStart(startSuffix.text))
-    )
-    // Why: hover calls this for every terminal row; reject non-path starts
-    // before translating their possible continuation rows.
-    if (!canStartWholeRow && !canStartBoundary) {
+    if (!start || !canStartHardWrappedPath(start.text)) {
       continue
     }
 
-    const sourceRows: { row: HardWrappedPathFragmentRow; y: number }[] = [{ row: start, y: startY }]
-    for (let rowY = startY + 1; rowY < startY + maxRows; rowY++) {
+    let text = ''
+    const rows: WrappedLogicalRow[] = []
+    for (let rowY = startY; rowY < startY + maxRows; rowY++) {
       const line = buffer.getLine(rowY)
-      const row = line ? trimHardWrappedPathRow(line) : null
-      if (!row) {
+      const translated = line ? trimHardWrappedPathRow(line) : null
+      if (!translated) {
         break
       }
-      sourceRows.push({ row, y: rowY })
-      if (!isHardWrappedPathContinuation(row.text)) {
+      if (rowY > startY && !isHardWrappedPathFragment(translated.text)) {
         break
       }
-    }
 
-    let lastWholeCandidateText: string | null = null
-    if (canStartWholeRow) {
-      let text = ''
-      const rows: WrappedLogicalRow[] = []
-      for (const sourceRow of sourceRows) {
-        if (sourceRow.y > startY && !isHardWrappedPathFragment(sourceRow.row.text)) {
-          break
-        }
-        rows.push(toWrappedLogicalRow(sourceRow.row, sourceRow.y, text.length))
-        text += sourceRow.row.text
-        if (sourceRow.y >= currentY) {
-          candidates.push(toWrappedLogicalLine(rows, text))
-          lastWholeCandidateText = text
-        }
+      rows.push({
+        y: rowY,
+        text: translated.text,
+        columns: translated.columns,
+        startIndex: text.length,
+        isWrapped: line?.isWrapped ?? false,
+        lineLength: line?.length ?? translated.text.length
+      })
+      text += translated.text
+
+      if (rowY >= currentY) {
+        const fingerprint = rows
+          .map((row) => `${row.y}:${row.isWrapped ? 1 : 0}:${row.lineLength}:${row.text}`)
+          .join('\n')
+        candidates.push({ text, rows: [...rows], fingerprint })
       }
-    }
-
-    if (!startSuffix || !canStartBoundary) {
-      continue
-    }
-    let boundaryText = startSuffix.text
-    const boundaryRows = [toWrappedLogicalRow(startSuffix, startY, 0)]
-    let reachedMixedContinuation = false
-    for (let rowIndex = 1; rowIndex < sourceRows.length; rowIndex++) {
-      const sourceRow = sourceRows[rowIndex]
-      if (isHardWrappedPathContinuation(sourceRow.row.text)) {
-        boundaryRows.push(toWrappedLogicalRow(sourceRow.row, sourceRow.y, boundaryText.length))
-        boundaryText += sourceRow.row.text
-        continue
-      }
-
-      reachedMixedContinuation = true
-      const finalPrefix = getHardWrappedPathPrefix(sourceRow.row)
-      if (finalPrefix && finalPrefix.text.length < sourceRow.row.text.length) {
-        boundaryRows.push(toWrappedLogicalRow(finalPrefix, sourceRow.y, boundaryText.length))
-        boundaryText += finalPrefix.text
-        if (sourceRow.y >= currentY && canStartHardWrappedPath(boundaryText)) {
-          // Why: only the first mixed continuation can close a hard-wrapped path;
-          // emitting more boundary combinations can merge sibling links.
-          candidates.push(toWrappedLogicalLine(boundaryRows, boundaryText))
-        }
-      }
-      break
-    }
-
-    const lastBoundaryRow = boundaryRows.at(-1)!
-    if (
-      !reachedMixedContinuation &&
-      isIncompleteHardWrappedPathStart(startSuffix.text) &&
-      boundaryRows.length >= 2 &&
-      lastBoundaryRow.y >= currentY &&
-      canStartHardWrappedPath(boundaryText) &&
-      lastWholeCandidateText !== boundaryText
-    ) {
-      candidates.push(toWrappedLogicalLine(boundaryRows, boundaryText))
     }
   }
 

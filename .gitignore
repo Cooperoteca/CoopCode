@@ -60,12 +60,8 @@ pnpm-debug.log*
 # Coverage
 coverage/
 
-# Prod release scan output (accidental adds)
-prod-release-scan-*.md
-
 # Benchmark run output
 /tools/benchmarks/results/*.json
-/.bench-fixtures/
 
 # Temp
 tmp/
@@ -77,22 +73,20 @@ design-docs/
 # Machine-local agent hook endpoint files may contain auth tokens.
 /agent-hooks/
 
-# Local-only design/planning docs (not checked in), including most of docs/reference/.
-# Durable docs that should be tracked must live in one of the allow-listed
-# locations below (assets, readme, STYLEGUIDE, mobile terminal shortcut bar,
-# and the tracked reference docs linked from AGENTS.md / README.md).
+# Local-only design/planning docs (not checked in).
+# Durable docs must live in one of the allow-listed locations below.
 docs/**
 !docs/
 !docs/assets/
 !docs/assets/**
 !docs/readme/
 !docs/readme/**
+!docs/reference/
+!docs/reference/**
+# Keep generated React perf scan ledgers local; durable docs still use docs/reference.
+docs/reference/react-performance-audit.md
 !docs/STYLEGUIDE.md
 !docs/mobile-terminal-shortcut-bar.md
-!docs/reference/
-!docs/reference/git-compatibility.md
-!docs/reference/headless-linux-server.md
-!docs/reference/linux-glibc-compatibility.md
 
 # Stably CLI (only docs/ are tracked)
 .stably/*
@@ -102,9 +96,9 @@ docs/**
 validation-screenshots/
 .stably-browser
 
-# Local scratch notes and PR evidence screenshots (not part of the product).
-/notes/
-/pr-evidence/
+# PR verification evidence screenshots are referenced from notes but should not
+# be committed.
+notes/artifacts/
 
 # Playwright
 test-results/
@@ -124,6 +118,3 @@ src/renderer/src/i18n/locales/.zh-catalog-cache.json
 src/renderer/src/i18n/locales/.ko-catalog-cache.json
 src/renderer/src/i18n/locales/.ja-catalog-cache.json
 src/renderer/src/i18n/locales/.es-catalog-cache.json
-
-# Bench result JSONs are working artifacts
-tools/benchmarks/results/terminal-pipeline-*.json

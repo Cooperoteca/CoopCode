@@ -1,12 +1,25 @@
 import { defineConfig } from 'vitest/config'
 
-const vitestOxcConfig = { tsconfig: false } as never
+const tsconfigRaw = JSON.stringify({
+  compilerOptions: {
+    jsx: 'react-jsx',
+    module: 'esnext',
+    moduleResolution: 'bundler',
+    strict: true,
+    target: 'es2022'
+  }
+})
 
 export default defineConfig({
   root: import.meta.dirname,
-  // Why: the app tsconfig intentionally excludes tests; Vite 8's OXC transform
-  // otherwise fails before Vitest can run the test modules.
-  oxc: vitestOxcConfig,
+  esbuild: {
+    tsconfigRaw
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      tsconfigRaw
+    }
+  },
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts']

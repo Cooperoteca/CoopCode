@@ -33,7 +33,7 @@ describe('refreshFileExplorerExpandedDirs', () => {
         '/repo/src': [entry('index.ts')],
         '/repo/docs': [entry('guide.md')]
       }
-      return { entries: entriesByPath[dirPath] ?? [], operationOwner: { kind: 'local' as const } }
+      return entriesByPath[dirPath] ?? []
     })
 
     const refreshed = await refreshFileExplorerExpandedDirs({
@@ -115,9 +115,9 @@ describe('refreshFileExplorerExpandedDirs', () => {
           ...prev,
           '/repo/src': newerSrcCache
         }))
-        return { entries: [entry('stale.ts')], operationOwner: { kind: 'local' as const } }
+        return [entry('stale.ts')]
       }
-      return { entries: [entry('guide.md')], operationOwner: { kind: 'local' as const } }
+      return [entry('guide.md')]
     })
 
     const refreshed = await refreshFileExplorerExpandedDirs({
@@ -158,10 +158,10 @@ describe('refreshFileExplorerExpandedDirs', () => {
     })
     const readDirectory = vi.fn(async (dirPath: string) => {
       if (dirPath === '/repo/src') {
-        return { entries: [entry('stale.ts')], operationOwner: { kind: 'local' as const } }
+        return [entry('stale.ts')]
       }
       await docsGate
-      return { entries: [entry('guide.md')], operationOwner: { kind: 'local' as const } }
+      return [entry('guide.md')]
     })
 
     const refreshPromise = refreshFileExplorerExpandedDirs({

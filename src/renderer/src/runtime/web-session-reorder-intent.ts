@@ -17,13 +17,7 @@ const REORDER_INTENT_TTL_MS = 10_000
 type ReorderIntent = { order: string[]; recordedAt: number }
 
 // worktreeId -> (groupId -> intent)
-import { webSessionIntentOwnerKey, type WebSessionIntentOwner } from './web-session-intent-owner'
-
-const pendingReorderByOwnerAndWorktree = new Map<string, Map<string, ReorderIntent>>()
-
-function reorderIntentPartitionKey(owner: WebSessionIntentOwner, worktreeId: string): string {
-  return `${webSessionIntentOwnerKey(owner)}\0${worktreeId}`
-}
+const pendingReorderByWorktree = new Map<string, Map<string, ReorderIntent>>()
 
 function sameMembership(a: readonly string[], b: readonly string[]): boolean {
   if (a.length !== b.length) {
@@ -38,7 +32,6 @@ function sameOrder(a: readonly string[], b: readonly string[]): boolean {
 }
 
 export function recordWebSessionReorderIntent(
-  owner: WebSessionIntentOwner,
   worktreeId: string,
   groupId: string,
   order: readonly string[],
@@ -47,11 +40,10 @@ export function recordWebSessionReorderIntent(
   if (!worktreeId || !groupId || order.length === 0) {
     return
   }
-  const partitionKey = reorderIntentPartitionKey(owner, worktreeId)
-  let byGroup = pendingReorderByOwnerAndWorktree.get(partitionKey)
+  let byGroup = pendingReorderByWorktree.get(worktreeId)
   if (!byGroup) {
     byGroup = new Map()
-    pendingReorderByOwnerAndWorktree.set(partitionKey, byGroup)
+    pendingReorderByWorktree.set(worktreeId, byGroup)
   }
   byGroup.set(groupId, { order: [...order], recordedAt: now })
 }
@@ -64,14 +56,12 @@ export function recordWebSessionReorderIntent(
  * diverges (add/close changed the truth), or the TTL lapses.
  */
 export function resolveWebSessionReorderedOrder(
-  owner: WebSessionIntentOwner,
   worktreeId: string,
   groupId: string,
   hostOrder: string[],
   now: number
 ): string[] {
-  const partitionKey = reorderIntentPartitionKey(owner, worktreeId)
-  const byGroup = pendingReorderByOwnerAndWorktree.get(partitionKey)
+  const byGroup = pendingReorderByWorktree.get(worktreeId)
   const intent = byGroup?.get(groupId)
   if (!intent) {
     return hostOrder
@@ -79,7 +69,7 @@ export function resolveWebSessionReorderedOrder(
   const clear = (): void => {
     byGroup!.delete(groupId)
     if (byGroup!.size === 0) {
-      pendingReorderByOwnerAndWorktree.delete(partitionKey)
+      pendingReorderByWorktree.delete(worktreeId)
     }
   }
   if (now - intent.recordedAt > REORDER_INTENT_TTL_MS) {
@@ -100,35 +90,10 @@ export function resolveWebSessionReorderedOrder(
   return [...intent.order]
 }
 
-export function clearWebSessionReorderIntentsForWorktree(
-  owner: WebSessionIntentOwner,
-  worktreeId: string
-): void {
-  pendingReorderByOwnerAndWorktree.delete(reorderIntentPartitionKey(owner, worktreeId))
-}
-
-export function clearWebSessionReorderIntent(
-  owner: WebSessionIntentOwner,
-  worktreeId: string,
-  groupId: string
-): void {
-  const partitionKey = reorderIntentPartitionKey(owner, worktreeId)
-  const byGroup = pendingReorderByOwnerAndWorktree.get(partitionKey)
-  byGroup?.delete(groupId)
-  if (byGroup?.size === 0) {
-    pendingReorderByOwnerAndWorktree.delete(partitionKey)
-  }
-}
-
-export function clearWebSessionReorderIntentsForOwner(owner: WebSessionIntentOwner): void {
-  const prefix = `${webSessionIntentOwnerKey(owner)}\0`
-  for (const key of pendingReorderByOwnerAndWorktree.keys()) {
-    if (key.startsWith(prefix)) {
-      pendingReorderByOwnerAndWorktree.delete(key)
-    }
-  }
+export function clearWebSessionReorderIntentsForWorktree(worktreeId: string): void {
+  pendingReorderByWorktree.delete(worktreeId)
 }
 
 export function resetWebSessionReorderIntentForTests(): void {
-  pendingReorderByOwnerAndWorktree.clear()
+  pendingReorderByWorktree.clear()
 }

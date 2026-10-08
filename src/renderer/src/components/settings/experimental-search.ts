@@ -95,50 +95,6 @@ export const getExperimentalPaneSearchEntries = createLocalizedCatalog(
         )
       ]
     },
-    {
-      title: translate(
-        'auto.components.settings.experimental.search.agentDashboard.title',
-        'Agent Dashboard'
-      ),
-      description: translate(
-        'auto.components.settings.experimental.search.agentDashboard.description',
-        'Kanban board for monitoring agents across worktrees, in-window or as a pop-out.'
-      ),
-      keywords: [
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.0d24759f14',
-          'experimental'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.agent',
-          'agent'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.dashboard',
-          'dashboard'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.kanban',
-          'kanban'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.popout',
-          'pop-out'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.board',
-          'board'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.inWindow',
-          'in-window'
-        ),
-        ...translateSearchKeyword(
-          'auto.components.settings.experimental.search.agentDashboard.worktrees',
-          'worktrees'
-        )
-      ]
-    },
     getNativeChatExperimentalSearchEntry(),
     {
       title: translate(
@@ -229,6 +185,55 @@ export const getExperimentalPaneSearchEntries = createLocalizedCatalog(
       ]
     },
     getNewWorktreeCardStyleSearchEntry(),
+    {
+      title: translate(
+        'auto.components.settings.experimental.search.78c2a8dc74',
+        'Shared paths on worktrees'
+      ),
+      description: translate(
+        'auto.components.settings.experimental.search.603d29ed74',
+        'Automatically materialize configured files or folders into newly created worktrees using APFS clone-copy on macOS when possible, otherwise symlinks.'
+      ),
+      keywords: [
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.0d24759f14',
+          'experimental'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.d23ae13990',
+          'worktree'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.10b52f79c1',
+          'worktrees'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.c387565812',
+          'symlink'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.bff1ff7768',
+          'symlinks'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.3028f0bd3a',
+          'link'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.f082788cfe',
+          'links'
+        ),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.3021571c30',
+          'shared'
+        ),
+        ...translateSearchKeyword('auto.components.settings.experimental.search.4ad605f222', 'env'),
+        ...translateSearchKeyword(
+          'auto.components.settings.experimental.search.44c7f209d5',
+          'node_modules'
+        )
+      ]
+    },
     getEphemeralVmsSearchEntry()
   ]
 )
@@ -250,14 +255,8 @@ export function getExperimentalSearchEntry() {
     agentsView: findEntry(
       translate('auto.components.settings.experimental.search.ccc5548ac5', 'Agents View')
     ),
-    agentDashboard: findEntry(
-      translate(
-        'auto.components.settings.experimental.search.agentDashboard.title',
-        'Agent Dashboard'
-      )
-    ),
     nativeChat: findEntry(
-      translate('auto.components.settings.experimental.search.nativeChat.title', 'Chat UI')
+      translate('auto.components.settings.experimental.search.nativeChat.title', 'Native chat')
     ),
     terminalAttention: findEntry(
       translate('auto.components.settings.experimental.search.9e4ddf776d', 'Terminal attention')
@@ -272,6 +271,12 @@ export function getExperimentalSearchEntry() {
       translate(
         'auto.components.settings.experimental.search.newWorktreeCardStyle.title',
         'New card style'
+      )
+    ),
+    symlinksOnWorktrees: findEntry(
+      translate(
+        'auto.components.settings.experimental.search.78c2a8dc74',
+        'Shared paths on worktrees'
       )
     ),
     ephemeralVms: findEntry(

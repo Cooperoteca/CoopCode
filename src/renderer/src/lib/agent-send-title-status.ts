@@ -1,5 +1,4 @@
-import type { AgentStatus } from './agent-status'
-import { classifyTitleActivity, resolveTitleActivityLabel } from '@/lib/pane-agent-evidence'
+import { type AgentStatus, detectAgentStatusFromTitle, getAgentLabel } from './agent-status'
 
 const EXPLICIT_IDLE_SEND_TITLE_RE = /(^|\s)(ready|idle|done)(\s|$|[.!?])/i
 const CLAUDE_IDLE_PREFIX = '\u2733'
@@ -7,11 +6,11 @@ const GEMINI_IDLE_PREFIX = '\u25c7'
 const PI_IDLE_PREFIX = '\u03c0 - '
 
 export function detectAgentSendTitleStatus(title: string | null | undefined): AgentStatus | null {
-  if (!title || resolveTitleActivityLabel(title) === null) {
+  if (!title || getAgentLabel(title) === null) {
     return null
   }
 
-  const status = classifyTitleActivity(title)
+  const status = detectAgentStatusFromTitle(title)
   if (status !== 'idle') {
     return status
   }

@@ -10,11 +10,6 @@ import {
   LinearAgentSkillSetupPrompt,
   _linearAgentSkillSetupPromptInternalsForTests
 } from './LinearAgentSkillSetupPrompt'
-import {
-  dismissLinearAgentSkillSetupReminderToast,
-  resetLinearAgentSkillSetupReminderToastForRuntime
-} from './linear-agent-skill-setup-reminder-toast'
-import { getExistingLinearAgentSkillSetupReminderState } from './linear-agent-skill-setup-reminders'
 
 const HOST_DISMISS_STORAGE_KEY = 'orca.linearTicketsSkill.setupDismissed.host'
 
@@ -143,10 +138,8 @@ async function snoozeInitialModal(
   props: ComponentProps<typeof LinearAgentSkillSetupPrompt>
 ): Promise<void> {
   await renderPrompt(props)
-  // Why: the modal's casual dismiss is the dialog × (session snooze) now that
-  // "Not now" is removed.
   await act(async () => {
-    findBodyButton('Close')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    findBodyButton('Not now')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
   })
   await unmountPrompt()
 }
@@ -154,11 +147,6 @@ async function snoozeInitialModal(
 type ReminderToastAction = {
   label?: string
   onClick?: () => void
-}
-
-type ReminderToastCallbacks = {
-  onAutoClose?: () => void
-  onDismiss?: () => void
 }
 
 describe('LinearAgentSkillSetupPrompt reminder toast', () => {
@@ -205,7 +193,7 @@ describe('LinearAgentSkillSetupPrompt reminder toast', () => {
     Reflect.deleteProperty(window, 'api')
   })
 
-  it('shows a warning toast on a later modal-only activation after a casual close', async () => {
+  it('shows a warning toast on a later modal-only activation after Not now', async () => {
     await snoozeInitialModal({ linked: true, remote: false, surface: 'modal' })
     await renderPrompt({ linked: true, remote: false, surface: 'modal' })
 
@@ -301,38 +289,6 @@ describe('LinearAgentSkillSetupPrompt reminder toast', () => {
     )
   })
 
-  it.each(['onAutoClose', 'onDismiss'] as const)(
-    'clears active reminder state after %s',
-    async (callbackName) => {
-      await snoozeInitialModal({ linked: true, remote: false, surface: 'modal' })
-      await renderPrompt({ linked: true, remote: false, surface: 'modal' })
-
-      const callbacks = vi.mocked(toast.warning).mock.calls.at(-1)?.[1] as
-        | ReminderToastCallbacks
-        | undefined
-      callbacks?.[callbackName]?.()
-
-      expect(
-        getExistingLinearAgentSkillSetupReminderState(HOST_DISMISS_STORAGE_KEY)?.activeToastId
-      ).toBeUndefined()
-    }
-  )
-
-  it('does not recreate missing reminder state during toast cleanup', () => {
-    dismissLinearAgentSkillSetupReminderToast(HOST_DISMISS_STORAGE_KEY)
-
-    expect(getExistingLinearAgentSkillSetupReminderState(HOST_DISMISS_STORAGE_KEY)).toBeUndefined()
-    expect(toast.dismiss).toHaveBeenCalledWith(
-      'linear-agent-skill-setup-orca.linearTicketsSkill.setupDismissed.host'
-    )
-  })
-
-  it('does not create missing reminder state when resetting a runtime', () => {
-    resetLinearAgentSkillSetupReminderToastForRuntime(HOST_DISMISS_STORAGE_KEY)
-
-    expect(getExistingLinearAgentSkillSetupReminderState(HOST_DISMISS_STORAGE_KEY)).toBeUndefined()
-  })
-
   it('dismisses an active reminder toast on permanent dismissal', async () => {
     await snoozeInitialModal({ linked: true, remote: false, surface: 'modal' })
     await renderPrompt({ linked: true, remote: false, surface: 'modal' })
@@ -345,15 +301,10 @@ describe('LinearAgentSkillSetupPrompt reminder toast', () => {
     })
     mocks.toastDismiss.mockClear()
     await act(async () => {
-      // Why: permanent dismiss is now an EyeOff icon button (aria-label, no text).
-      document.body
-        .querySelector<HTMLButtonElement>('button[aria-label="Don\'t show again"]')
-        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      findBodyButton("Don't show again")?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
     expect(window.localStorage.getItem(HOST_DISMISS_STORAGE_KEY)).toBe('1')
-    expect(toast.dismiss).toHaveBeenCalledWith(
-      'linear-agent-skill-setup-orca.linearTicketsSkill.setupDismissed.host'
-    )
+    expect(toast.dismiss).not.toHaveBeenCalled()
   })
 })

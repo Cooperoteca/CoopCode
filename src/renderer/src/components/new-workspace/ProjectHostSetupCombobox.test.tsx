@@ -62,8 +62,7 @@ const needsSetupOption: NeedsSetupProjectHostOption = {
   hostId: 'ssh:builder',
   label: 'Builder',
   detail: 'Project not set up on this host',
-  isAvailable: true,
-  attention: false
+  isAvailable: true
 }
 
 const unavailableOption: NeedsSetupProjectHostOption = {
@@ -73,8 +72,7 @@ const unavailableOption: NeedsSetupProjectHostOption = {
   hostId: 'runtime:old',
   label: 'Old server',
   detail: 'Update Orca on this host to set up projects',
-  isAvailable: false,
-  attention: false
+  isAvailable: false
 }
 
 beforeEach(() => {

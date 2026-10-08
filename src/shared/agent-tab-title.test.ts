@@ -16,12 +16,10 @@ describe('deriveGeneratedTabTitle', () => {
     ).toBe('Refactor the auth middleware to use JWT')
   })
 
-  it('strips markup, links, emoji, and punctuation without promoting incidental markers', () => {
+  it('strips markup, links, emoji, and punctuation from generated titles', () => {
     expect(
-      deriveGeneratedTabTitle(
-        'Please fix auth note #1 with `src/auth.ts`!!! https://example.com 🔥'
-      )
-    ).toBe('Fix auth note 1 with src auth')
+      deriveGeneratedTabTitle('Please fix `src/auth.ts`!!! https://example.com 🔥 then add tests')
+    ).toBe('Fix src auth')
   })
 
   it('preserves non-ASCII title text while folding Unicode whitespace', () => {
@@ -34,18 +32,6 @@ describe('deriveGeneratedTabTitle', () => {
     expect(deriveGeneratedTabTitle('Issue #2056: Opt-in generated tab titles for agents')).toBe(
       'Opt in generated tab titles for agents'
     )
-  })
-
-  it('strips a URL containing underscores intact', () => {
-    expect(
-      deriveGeneratedTabTitle('inspect https://gitlab.com/g/p/-/work_items/9 then report')
-    ).toBe('Inspect then report')
-  })
-
-  it('strips a URL wrapped in markdown emphasis without leaking fragments', () => {
-    const title = deriveGeneratedTabTitle('Review _https://github.com/o/r/pull/5_ now')
-    expect(title).toBe('Review now')
-    expect(title).not.toMatch(/https|pull/)
   })
 
   it('bounds titles to the maximum length without adding punctuation', () => {

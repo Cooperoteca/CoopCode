@@ -1,3 +1,6 @@
+/* oxlint-disable max-lines -- Why: TerminalPane tests share a large mocked
+   settings harness; splitting the new Windows-shell cases would duplicate
+   brittle React/store mocks without improving coverage. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockStateValues: unknown[] = []
@@ -362,7 +365,7 @@ describe('TerminalPane PowerShell version setting', () => {
     expect(collectText(element)).not.toContain('WSL')
   })
 
-  it('shows a persisted WSL default without PowerShell or distro sub-settings', () => {
+  it('does not show WSL distro choices for a persisted legacy WSL shell', () => {
     const element = TerminalPane({
       settings: {
         terminalScrollbackRows: 5_000,
@@ -383,9 +386,6 @@ describe('TerminalPane PowerShell version setting', () => {
     const text = collectText(element)
     expect(text).toContain('PowerShell')
     expect(text).toContain('Command Prompt')
-    expect(text).toContain('WSL')
-    expect(hasShellIconFor(element, 'wsl.exe')).toBe(true)
-    expect(text).not.toContain('PowerShell Version')
     expect(text).not.toContain('Choose which WSL distribution')
     expect(text).not.toContain('Windows default')
     expect(text).not.toContain('Ubuntu')

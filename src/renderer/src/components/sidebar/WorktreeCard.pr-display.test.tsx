@@ -265,12 +265,6 @@ describe('WorktreeCard linked PR display', () => {
         linkedReviewHintKey: 'github:456'
       }
     }
-    prCache = {
-      'repo-1::feature/local-branch': {
-        data: makePRInfo({ number: 456, title: 'Stale branch PR' }),
-        fetchedAt: Date.now()
-      }
-    }
     const { default: WorktreeCard } = await import('./WorktreeCard')
 
     const markup = renderWorktreeCardMarkup(
@@ -291,14 +285,7 @@ describe('WorktreeCard linked PR display', () => {
       'local::repo-1::feature/local-branch': {
         data: makeHostedReview({ number: 456, title: 'Branch PR', state: 'open' }),
         fetchedAt: Date.now(),
-        linkedReviewHintKey: 'github:456',
-        branchLookupGitHubPRNumber: 456
-      }
-    }
-    prCache = {
-      'repo-1::feature/local-branch': {
-        data: makePRInfo({ number: 456, title: 'Branch PR' }),
-        fetchedAt: Date.now()
+        linkedReviewHintKey: ''
       }
     }
     const { default: WorktreeCard } = await import('./WorktreeCard')

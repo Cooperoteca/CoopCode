@@ -18,8 +18,6 @@ import {
   getFreshMetadata,
   loadMetadata
 } from './metadata-request-cache'
-import { githubRepoIdentityKey } from '../../../shared/github-repository-identity-key'
-import { githubProjectHost } from '../../../shared/github-project-identity'
 
 type MetadataState<T> = {
   data: T
@@ -38,8 +36,7 @@ export function clearGitHubSlugMetadataCache(): void {
 export function useRepoLabelsBySlug(
   owner: string | null,
   repo: string | null,
-  settings?: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null,
-  host?: string
+  settings?: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null
 ): MetadataState<string[]> {
   const [state, setState] = useState<MetadataState<string[]>>({
     data: [],
@@ -47,25 +44,21 @@ export function useRepoLabelsBySlug(
     error: null
   })
   const activeKeyRef = useRef<string | null>(null)
-  // Why: parent selectors can pass a fresh settings object each render; keying
-  // the effect on the primitive env id keeps a failure's setState from re-running
-  // the effect and re-issuing the fetch in a render-paced loop (same class as
-  // the seedKey stabilization below).
-  const activeRuntimeEnvironmentId = settings?.activeRuntimeEnvironmentId ?? null
 
   useEffect(() => {
     if (!owner || !repo) {
       return
     }
-    const target = getActiveRuntimeTarget({ activeRuntimeEnvironmentId })
-    const repositoryKey = githubRepoIdentityKey({ owner, repo, host })
+    const target = getActiveRuntimeTarget(settings)
     const key =
       target.kind === 'environment'
-        ? `runtime:${target.environmentId}:${repositoryKey}`
-        : repositoryKey
+        ? `runtime:${target.environmentId}:${owner}/${repo}`
+        : `${owner}/${repo}`
 
     const cached = getFreshMetadata(slugLabelStore, key)
     if (cached) {
+      // Why: parent selectors can pass a fresh settings object each render;
+      // only the first cached hit for this key should write React state.
       if (activeKeyRef.current !== key) {
         setState({ data: cached.data, loading: false, error: null })
       }
@@ -89,10 +82,10 @@ export function useRepoLabelsBySlug(
         ? callRuntimeRpc<ListLabelsBySlugResult>(
             target,
             'github.project.listLabelsBySlug',
-            { owner, repo, host: githubProjectHost(host) },
+            { owner, repo },
             { timeoutMs: 30_000 }
           )
-        : window.api.gh.listLabelsBySlug({ owner, repo, host: githubProjectHost(host) })
+        : window.api.gh.listLabelsBySlug({ owner, repo })
       ).then((res) => {
         if (!res.ok) {
           throw new Error(res.error.message)
@@ -117,7 +110,7 @@ export function useRepoLabelsBySlug(
           error: err instanceof Error ? err.message : 'Failed to load labels'
         }))
       })
-  }, [owner, repo, host, activeRuntimeEnvironmentId])
+  }, [owner, repo, settings])
 
   return state
 }
@@ -126,8 +119,7 @@ export function useRepoAssigneesBySlug(
   owner: string | null,
   repo: string | null,
   seedLogins?: string[],
-  settings?: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null,
-  host?: string
+  settings?: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null
 ): MetadataState<GitHubAssignableUser[]> {
   const [state, setState] = useState<MetadataState<GitHubAssignableUser[]>>({
     data: [],
@@ -139,20 +131,16 @@ export function useRepoAssigneesBySlug(
   // the joined-string identity so the effect doesn't re-fire on every render
   // — this is the assignee popover refetch-storm fix.
   const seedKey = (seedLogins ?? []).slice().sort().join(',')
-  // Why: see useRepoLabelsBySlug — primitive env id keeps failure setState from
-  // re-arming the effect through a fresh settings object identity.
-  const activeRuntimeEnvironmentId = settings?.activeRuntimeEnvironmentId ?? null
 
   useEffect(() => {
     if (!owner || !repo) {
       return
     }
-    const target = getActiveRuntimeTarget({ activeRuntimeEnvironmentId })
-    const repositoryKey = githubRepoIdentityKey({ owner, repo, host })
+    const target = getActiveRuntimeTarget(settings)
     const key =
       target.kind === 'environment'
-        ? `runtime:${target.environmentId}:${repositoryKey}#${seedKey}`
-        : `${repositoryKey}#${seedKey}`
+        ? `runtime:${target.environmentId}:${owner}/${repo}#${seedKey}`
+        : `${owner}/${repo}#${seedKey}`
 
     const cached = getFreshMetadata(slugAssigneeStore, key)
     if (cached) {
@@ -179,7 +167,6 @@ export function useRepoAssigneesBySlug(
     const args = {
       owner,
       repo,
-      host: githubProjectHost(host),
       ...(seedKey ? { seedLogins: seedKey.split(',') } : {})
     }
     loadMetadata(slugAssigneeStore, key, () =>
@@ -215,7 +202,7 @@ export function useRepoAssigneesBySlug(
           error: err instanceof Error ? err.message : 'Failed to load assignees'
         }))
       })
-  }, [owner, repo, host, seedKey, activeRuntimeEnvironmentId])
+  }, [owner, repo, seedKey, settings])
 
   return state
 }

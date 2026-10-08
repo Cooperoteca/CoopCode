@@ -9,14 +9,7 @@ import type { WorkspacePort, WorkspacePortScanResult } from '../../../shared/wor
 export type OpenHttpLinkOptions = {
   worktreeId?: string | null
   forceSystemBrowser?: boolean
-  sourceOwner?: HttpLinkSourceOwner
 }
-
-export type HttpLinkSourceOwner =
-  | { kind: 'local' }
-  | { kind: 'runtime'; runtimeEnvironmentId: string }
-  | { kind: 'ssh'; connectionId: string }
-  | { kind: 'unknown' }
 
 type StoreAccessor = () => {
   settings?: Partial<
@@ -32,7 +25,6 @@ type StoreAccessor = () => {
   worktreesByRepo?: Record<string, LocalhostLinkWorktree[]>
   allWorktrees?: () => LocalhostLinkWorktree[]
   workspacePortScan?: { result: WorkspacePortScanResult } | null
-  workspacePortScansByKey?: Record<string, WorkspacePortScanResult>
 }
 
 type LocalhostLinkRepo = {
@@ -64,15 +56,11 @@ export function registerHttpLinkStoreAccessor(fn: StoreAccessor): void {
 // branch). Shift+Cmd/Ctrl is the escape hatch: callers pass forceSystemBrowser
 // to bypass the setting entirely.
 export function openHttpLink(url: string, opts: OpenHttpLinkOptions = {}): void {
-  const { worktreeId, forceSystemBrowser, sourceOwner } = opts
-  if (sourceOwner?.kind === 'unknown') {
-    return
-  }
+  const { worktreeId, forceSystemBrowser } = opts
   const state = storeAccessor?.()
   const remoteRuntimeActive = Boolean(state?.settings?.activeRuntimeEnvironmentId?.trim())
-  const sourceIsLocal = sourceOwner ? sourceOwner.kind === 'local' : !remoteRuntimeActive
   const routeToOrca =
-    sourceIsLocal &&
+    !remoteRuntimeActive &&
     !forceSystemBrowser &&
     Boolean(worktreeId) &&
     state?.settings?.openLinksInApp === true
@@ -87,7 +75,7 @@ export function openHttpLink(url: string, opts: OpenHttpLinkOptions = {}): void 
       // to the global activeWorktreeId deselects the real repo workspace.
       state.setActiveWorktree(worktreeId)
     }
-    const localhostRoute = localhostLabelRouteForHttpLink(url, state, sourceOwner)
+    const localhostRoute = localhostLabelRouteForTerminalLink(url, state)
     if (!localhostRoute) {
       state.createBrowserTab(worktreeId, url, { activate: true })
       return
@@ -98,7 +86,7 @@ export function openHttpLink(url: string, opts: OpenHttpLinkOptions = {}): void 
     return
   }
 
-  const localhostRoute = state ? localhostLabelRouteForHttpLink(url, state, sourceOwner) : null
+  const localhostRoute = state ? localhostLabelRouteForTerminalLink(url, state) : null
   if (!localhostRoute) {
     void window.api.shell.openUrl(url)
     return
@@ -106,24 +94,6 @@ export function openHttpLink(url: string, opts: OpenHttpLinkOptions = {}): void 
   void openLabeledLocalhostLink(url, localhostRoute, (labeledUrl) => {
     void window.api.shell.openUrl(labeledUrl)
   })
-}
-
-function localhostLabelRouteForHttpLink(
-  url: string,
-  state: ReturnType<StoreAccessor>,
-  sourceOwner?: HttpLinkSourceOwner
-): LocalhostWorktreeLabelRoute | null {
-  if (sourceOwner && sourceOwner.kind !== 'local') {
-    return null
-  }
-  if (!sourceOwner && state.settings?.activeRuntimeEnvironmentId?.trim()) {
-    return null
-  }
-  const sourceScan =
-    sourceOwner?.kind === 'local'
-      ? (state.workspacePortScansByKey?.['local:all'] ?? null)
-      : undefined
-  return localhostLabelRouteForTerminalLink(url, state, sourceOwner?.kind === 'local', sourceScan)
 }
 
 export async function resolveLocalhostHttpLinkDisplayUrl(url: string): Promise<string | null> {
@@ -158,13 +128,11 @@ async function openLabeledLocalhostLink(
 
 function localhostLabelRouteForTerminalLink(
   rawUrl: string,
-  state: ReturnType<StoreAccessor>,
-  ignoreActiveRuntime = false,
-  sourceScan?: WorkspacePortScanResult | null
+  state: ReturnType<StoreAccessor>
 ): LocalhostWorktreeLabelRoute | null {
   if (
     state.settings?.localhostWorktreeLabelsEnabled !== true ||
-    (!ignoreActiveRuntime && state.settings?.activeRuntimeEnvironmentId?.trim())
+    state.settings?.activeRuntimeEnvironmentId?.trim()
   ) {
     return null
   }
@@ -174,8 +142,7 @@ function localhostLabelRouteForTerminalLink(
   if (!parsed) {
     return null
   }
-  const scan = sourceScan === undefined ? state.workspacePortScan?.result : sourceScan
-  const port = findWorkspacePortByNumber(scan, Number(parsed.port))
+  const port = findWorkspacePortByNumber(state.workspacePortScan?.result, Number(parsed.port))
   if (!port) {
     return null
   }

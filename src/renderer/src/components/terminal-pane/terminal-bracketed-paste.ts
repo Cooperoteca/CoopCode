@@ -66,15 +66,8 @@ export function sanitizeTerminalPasteText(text: string): string {
   return sanitizeBracketedPasteText(text)
 }
 
-export function normalizeTerminalPasteLineEndings(text: string): string {
-  // Why: xterm's native paste path converts every clipboard newline to CR.
-  // Direct frames must match it or ConPTY TUIs can treat raw LF as submit.
-  return text.replace(/\r?\n/g, '\r')
-}
-
 export function wrapTerminalBracketedPasteText(text: string): string {
-  const normalizedText = normalizeTerminalPasteLineEndings(text)
-  return `${BRACKETED_PASTE_START}${sanitizeBracketedPasteText(normalizedText)}${BRACKETED_PASTE_END}`
+  return `${BRACKETED_PASTE_START}${sanitizeBracketedPasteText(text)}${BRACKETED_PASTE_END}`
 }
 
 function forceBracketedPaste(terminal: PasteTerminal, text: string): void {

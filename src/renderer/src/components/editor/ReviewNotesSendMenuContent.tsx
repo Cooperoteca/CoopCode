@@ -20,11 +20,8 @@ import {
   deriveNotesSendAgentTargets,
   type NotesSendAgentTarget
 } from '@/lib/notes-send-agent-targets'
-import {
-  agentKindForAgentType,
-  formatAgentTypeLabel,
-  agentTypeToIconAgent
-} from '@/lib/agent-status'
+import { agentKindForAgentType, formatAgentTypeLabel } from '@/lib/agent-status'
+import { agentTypeToIconAgent } from '@/lib/agent-status'
 import { track } from '@/lib/telemetry'
 import { useNow } from '@/components/dashboard/useNow'
 import type { DashboardAgentRow as DashboardAgentRowData } from '@/components/dashboard/useDashboardData'

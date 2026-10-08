@@ -112,13 +112,6 @@ export function filterSetupScriptPromptDismissalsToValidRepos(
   value: unknown,
   validRepoIds: Set<string>
 ): string[] {
-  return sanitizeSetupScriptPromptDismissals(value).filter((entry) => {
-    const repoId = entry.slice(SETUP_SCRIPT_PROMPT_DISMISSAL_PREFIX.length)
-    return validRepoIds.has(repoId)
-  })
-}
-
-export function sanitizeSetupScriptPromptDismissals(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return []
   }
@@ -128,7 +121,8 @@ export function sanitizeSetupScriptPromptDismissals(value: unknown): string[] {
     if (typeof entry !== 'string' || !entry.startsWith(SETUP_SCRIPT_PROMPT_DISMISSAL_PREFIX)) {
       continue
     }
-    if (!next.includes(entry)) {
+    const repoId = entry.slice(SETUP_SCRIPT_PROMPT_DISMISSAL_PREFIX.length)
+    if (validRepoIds.has(repoId) && !next.includes(entry)) {
       next.push(entry)
     }
   }

@@ -9,8 +9,6 @@ export type SshResolvedConfig = {
   identityAgent?: string
   identitiesOnly: boolean
   forwardAgent: boolean
-  /** Effective GSSAPIAuthentication, including distro-wide /etc/ssh defaults. */
-  gssapiAuthentication?: boolean
   proxyCommand?: string
   proxyUseFdpass: boolean
   proxyJump?: string
@@ -103,12 +101,11 @@ function buildSshResolvedConfig(
   return {
     hostname: map.get('hostname') ?? '',
     user: map.get('user') || undefined,
-    port: Number.parseInt(map.get('port') ?? '22', 10),
+    port: parseInt(map.get('port') ?? '22', 10),
     identityFile: identityFiles,
     identityAgent,
     identitiesOnly: map.get('identitiesonly') === 'yes',
     forwardAgent: map.get('forwardagent') === 'yes',
-    gssapiAuthentication: map.get('gssapiauthentication') === 'yes',
     proxyCommand,
     proxyUseFdpass: map.get('proxyusefdpass') === 'yes',
     proxyJump,

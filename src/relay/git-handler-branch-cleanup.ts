@@ -3,7 +3,6 @@ import {
   getBranchCleanupTargetRefs,
   refreshBranchCleanupTargetRefs
 } from '../shared/git-branch-cleanup'
-import type { GitCapabilityCache } from '../shared/git-capability-cache'
 import type { GitExec } from './git-handler-ops'
 import { parseWorktreeList } from './git-handler-utils'
 
@@ -11,8 +10,7 @@ export async function deleteAlreadyMergedRelayBranchAfterSafeDeleteFailure(
   git: GitExec,
   repoPath: string,
   branchName: string,
-  branchHead: string,
-  capabilities: GitCapabilityCache
+  branchHead: string
 ): Promise<boolean> {
   const runGit = (args: string[], options?: { stdin?: string }) =>
     options ? git(args, repoPath, options) : git(args, repoPath)
@@ -21,9 +19,7 @@ export async function deleteAlreadyMergedRelayBranchAfterSafeDeleteFailure(
   // Why: SSH worktrees hit the same squash-merge shape as local worktrees.
   // Git's no-op merge proof lets us clean up only branches whose changes
   // already exist on the saved base ref.
-  if (
-    !(await branchHasNoUnmergedChangesOnAnyTarget(runGit, branchName, targetRefs, capabilities))
-  ) {
+  if (!(await branchHasNoUnmergedChangesOnAnyTarget(runGit, branchName, targetRefs))) {
     return false
   }
   await deleteRelayBranchAtExpectedHead(git, repoPath, branchName, branchHead)

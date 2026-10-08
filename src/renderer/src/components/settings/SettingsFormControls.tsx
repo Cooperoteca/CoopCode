@@ -6,15 +6,12 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ScrollArea } from '../ui/scroll-area'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
-import { Popover, PopoverAnchor, PopoverContent } from '../ui/popover'
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { Check, ChevronsUpDown, CircleX } from 'lucide-react'
 import { normalizeColor, type TerminalThemeOption } from '@/lib/terminal-theme'
 import { MAX_THEME_RESULTS } from './SettingsConstants'
 import {
   filterFontSuggestions,
   filterTerminalThemeOptions,
-  getRenderedFontSuggestions,
   isSettingsFormOptionQueryTooLarge
 } from './settings-form-option-filter'
 import { cn } from '@/lib/utils'
@@ -63,7 +60,6 @@ type SettingsRowProps = {
   label: React.ReactNode
   description?: React.ReactNode
   control: React.ReactNode
-  className?: string
   /** Optional id applied to the label so the control can reference it via aria-labelledby. */
   labelId?: string
   /** When true, top-align label/description and control. Useful for tall control columns. */
@@ -75,7 +71,6 @@ export function SettingsRow({
   label,
   description,
   control,
-  className,
   labelId,
   alignTop
 }: SettingsRowProps): React.JSX.Element {
@@ -84,8 +79,7 @@ export function SettingsRow({
       className={cn(
         'flex gap-4',
         description ? 'py-3' : 'py-2',
-        alignTop ? 'items-start' : 'items-center justify-between',
-        className
+        alignTop ? 'items-start' : 'items-center justify-between'
       )}
     >
       <div className={cn('min-w-0 flex-1', description ? 'space-y-1' : 'space-y-0.5')}>
@@ -106,7 +100,6 @@ type SettingsSwitchRowProps = {
   description?: React.ReactNode
   checked: boolean
   onChange: () => void
-  className?: string
   ariaLabel?: string
 }
 
@@ -115,14 +108,12 @@ export function SettingsSwitchRow({
   description,
   checked,
   onChange,
-  className,
   ariaLabel
 }: SettingsSwitchRowProps): React.JSX.Element {
   return (
     <SettingsRow
       label={label}
       description={description}
-      className={className}
       control={
         <SettingsSwitch
           checked={checked}
@@ -139,8 +130,6 @@ type SegmentedOption<T extends string | number> = {
   label: React.ReactNode
   disabled?: boolean
   ariaLabel?: string
-  /** Optional hover label describing what the option does. */
-  tooltip?: React.ReactNode
 }
 
 type SettingsSegmentedControlProps<T extends string | number> = {
@@ -172,7 +161,7 @@ export function SettingsSegmentedControl<T extends string | number>({
     >
       {options.map((opt) => {
         const active = opt.value === value
-        const button = (
+        return (
           <button
             key={String(opt.value)}
             type="button"
@@ -198,15 +187,6 @@ export function SettingsSegmentedControl<T extends string | number>({
           >
             {opt.label}
           </button>
-        )
-        if (opt.tooltip == null) {
-          return button
-        }
-        return (
-          <Tooltip key={String(opt.value)}>
-            <TooltipTrigger asChild>{button}</TooltipTrigger>
-            <TooltipContent>{opt.tooltip}</TooltipContent>
-          </Tooltip>
         )
       })}
     </div>
@@ -305,7 +285,6 @@ type FontAutocompleteProps = {
   suggestions: string[]
   onChange: (value: string) => void
   placeholder?: string
-  onRequestSuggestions?: () => void
   /** Fires with whichever option the user is currently highlighting in the
    *  dropdown (via mouse hover or keyboard arrow), or null when nothing is
    *  highlighted / the dropdown is closed. Lets a consumer show a live
@@ -608,7 +587,6 @@ export function FontAutocomplete({
   suggestions,
   onChange,
   placeholder = 'SF Mono',
-  onRequestSuggestions,
   onPreviewFontFamily
 }: FontAutocompleteProps): React.JSX.Element {
   const [query, setQuery] = useState(value)
@@ -640,19 +618,21 @@ export function FontAutocomplete({
     }
   }
 
-  const requestSuggestions = useCallback((): void => {
-    onRequestSuggestions?.()
-  }, [onRequestSuggestions])
+  useEffect(() => {
+    if (!open) {
+      return
+    }
 
-  const handleOpenChange = (nextOpen: boolean): void => {
-    setOpen(nextOpen)
-    if (nextOpen) {
-      requestSuggestions()
+    const handlePointerDown = (event: MouseEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false)
+        setIsFilteringQuery(false)
+      }
     }
-    if (!nextOpen) {
-      setIsFilteringQuery(false)
-    }
-  }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [open])
 
   const normalizedQuery = query.trim().toLowerCase()
   const normalizedValue = value.trim().toLowerCase()
@@ -664,10 +644,6 @@ export function FontAutocomplete({
   // still reveal every installed font instead of only fonts sharing that name.
   const visibleSuggestions =
     !isFilteringQuery && normalizedQuery === normalizedValue ? suggestions : filteredSuggestions
-  const renderedSuggestions = useMemo(
-    () => getRenderedFontSuggestions(visibleSuggestions, highlightedIndex),
-    [visibleSuggestions, highlightedIndex]
-  )
 
   // Why: sync the highlighted index during render rather than via useEffect so
   // the correct item is highlighted on the very first paint after open/filter
@@ -686,7 +662,7 @@ export function FontAutocomplete({
     if (!open || visibleSuggestions.length === 0) {
       setHighlightedIndex(-1)
     } else {
-      const selectedIndex = visibleSuggestions.indexOf(value)
+      const selectedIndex = visibleSuggestions.findIndex((font) => font === value)
       setHighlightedIndex(Math.max(selectedIndex, 0))
     }
   }
@@ -715,180 +691,143 @@ export function FontAutocomplete({
   const focusInput = (): void => {
     inputRef.current?.focus()
   }
-  const popoverAvailableHeightStyle = {
-    // Why: tailwind-merge rewrites this arbitrary max-height class on the
-    // ScrollArea root, so keep the Radix available-height clamp as inline style.
-    maxHeight: 'var(--radix-popover-content-available-height)'
-  } as React.CSSProperties
 
   return (
     <div ref={setRootNode} className="relative max-w-sm">
-      <Popover open={open} onOpenChange={handleOpenChange}>
-        <PopoverAnchor asChild>
-          <div className="relative">
-            <Input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => {
-                const next = e.target.value
-                requestSuggestions()
-                setQuery(next)
-                setIsFilteringQuery(true)
-                onChange(next)
-                setOpen(true)
-              }}
-              onFocus={() => {
-                requestSuggestions()
+      <div className="relative">
+        <Input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => {
+            const next = e.target.value
+            setQuery(next)
+            setIsFilteringQuery(true)
+            onChange(next)
+            setOpen(true)
+          }}
+          onFocus={() => {
+            setIsFilteringQuery(false)
+            setOpen(true)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              if (open) {
+                e.preventDefault()
+                setOpen(false)
                 setIsFilteringQuery(false)
-                setOpen(true)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  if (open) {
-                    e.preventDefault()
-                    setOpen(false)
-                    setIsFilteringQuery(false)
-                  }
-                  return
-                }
-
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault()
-                  setOpen(true)
-                  if (visibleSuggestions.length > 0) {
-                    setHighlightedIndex((current) =>
-                      current < 0 ? 0 : Math.min(current + 1, visibleSuggestions.length - 1)
-                    )
-                  }
-                  return
-                }
-
-                if (e.key === 'ArrowUp') {
-                  e.preventDefault()
-                  setOpen(true)
-                  if (visibleSuggestions.length > 0) {
-                    setHighlightedIndex((current) =>
-                      current < 0 ? visibleSuggestions.length - 1 : Math.max(current - 1, 0)
-                    )
-                  }
-                  return
-                }
-
-                if (e.key === 'Enter' && open && highlightedIndex >= 0) {
-                  const highlightedFont = visibleSuggestions[highlightedIndex]
-                  if (highlightedFont) {
-                    e.preventDefault()
-                    commitValue(highlightedFont)
-                  }
-                }
-              }}
-              placeholder={placeholder}
-              className="pr-18"
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded={open}
-              aria-controls={listboxId}
-              aria-activedescendant={
-                open && highlightedIndex >= 0
-                  ? `${listboxId}-option-${highlightedIndex}`
-                  : undefined
               }
-            />
-            <div className="absolute inset-y-0 right-2 flex items-center gap-1">
-              {query ? (
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    setQuery('')
-                    setIsFilteringQuery(false)
-                    onChange('')
-                    setOpen(true)
-                    focusInput()
-                  }}
-                  className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  aria-label={translate(
-                    'auto.components.settings.SettingsFormControls.a4ff6143f8',
-                    'Clear font selection'
-                  )}
-                  title={translate(
-                    'auto.components.settings.SettingsFormControls.74bcecd5ec',
-                    'Clear'
-                  )}
-                >
-                  <CircleX className="size-3.5" />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  const nextOpen = !open
-                  setOpen(nextOpen)
-                  if (!nextOpen) {
-                    setIsFilteringQuery(false)
-                  }
-                  if (nextOpen) {
-                    requestSuggestions()
-                    focusInput()
-                  }
-                }}
-                className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                aria-label={translate(
-                  'auto.components.settings.SettingsFormControls.c766f8ac75',
-                  'Toggle font suggestions'
-                )}
-                title={translate(
-                  'auto.components.settings.SettingsFormControls.b55371ea18',
-                  'Fonts'
-                )}
-              >
-                <ChevronsUpDown className="size-3.5" />
-              </button>
-            </div>
-          </div>
-        </PopoverAnchor>
+              return
+            }
 
-        {/* Why: portal the dropdown outside the settings section — an in-flow
-          absolute panel makes the highlighted option's scrollIntoView scroll
-          the whole settings pane, pushing the section content out of view. */}
-        <PopoverContent
-          align="start"
-          className="w-[var(--radix-popover-trigger-width)]"
-          onOpenAutoFocus={(e) => e.preventDefault()}
-          onCloseAutoFocus={(e) => e.preventDefault()}
-          onInteractOutside={(e) => {
-            // Why: the input and its clear/toggle buttons are the anchor, not
-            // the content, so Radix would otherwise dismiss on every click there.
-            if (rootRef.current?.contains(e.target as Node)) {
+            if (e.key === 'ArrowDown') {
               e.preventDefault()
+              setOpen(true)
+              if (visibleSuggestions.length > 0) {
+                setHighlightedIndex((current) =>
+                  current < 0 ? 0 : Math.min(current + 1, visibleSuggestions.length - 1)
+                )
+              }
+              return
+            }
+
+            if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              setOpen(true)
+              if (visibleSuggestions.length > 0) {
+                setHighlightedIndex((current) =>
+                  current < 0 ? visibleSuggestions.length - 1 : Math.max(current - 1, 0)
+                )
+              }
+              return
+            }
+
+            if (e.key === 'Enter' && open && highlightedIndex >= 0) {
+              const highlightedFont = visibleSuggestions[highlightedIndex]
+              if (highlightedFont) {
+                e.preventDefault()
+                commitValue(highlightedFont)
+              }
             }
           }}
-        >
-          <ScrollArea
-            className={renderedSuggestions.length > 8 ? 'h-64' : undefined}
-            style={popoverAvailableHeightStyle}
-            viewportProps={{ style: popoverAvailableHeightStyle }}
+          placeholder={placeholder}
+          className="pr-18"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          aria-activedescendant={
+            open && highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined
+          }
+        />
+        <div className="absolute inset-y-0 right-2 flex items-center gap-1">
+          {query ? (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setQuery('')
+                setIsFilteringQuery(false)
+                onChange('')
+                setOpen(true)
+                focusInput()
+              }}
+              className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label={translate(
+                'auto.components.settings.SettingsFormControls.a4ff6143f8',
+                'Clear font selection'
+              )}
+              title={translate('auto.components.settings.SettingsFormControls.74bcecd5ec', 'Clear')}
+            >
+              <CircleX className="size-3.5" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              const nextOpen = !open
+              setOpen(nextOpen)
+              if (!nextOpen) {
+                setIsFilteringQuery(false)
+              }
+              if (nextOpen) {
+                focusInput()
+              }
+            }}
+            className="rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={translate(
+              'auto.components.settings.SettingsFormControls.c766f8ac75',
+              'Toggle font suggestions'
+            )}
+            title={translate('auto.components.settings.SettingsFormControls.b55371ea18', 'Fonts')}
           >
+            <ChevronsUpDown className="size-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {open ? (
+        <div className="absolute top-full z-20 mt-2 w-full overflow-hidden rounded-md border border-border/50 bg-popover shadow-md">
+          <ScrollArea className={visibleSuggestions.length > 8 ? 'h-64' : undefined}>
             <div id={listboxId} role="listbox" className="p-1">
               {visibleSuggestions.length > 0 ? (
-                renderedSuggestions.map(({ font, sourceIndex }) => (
+                visibleSuggestions.map((font, index) => (
                   <button
                     key={font}
                     type="button"
-                    id={`${listboxId}-option-${sourceIndex}`}
+                    id={`${listboxId}-option-${index}`}
                     role="option"
-                    aria-selected={sourceIndex === highlightedIndex}
+                    aria-selected={index === highlightedIndex}
                     ref={(element) => {
-                      if (element && sourceIndex === highlightedIndex) {
+                      if (element && index === highlightedIndex) {
                         element.scrollIntoView({ block: 'nearest' })
                       }
                     }}
                     onMouseDown={(e) => e.preventDefault()}
-                    onMouseEnter={() => setHighlightedIndex(sourceIndex)}
+                    onMouseEnter={() => setHighlightedIndex(index)}
                     onClick={() => commitValue(font)}
                     className={`flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm transition-colors ${
-                      sourceIndex === highlightedIndex
+                      index === highlightedIndex
                         ? 'bg-accent text-accent-foreground'
                         : 'hover:bg-muted/60'
                     }`}
@@ -907,8 +846,8 @@ export function FontAutocomplete({
               )}
             </div>
           </ScrollArea>
-        </PopoverContent>
-      </Popover>
+        </div>
+      ) : null}
     </div>
   )
 }

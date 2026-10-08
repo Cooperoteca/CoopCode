@@ -44,7 +44,6 @@ export function useFileSearchPanel(explorerView: 'files' | 'search'): FileSearch
   const fileSearchIncludePattern = searchState?.includePattern ?? ''
   const fileSearchExcludePattern = searchState?.excludePattern ?? ''
   const fileSearchResults = searchState?.results ?? null
-  const fileSearchResultOwner = searchState?.resultOwner ?? null
   const fileSearchLoading = searchState?.loading ?? false
   const fileSearchCollapsedFiles = searchState?.collapsedFiles ?? EMPTY_COLLAPSED_FILES
   const fileSearchSeedRequestId = searchState?.seedRequestId
@@ -128,22 +127,18 @@ export function useFileSearchPanel(explorerView: 'files' | 'search'): FileSearch
   useEffect(() => {
     if (!worktreePath) {
       cancelPendingSearch()
-      updateActiveSearchState({ results: null, resultOwner: null })
+      updateActiveSearchState({ results: null })
     }
   }, [worktreePath, cancelPendingSearch, updateActiveSearchState])
 
-  const committedSearchResults = useMemo(
-    () => ({ results: fileSearchResults, owner: fileSearchResultOwner }),
-    [fileSearchResultOwner, fileSearchResults]
-  )
-  const deferredSearchResults = useDeferredValue(committedSearchResults)
+  const deferredSearchResults = useDeferredValue(fileSearchResults)
   const searchRows = useMemo(
     () =>
       buildSearchRows(
-        fileSearchQuery.trim() && worktreePath ? deferredSearchResults.results : null,
+        fileSearchQuery.trim() && worktreePath ? deferredSearchResults : null,
         fileSearchCollapsedFiles
       ),
-    [deferredSearchResults.results, fileSearchCollapsedFiles, fileSearchQuery, worktreePath]
+    [deferredSearchResults, fileSearchCollapsedFiles, fileSearchQuery, worktreePath]
   )
 
   useEffect(() => {
@@ -223,8 +218,11 @@ export function useFileSearchPanel(explorerView: 'files' | 'search'): FileSearch
 
   const handleMatchClick = useCallback(
     (fileResult: SearchFileResult, match: SearchMatch) => {
+      if (!activeWorktreeId) {
+        return
+      }
       openMatchResult({
-        resultOwner: deferredSearchResults.owner,
+        activeWorktreeId,
         fileResult,
         match,
         openFile,
@@ -233,7 +231,7 @@ export function useFileSearchPanel(explorerView: 'files' | 'search'): FileSearch
         revealInnerRafRef
       })
     },
-    [deferredSearchResults.owner, openFile, setPendingEditorReveal]
+    [activeWorktreeId, openFile, setPendingEditorReveal]
   )
 
   return {
@@ -276,7 +274,7 @@ export function useFileSearchPanel(explorerView: 'files' | 'search'): FileSearch
       }
     },
     resultsProps: {
-      results: deferredSearchResults.results,
+      results: deferredSearchResults,
       hasCommittedResults: fileSearchResults !== null,
       query: fileSearchQuery,
       loading: fileSearchLoading,

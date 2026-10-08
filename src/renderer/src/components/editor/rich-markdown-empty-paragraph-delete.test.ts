@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
-import { createIsolatedMarkdownExtensionForTests } from './isolated-markdown-extension-for-tests'
+import { Markdown } from '@tiptap/markdown'
 import { deleteAdjacentEmptyParagraph } from './rich-markdown-empty-paragraph-delete'
 
-const extensions = [StarterKit, createIsolatedMarkdownExtensionForTests()]
+const extensions = [StarterKit, Markdown.configure({ markedOptions: { gfm: true } })]
 
 const hardWrappedMarkdown =
   'Alpha owns launch-lifetime state keyed by tab id, while native\n' +

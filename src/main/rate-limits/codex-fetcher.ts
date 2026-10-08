@@ -1,4 +1,6 @@
-/* eslint-disable max-lines -- Why: keep Codex RPC and PTY fallback paths together to audit protocol/parsing differences and shared account-scoped env handling. */
+/* eslint-disable max-lines -- Why: keeping both Codex RPC and PTY fallback
+paths together in one file makes it easier to audit the protocol/parsing
+differences and ensure account-scoped env handling stays identical. */
 import type {
   CodexRateLimitResetOutcome,
   ProviderRateLimits,
@@ -7,17 +9,8 @@ import type {
 import { spawn } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { cancelUnreadResponseBody } from '../lib/unread-response-body'
 import { join } from 'node:path'
-import { probeCodexAuthPresence } from './codex-auth-presence'
-import { extractClaudePtyResetMetadata } from './claude-pty-reset-parser'
-import {
-  classifyCodexRateLimitWindows,
-  CODEX_SESSION_WINDOW_MINUTES,
-  CODEX_WEEKLY_WINDOW_MINUTES,
-  type CodexRpcRateLimits,
-  type CodexRpcRateWindow
-} from './codex-rate-limit-window-classification'
+import { codexAuthExists } from './codex-auth-presence'
 import { resolveCodexCommand } from '../codex-cli/command'
 import { withMacTailscaleDnsHint } from '../network/macos-tailscale-dns-diagnostic'
 import { getCmdExePath, getSpawnArgsForWindows } from '../win32-utils'
@@ -25,33 +18,13 @@ import { cleanupHiddenRateLimitPty, registerHiddenRateLimitPty } from './hidden-
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import { extractCodexAuthError, isCodexAuthError } from '../../shared/codex-auth-errors'
 import {
-  buildWslLoginShellCommand,
-  escapeWslShCommandForWindows
-} from '../../shared/wsl-login-shell-command'
-import {
   getHiddenRateLimitWslCwdSetupCommands,
   resolveHiddenRateLimitPtyCwd
 } from './hidden-rate-limit-pty-cwd'
-import {
-  createAuthFilesystemOperation,
-  type SharedAuthFilesystemOperation
-} from './auth-filesystem-operation'
 
 const RPC_TIMEOUT_MS = 10_000
 const WSL_RPC_TIMEOUT_MS = 25_000
 const PTY_TIMEOUT_MS = 15_000
-// Why: codex ≥0.145 renders a '›' composer with placeholder text after it, so a
-// prompt-anchored send can never fire; nudge /status after a short boot grace.
-const PTY_STATUS_NUDGE_MS = 2_500
-// Why: '/status\r' in one write coalesces into a paste-like chunk and the TUI
-// inserts the newline instead of submitting; Enter must be its own keypress.
-const PTY_STATUS_ENTER_DELAY_MS = 350
-// Why: slow hosts (WSL/SSH) can drop the first Enter while the TUI is still
-// booting; one spare Enter is a no-op on an empty, ready composer.
-const PTY_STATUS_ENTER_RETRY_MS = 3_000
-const BACKEND_TIMEOUT_MS = 10_000
-// Why: redeeming a reset credit is an explicit user action, not a poll — allow more time for a slow backend.
-const REDEEM_BACKEND_TIMEOUT_MS = 30_000
 const MAX_DIAGNOSTIC_OUTPUT_LENGTH = 100_000
 
 export type FetchCodexRateLimitsOptions = {
@@ -70,6 +43,12 @@ type RpcResponse = {
   error?: { code: number; message: string }
 }
 
+type RpcRateWindow = {
+  usedPercent?: number
+  windowDurationMins?: number
+  resetsAt?: number // Unix seconds
+}
+
 type RateLimitResetCredits = {
   availableCount: number
   totalEarnedCount?: number
@@ -81,9 +60,15 @@ type RateLimitResetCredits = {
   }[]
 }
 
-// Why: the Codex app-server wraps rate limit data as { rateLimits: { primary, secondary, ... } }.
+type RpcRateLimitsResult = {
+  primary?: RpcRateWindow
+  secondary?: RpcRateWindow
+}
+
+// Why: the Codex app-server wraps rate limit data inside a `rateLimits` key.
+// The actual response shape is `{ rateLimits: { primary, secondary, ... } }`.
 type RpcRateLimitsResponse = {
-  rateLimits?: CodexRpcRateLimits | null
+  rateLimits?: RpcRateLimitsResult
   rateLimitResetCredits?: {
     availableCount?: number
     totalEarnedCount?: number
@@ -113,21 +98,6 @@ type BackendRateLimitResetCreditsResponse = {
   }[]
 }
 
-type BackendRateLimitWindow = {
-  used_percent?: number
-  limit_window_seconds?: number
-  reset_at?: number
-}
-
-type BackendUsageResponse = {
-  plan_type?: string
-  rate_limit?: {
-    primary_window?: BackendRateLimitWindow | null
-    secondary_window?: BackendRateLimitWindow | null
-  } | null
-  rate_limit_reset_credits?: BackendRateLimitResetCreditsResponse | null
-}
-
 type BackendConsumeRateLimitResetCreditResponse = {
   code?: string
 }
@@ -136,23 +106,13 @@ type CodexBackendAuthHeaders = {
   headers: Record<string, string>
 }
 
-type BackendAuthReadResult =
-  | { content: string; error?: never }
-  | { content?: never; error: unknown }
-
-const backendAuthReadByPath = new Map<
-  string,
-  SharedAuthFilesystemOperation<BackendAuthReadResult>
->()
-
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`
 }
 
 function buildWslCodexCommand(
   codexHomePath: string,
-  args: string[],
-  options?: { isolateRpcStdio?: boolean }
+  args: string[]
 ): {
   command: string
   args: string[]
@@ -161,24 +121,14 @@ function buildWslCodexCommand(
   if (process.platform !== 'win32' || !wslInfo) {
     return null
   }
-  const setupCommands = [
+  const script = [
     ...getHiddenRateLimitWslCwdSetupCommands(),
-    `export CODEX_HOME=${shellQuote(wslInfo.linuxPath)}`
+    `export CODEX_HOME=${shellQuote(wslInfo.linuxPath)}`,
+    `exec codex ${args.map(shellQuote).join(' ')}`
   ].join(' && ')
-  const execSuffix = `${args.map(shellQuote).join(' ')}${
-    options?.isolateRpcStdio ? ' <&3 >&4 3<&- 4>&-' : ''
-  }`
-  // Why: npm/nvm launchers use `#!/usr/bin/env node`; exec'ing them from plain sh loses Node's PATH and pins stale installs.
-  const loginShellCommand = buildWslLoginShellCommand(
-    [setupCommands, `exec codex ${execSuffix}`].join(' && ')
-  )
-  // Why: keep the outer sh non-login and hide RPC pipes before shell startup can read input or print banners.
-  const command = options?.isolateRpcStdio
-    ? ['exec 3<&0', 'exec 4>&1', 'exec </dev/null', 'exec >/dev/null', loginShellCommand].join('\n')
-    : loginShellCommand
   return {
     command: 'wsl.exe',
-    args: ['-d', wslInfo.distro, '--', 'sh', '-c', escapeWslShCommandForWindows(command)]
+    args: ['-d', wslInfo.distro, '--', 'bash', '-lc', script]
   }
 }
 
@@ -292,55 +242,14 @@ function mapBackendRateLimitResetCredits(
   }
 }
 
-function createBackendRequestSignal(
-  callerSignal?: AbortSignal,
-  timeoutMs = BACKEND_TIMEOUT_MS
-): AbortSignal {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs)
-  return callerSignal ? AbortSignal.any([callerSignal, timeoutSignal]) : timeoutSignal
-}
-
-function getBackendAuthRead(
-  authPath: string
-): SharedAuthFilesystemOperation<BackendAuthReadResult> {
-  const existing = backendAuthReadByPath.get(authPath)
-  if (existing) {
-    return existing
-  }
-  // Why: Node can't cancel an in-flight UNC read; keep one read per auth path so repeated refreshes don't stack them.
-  const read = createAuthFilesystemOperation(authPath, () =>
-    readFile(authPath, 'utf8').then(
-      (content) => ({ content }),
-      (error: unknown) => ({ error })
-    )
-  )
-  backendAuthReadByPath.set(authPath, read)
-  const clearRead = (): void => {
-    if (backendAuthReadByPath.get(authPath) === read) {
-      backendAuthReadByPath.delete(authPath)
-    }
-  }
-  void read.result.then(clearRead, clearRead)
-  return read
-}
-
-async function readBackendAuth(authPath: string, signal: AbortSignal): Promise<string> {
-  const result = await getBackendAuthRead(authPath).wait(signal)
-  if ('error' in result) {
-    throw result.error
-  }
-  return result.content
-}
-
 async function getCodexBackendAuthHeaders(
-  options: FetchCodexRateLimitsOptions | undefined,
-  signal: AbortSignal
+  options?: FetchCodexRateLimitsOptions
 ): Promise<CodexBackendAuthHeaders | null> {
-  if (signal.aborted) {
+  if (options?.signal?.aborted) {
     return null
   }
   const authPath = join(getCodexHomePath(options?.codexHomePath), 'auth.json')
-  const auth = JSON.parse(await readBackendAuth(authPath, signal)) as CodexAuthFile
+  const auth = JSON.parse(await readFile(authPath, 'utf8')) as CodexAuthFile
   const accessToken = auth.tokens?.access_token
   if (!accessToken) {
     return null
@@ -364,21 +273,20 @@ async function fetchBackendRateLimitResetCredits(
   if (options?.signal?.aborted) {
     return null
   }
-  const signal = createBackendRequestSignal(options?.signal)
-  const auth = await getCodexBackendAuthHeaders(options, signal)
+  const auth = await getCodexBackendAuthHeaders(options)
   if (!auth) {
     return null
   }
-  if (signal.aborted) {
+  if (options?.signal?.aborted) {
     return null
   }
-  // Why: Codex 0.140's app-server strips the reset-credit metadata this backend endpoint still returns.
+  // Why: published Codex 0.140 can read windows through app-server but strips
+  // reset-credit metadata that the backend already returns.
   const response = await fetch('https://chatgpt.com/backend-api/wham/rate-limit-reset-credits', {
     ...auth,
-    signal
+    signal: options?.signal
   })
   if (!response.ok) {
-    await cancelUnreadResponseBody(response)
     return null
   }
   const payload = (await response.json()) as BackendRateLimitResetCreditsResponse
@@ -428,8 +336,7 @@ export async function consumeCodexRateLimitResetCredit(options: {
   if (!options.idempotencyKey.trim()) {
     throw new Error('Codex reset idempotency key is required')
   }
-  const signal = createBackendRequestSignal(undefined, REDEEM_BACKEND_TIMEOUT_MS)
-  const auth = await getCodexBackendAuthHeaders(options, signal)
+  const auth = await getCodexBackendAuthHeaders(options)
   if (!auth) {
     throw new Error('Codex not signed in')
   }
@@ -441,12 +348,10 @@ export async function consumeCodexRateLimitResetCredit(options: {
         ...auth.headers,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ redeem_request_id: options.idempotencyKey }),
-      signal
+      body: JSON.stringify({ redeem_request_id: options.idempotencyKey })
     }
   )
   if (!response.ok) {
-    await cancelUnreadResponseBody(response)
     throw new Error(`Codex reset failed: HTTP ${response.status}`)
   }
   const payload = (await response.json()) as BackendConsumeRateLimitResetCreditResponse
@@ -454,19 +359,19 @@ export async function consumeCodexRateLimitResetCredit(options: {
 }
 
 function mapRpcWindow(
-  raw: CodexRpcRateWindow | null | undefined,
+  raw: RpcRateWindow | undefined,
   expectedWindowMinutes: number
 ): RateLimitWindow | null {
-  if (!raw || typeof raw.usedPercent !== 'number' || !Number.isFinite(raw.usedPercent)) {
+  if (!raw || typeof raw.usedPercent !== 'number') {
     return null
   }
   let resetDescription: string | null = null
   let resetsAt: number | null = null
 
-  if (typeof raw.resetsAt === 'number' && Number.isFinite(raw.resetsAt) && raw.resetsAt > 0) {
+  if (raw.resetsAt) {
     // Why: Codex returns resetsAt as Unix seconds, not milliseconds.
     const date = new Date(raw.resetsAt * 1000)
-    if (!Number.isNaN(date.getTime())) {
+    if (!isNaN(date.getTime())) {
       resetsAt = date.getTime()
       const now = new Date()
       const isToday = date.toDateString() === now.toDateString()
@@ -482,73 +387,11 @@ function mapRpcWindow(
 
   return {
     usedPercent: Math.min(100, Math.max(0, raw.usedPercent)),
-    // Why: older app-server builds can report canonical bucket lengths off by one minute.
+    // Why: Codex currently reports remaining minutes in `windowDurationMins`.
+    // Orca's UI needs the fixed bucket duration so labels stay "5h" / "wk".
     windowMinutes: expectedWindowMinutes,
     resetsAt,
     resetDescription
-  }
-}
-
-function mapBackendUsageWindow(
-  raw: BackendRateLimitWindow | null | undefined,
-  fallbackWindowMinutes: number
-): RateLimitWindow | null {
-  const limitWindowSeconds = raw?.limit_window_seconds
-  // Why: match Codex backend-client's window_minutes_from_seconds — actual bucket duration, rounding partial minutes up.
-  const windowMinutes =
-    typeof limitWindowSeconds === 'number' &&
-    Number.isFinite(limitWindowSeconds) &&
-    limitWindowSeconds > 0
-      ? Math.ceil(limitWindowSeconds / 60)
-      : fallbackWindowMinutes
-  return mapRpcWindow(
-    raw
-      ? {
-          usedPercent: raw.used_percent,
-          resetsAt: raw.reset_at
-        }
-      : undefined,
-    windowMinutes
-  )
-}
-
-async function fetchViaBackend(
-  options?: FetchCodexRateLimitsOptions
-): Promise<ProviderRateLimits | null> {
-  const signal = createBackendRequestSignal(options?.signal)
-  const auth = await getCodexBackendAuthHeaders(options, signal)
-  if (!auth || signal.aborted) {
-    return null
-  }
-  // Why: reuse Codex's own get_rate_limit_status endpoint, avoiding a hidden app-server (and WSL login shell) per refresh.
-  const response = await fetch('https://chatgpt.com/backend-api/wham/usage', {
-    ...auth,
-    signal
-  })
-  if (!response.ok) {
-    await cancelUnreadResponseBody(response)
-    return null
-  }
-  const payload = (await response.json()) as BackendUsageResponse
-  // Why: plan_type is required by Codex's RateLimitStatusPayload; reject malformed JSON so the app-server fallback still runs.
-  if (typeof payload.plan_type !== 'string') {
-    return null
-  }
-  return {
-    provider: 'codex',
-    session: mapBackendUsageWindow(payload.rate_limit?.primary_window, 300),
-    weekly: mapBackendUsageWindow(payload.rate_limit?.secondary_window, 10080),
-    // Surfaced for the status-bar Usage row (e.g. "Codex · Plus").
-    planType: payload.plan_type,
-    ...(payload.rate_limit_reset_credits !== undefined
-      ? {
-          rateLimitResetCredits:
-            mapBackendRateLimitResetCredits(payload.rate_limit_reset_credits) ?? null
-        }
-      : {}),
-    updatedAt: Date.now(),
-    error: null,
-    status: 'ok'
   }
 }
 
@@ -568,20 +411,28 @@ async function fetchViaRpc(options?: FetchCodexRateLimitsOptions): Promise<Provi
 
     const codexArgs = ['-s', 'read-only', '-a', 'untrusted', 'app-server']
     const wslCodex = options?.codexHomePath
-      ? buildWslCodexCommand(options.codexHomePath, codexArgs, { isolateRpcStdio: true })
+      ? buildWslCodexCommand(options.codexHomePath, codexArgs)
       : null
-    // Why: cold WSL startup + app-server init can exceed the host RPC budget, causing a false "unavailable" on launch.
+    // Why: cold WSL process startup plus Codex app-server initialization can
+    // exceed the host RPC budget, causing a false "unavailable" on app launch.
     const rpcTimeoutMs = wslCodex ? WSL_RPC_TIMEOUT_MS : RPC_TIMEOUT_MS
     const codexCommand = wslCodex ? 'codex' : resolveCodexCommand()
-    // Why: .cmd/.bat launchers can't be spawned directly and shell:true triggers DEP0190 — route them through cmd.exe /c.
+    // Why: on Windows, resolveCodexCommand() may return a .cmd/.bat file.
+    // spawn() cannot execute batch scripts directly without shell:true, but
+    // shell:true with an args array triggers DEP0190 (args are concatenated,
+    // not escaped). Fix: detect batch scripts and route through cmd.exe /c.
     const { spawnCmd, spawnArgs } = wslCodex
       ? { spawnCmd: wslCodex.command, spawnArgs: wslCodex.args }
       : getSpawnArgsForWindows(codexCommand, codexArgs)
     const child = spawn(spawnCmd, spawnArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: resolveHiddenRateLimitPtyCwd(),
-      // Why: scope the selected account to this subprocess only; never mutate process.env globally.
-      // Why windowsHide: without it, background cmd.exe /c polls flash a console window on Windows.
+      // Why: the selected Codex rate-limit account must only affect this fetch
+      // subprocess. Never mutate process.env globally or other Codex features
+      // would inherit the managed account unintentionally.
+      // Why windowsHide: this fetch runs periodically in the background;
+      // without the flag, cmd.exe /c would flash a console window for each
+      // poll on Windows.
       windowsHide: true,
       env: {
         ...(wslCodex ? cloneProcessEnvWithoutCodexHome() : process.env),
@@ -647,7 +498,11 @@ async function fetchViaRpc(options?: FetchCodexRateLimitsOptions): Promise<Provi
       return id
     }
 
-    // Why: JSON-RPC/LSP handshake — send `initialized` after initialize or the server rejects methods as "Not initialized".
+    // Why: the Codex RPC server follows the JSON-RPC/LSP initialization
+    // handshake: client sends `initialize` request, waits for the response,
+    // then sends an `initialized` notification. Only after that will the
+    // server accept other methods. Skipping the notification causes "Not
+    // initialized" errors on subsequent requests.
     let rateLimitsId: number | null = null
 
     const initId = sendRpc('initialize', {
@@ -679,7 +534,8 @@ async function fetchViaRpc(options?: FetchCodexRateLimitsOptions): Promise<Provi
           }
 
           if (msg.id === initId) {
-            // Initialize succeeded — send `initialized`, then request rate limits.
+            // Initialize succeeded — send `initialized` notification, then
+            // request rate limits.
             sendNotification('initialized')
             rateLimitsId = sendRpc('account/rateLimits/read')
             continue
@@ -707,9 +563,8 @@ async function fetchViaRpc(options?: FetchCodexRateLimitsOptions): Promise<Provi
 
             const wrapper = msg.result as RpcRateLimitsResponse | undefined
             const result = wrapper?.rateLimits
-            const classifiedWindows = classifyCodexRateLimitWindows(result)
-            const session = mapRpcWindow(classifiedWindows.session, CODEX_SESSION_WINDOW_MINUTES)
-            const weekly = mapRpcWindow(classifiedWindows.weekly, CODEX_WEEKLY_WINDOW_MINUTES)
+            const session = mapRpcWindow(result?.primary, 300)
+            const weekly = mapRpcWindow(result?.secondary, 10080)
             const rateLimitResetCredits = mapRpcRateLimitResetCredits(
               wrapper?.rateLimitResetCredits
             )
@@ -780,33 +635,11 @@ async function fetchViaRpc(options?: FetchCodexRateLimitsOptions): Promise<Provi
 // PTY fallback — spawn `codex`, send `/status`, parse rendered output
 // ---------------------------------------------------------------------------
 
-// Why: match the Codex CLI /status output ("5h limit"/"Weekly limit" lines). Newer
-// CLIs render a meter between the label and the percent ("Weekly limit: [███░] 43% left"),
-// so skip any non-digit run and capture the used/left word to orient the number.
-// The lookbehind rejects model-scoped rows ("GPT-…-Spark Weekly limit") so they are
-// never selected as the account window regardless of row order; line-start anchoring
-// is unusable here because stripping cursor-move sequences merges visual lines.
-const FIVE_HOUR_RE = /(?<![\w-][^\S\r\n]{0,4})5h\s+limit[^\d%\r\n]*(\d+)%(?:\s*(used|left))?/i
-const WEEKLY_RE = /(?<![\w-][^\S\r\n]{0,4})weekly\s+limit[^\d%\r\n]*(\d+)%(?:\s*(used|left))?/i
-// Why: model-scoped limit rows must still stop a per-window reset-text scan.
-const ANY_LIMIT_LABEL_RE = /(?:5h|weekly)\s+limit/i
-
-// eslint-disable-next-line no-control-regex
-const PTY_CONTROL_SEQUENCE_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g
-
-function stripPtyControlSequences(output: string): string {
-  return output.replace(PTY_CONTROL_SEQUENCE_RE, '')
-}
-
-function isPtyLimitLabel(line: string): boolean {
-  return ANY_LIMIT_LABEL_RE.test(line)
-}
-
-function ptyUsedPercent(match: RegExpExecArray): number {
-  const pct = Number.parseInt(match[1], 10)
-  const oriented = match[2]?.toLowerCase() === 'left' ? 100 - pct : pct
-  return Math.min(100, Math.max(0, oriented))
-}
+// Why: these patterns match the Codex CLI's /status output format.
+// "5h limit" and "Weekly limit" lines contain a percent and optional reset text.
+const FIVE_HOUR_RE = /5h\s+limit[:\s]*(\d+)%/i
+const WEEKLY_RE = /weekly\s+limit[:\s]*(\d+)%/i
+const RESET_TEXT_RE = /resets?\s+(?:at\s+|in\s+)?(.+)/i
 
 function parsePtyStatus(output: string): {
   session: RateLimitWindow | null
@@ -814,37 +647,30 @@ function parsePtyStatus(output: string): {
 } {
   const fiveMatch = FIVE_HOUR_RE.exec(output)
   const weeklyMatch = WEEKLY_RE.exec(output)
-  const lines = output.split(/\r\n|\n|\r/)
-  // Why: each limit line owns the reset text that follows it (weekly-only plans
-  // have no 5h line), and parsing it into resetsAt is what the UI renders.
-  const sessionReset = extractClaudePtyResetMetadata(
-    lines,
-    (line) => FIVE_HOUR_RE.test(line),
-    isPtyLimitLabel
-  )
-  const weeklyReset = extractClaudePtyResetMetadata(
-    lines,
-    (line) => WEEKLY_RE.test(line),
-    isPtyLimitLabel
-  )
 
   const session: RateLimitWindow | null = fiveMatch
     ? {
-        usedPercent: ptyUsedPercent(fiveMatch),
+        usedPercent: Math.min(100, parseInt(fiveMatch[1], 10)),
         windowMinutes: 300,
-        resetsAt: sessionReset.resetsAt,
-        resetDescription: sessionReset.resetDescription
+        resetsAt: null,
+        resetDescription: null
       }
     : null
 
   const weekly: RateLimitWindow | null = weeklyMatch
     ? {
-        usedPercent: ptyUsedPercent(weeklyMatch),
+        usedPercent: Math.min(100, parseInt(weeklyMatch[1], 10)),
         windowMinutes: 10080,
-        resetsAt: weeklyReset.resetsAt,
-        resetDescription: weeklyReset.resetDescription
+        resetsAt: null,
+        resetDescription: null
       }
     : null
+
+  // Try to extract reset time from surrounding text
+  const resetMatch = RESET_TEXT_RE.exec(output)
+  if (resetMatch && session) {
+    session.resetDescription = resetMatch[1].trim()
+  }
 
   return { session, weekly }
 }
@@ -860,7 +686,13 @@ async function fetchViaPty(options?: FetchCodexRateLimitsOptions): Promise<Provi
   const wslCodex = options?.codexHomePath ? buildWslCodexCommand(options.codexHomePath, []) : null
   const codexCommand = wslCodex ? 'codex' : resolveCodexCommand()
 
-  // Why: on win32 route through cmd.exe (even bare 'codex') so PATHEXT resolves codex.cmd under a minimal Electron PATH.
+  // Why: node-pty cannot spawn .cmd/.bat batch scripts directly on Windows —
+  // those need cmd.exe as an interpreter. resolveCodexCommand() may also fall
+  // back to bare 'codex' when it can't locate the binary on disk, yet cmd.exe
+  // can still find codex.cmd via PATHEXT. Always route through cmd.exe on win32.
+  // Why not getSpawnArgsForWindows: the PTY path must route through cmd.exe
+  // even for bare 'codex' (not just .cmd/.bat) to let PATHEXT resolution
+  // succeed under a minimal Electron PATH. /d matches the rest of the codebase.
   const isWin32 = process.platform === 'win32'
   const spawnFile = wslCodex ? wslCodex.command : isWin32 ? getCmdExePath() : codexCommand
   const spawnArgs = wslCodex ? wslCodex.args : isWin32 ? ['/d', '/c', codexCommand] : []
@@ -884,53 +716,6 @@ async function fetchViaPty(options?: FetchCodexRateLimitsOptions): Promise<Provi
       }
     })
     const termDisposables: { dispose: () => void }[] = [registerHiddenRateLimitPty(term)]
-
-    let statusEnter: ReturnType<typeof setTimeout> | null = null
-    function sendStatusCommand(): void {
-      sentStatus = true
-      if (statusNudge) {
-        clearTimeout(statusNudge)
-        statusNudge = null
-      }
-      term.write('/status')
-      statusEnter = setTimeout(() => {
-        statusEnter = null
-        term.write('\r')
-        statusEnter = setTimeout(() => {
-          statusEnter = null
-          if (!resolved && !settleTimer) {
-            term.write('\r')
-          }
-        }, PTY_STATUS_ENTER_RETRY_MS)
-      }, PTY_STATUS_ENTER_DELAY_MS)
-    }
-
-    let statusNudge: ReturnType<typeof setTimeout> | null = null
-    // Why: count the nudge grace from first TUI output, not spawn, so slow
-    // WSL/SSH boots get the full window before /status is typed.
-    function armStatusNudge(): void {
-      if (statusNudge || sentStatus || resolved) {
-        return
-      }
-      statusNudge = setTimeout(() => {
-        statusNudge = null
-        if (!resolved && !sentStatus) {
-          sendStatusCommand()
-        }
-      }, PTY_STATUS_NUDGE_MS)
-    }
-    termDisposables.push({
-      dispose: () => {
-        if (statusNudge) {
-          clearTimeout(statusNudge)
-          statusNudge = null
-        }
-        if (statusEnter) {
-          clearTimeout(statusEnter)
-          statusEnter = null
-        }
-      }
-    })
 
     function settleAborted(): void {
       if (resolved) {
@@ -981,24 +766,23 @@ async function fetchViaPty(options?: FetchCodexRateLimitsOptions): Promise<Provi
 
     const onDataDisposable = term.onData((data) => {
       output += data
-      // Why: only recent status output is needed; cap noisy TUI output like the Claude fallback.
+      // Why: this background fallback only needs recent status output for
+      // parsing and diagnostics; cap noisy TUI output like the Claude fallback.
       if (output.length > MAX_DIAGNOSTIC_OUTPUT_LENGTH) {
         output = output.slice(-MAX_DIAGNOSTIC_OUTPUT_LENGTH)
       }
 
-      armStatusNudge()
-
       // Wait for prompt, then send /status
-      if (!sentStatus && /[>›]\s*$/.test(data)) {
-        sendStatusCommand()
+      if (!sentStatus && />\s*$/.test(data)) {
+        sentStatus = true
+        term.write('/status\r')
         return
       }
 
       // Check if we have parseable output
-      // Why: colored meter bars embed digits inside CSI sequences, so probe cleaned text.
-      const probe = sentStatus && !settleTimer ? stripPtyControlSequences(output) : null
-      if (probe !== null && (FIVE_HOUR_RE.test(probe) || WEEKLY_RE.test(probe))) {
-        // Why: the TUI keeps streaming after status is parseable; one settle timer lets the panel finish flushing.
+      if (sentStatus && !settleTimer && (FIVE_HOUR_RE.test(output) || WEEKLY_RE.test(output))) {
+        // Why: after status text is parseable the TUI may continue streaming
+        // chunks; one settle timer is enough to let the panel finish flushing.
         settleTimer = setTimeout(() => {
           settleTimer = null
           if (resolved) {
@@ -1011,7 +795,8 @@ async function fetchViaPty(options?: FetchCodexRateLimitsOptions): Promise<Provi
           }
           cleanupHiddenRateLimitPty(term, termDisposables, { kill: true })
 
-          const clean = stripPtyControlSequences(output)
+          // eslint-disable-next-line no-control-regex
+          const clean = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
           const { session, weekly } = parsePtyStatus(clean)
 
           resolve({
@@ -1044,7 +829,8 @@ async function fetchViaPty(options?: FetchCodexRateLimitsOptions): Promise<Provi
           clearTimeout(timeout)
           timeout = null
         }
-        const clean = stripPtyControlSequences(output)
+        // eslint-disable-next-line no-control-regex
+        const clean = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
         const { session, weekly } = parsePtyStatus(clean)
         resolve({
           provider: 'codex',
@@ -1076,14 +862,10 @@ export async function fetchCodexRateLimits(
   if (options?.signal?.aborted) {
     return abortedCodexRateLimitResult()
   }
-  // Why: don't spawn `codex` unless signed in — otherwise non-Codex users see an unexpected background process that can only error.
-  const authPresence = await probeCodexAuthPresence(options?.codexHomePath, {
-    signal: options?.signal
-  })
-  if (options?.signal?.aborted) {
-    return abortedCodexRateLimitResult()
-  }
-  if (authPresence === 'absent') {
+  // Why: never spawn the `codex` binary unless the user has signed in. Without
+  // auth the RPC/PTY paths can only error, and spawning them shows up as an
+  // unexpected background Codex process for users who don't use Codex.
+  if (!codexAuthExists(options?.codexHomePath)) {
     return {
       provider: 'codex',
       session: null,
@@ -1093,40 +875,8 @@ export async function fetchCodexRateLimits(
       status: 'unavailable'
     }
   }
-  if (authPresence !== 'present') {
-    return {
-      provider: 'codex',
-      session: null,
-      weekly: null,
-      updatedAt: Date.now(),
-      error:
-        authPresence === 'timeout'
-          ? 'Timed out while checking Codex sign-in status'
-          : 'Codex sign-in status is unavailable',
-      status: 'error'
-    }
-  }
 
-  // Path A (WSL): use Codex's backend usage contract so a routine poll skips spawning a login shell to rebuild the CLI env.
-  if (options?.codexHomePath && parseWslUncPath(options.codexHomePath)) {
-    try {
-      const backendResult = await fetchViaBackend(options)
-      if (options?.signal?.aborted) {
-        return abortedCodexRateLimitResult()
-      }
-      if (backendResult) {
-        const withResetCredits = await withBackendRateLimitResetCredits(backendResult, options)
-        return options?.signal?.aborted ? abortedCodexRateLimitResult() : withResetCredits
-      }
-    } catch {
-      if (options?.signal?.aborted) {
-        return abortedCodexRateLimitResult()
-      }
-      // Why: token refresh, network routing, and custom-CA behavior can differ from the host fetch stack; keep CLI paths as fallbacks.
-    }
-  }
-
-  // Path B: try RPC
+  // Path A: try RPC first
   try {
     const rpcResult = await fetchViaRpc(options)
     if (options?.signal?.aborted) {
@@ -1142,7 +892,8 @@ export async function fetchCodexRateLimits(
     if (options?.allowPtyFallback === false) {
       return rpcResult
     }
-    // Why: app-server can fail independently of the interactive CLI; fall back to the /status PTY reader on RPC errors.
+    // Why: app-server can fail independently of the interactive CLI. Keep the
+    // status-bar useful by trying the older /status PTY reader on RPC errors.
   } catch {
     if (options?.signal?.aborted) {
       return abortedCodexRateLimitResult()
@@ -1160,7 +911,7 @@ export async function fetchCodexRateLimits(
     // RPC failed — fall through to PTY
   }
 
-  // Path C: PTY fallback
+  // Path B: PTY fallback
   try {
     if (options?.signal?.aborted) {
       return abortedCodexRateLimitResult()

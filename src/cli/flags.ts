@@ -1,4 +1,4 @@
-import { RuntimeClientError } from './runtime/types'
+import { RuntimeClientError } from './runtime-client'
 import { REPEATED_FLAG_SEPARATOR } from './args'
 
 export function getRequiredStringFlag(flags: Map<string, string | boolean>, name: string): string {

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Why: this regression spec keeps the deterministic IPC fakes, setup-state seeding, and frame-level flash monitor together so the flicker contract is auditable in one place. */
 import type { ElectronApplication, Page } from '@stablyai/playwright-test'
 import type { SkillDiscoveryResult } from '../../src/shared/skills'
 import { test, expect } from './helpers/orca-app'

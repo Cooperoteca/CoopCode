@@ -6,7 +6,6 @@ import {
   type ParentPrChecksRow
 } from '@/components/right-sidebar/parent-pr-checks-rows'
 import type { WorktreeCardPrDisplay } from './worktree-card-pr-display'
-import { getProjectedWorktreeLineageChildrenByParentId } from './worktree-lineage-projection'
 
 type FolderWorkspaceCardPrDisplayArgs = {
   folderWorkspaceId: string
@@ -78,18 +77,21 @@ function getAttachedWorktreesForFolderWorkspaceCard({
     .filter((worktree): worktree is Worktree => worktree !== null)
 
   const included = new Map(directChildren.map((worktree) => [worktree.id, worktree]))
-  const childrenByParentId = getProjectedWorktreeLineageChildrenByParentId(
-    worktreeLineageById ?? {},
-    worktreeMap
-  )
-  const queue = [...directChildren]
-  for (let index = 0; index < queue.length; index += 1) {
-    for (const child of childrenByParentId.get(queue[index].id) ?? []) {
-      if (child.isArchived || included.has(child.id)) {
+  let added = true
+
+  while (added) {
+    added = false
+    for (const lineage of Object.values(worktreeLineageById ?? {})) {
+      if (included.has(lineage.worktreeId) || !included.has(lineage.parentWorktreeId)) {
+        continue
+      }
+      const parent = worktreeMap.get(lineage.parentWorktreeId)
+      const child = worktreeMap.get(lineage.worktreeId)
+      if (!isCurrentLineagePair(parent, child, lineage)) {
         continue
       }
       included.set(child.id, child)
-      queue.push(child)
+      added = true
     }
   }
 
@@ -126,6 +128,21 @@ function getWorkspaceLineageChild(
     return null
   }
   return worktree
+}
+
+function isCurrentLineagePair(
+  parent: Worktree | undefined,
+  child: Worktree | undefined,
+  lineage: WorktreeLineage
+): child is Worktree {
+  return Boolean(
+    parent &&
+    child &&
+    !parent.isArchived &&
+    !child.isArchived &&
+    child.instanceId === lineage.worktreeInstanceId &&
+    parent.instanceId === lineage.parentWorktreeInstanceId
+  )
 }
 
 function compareReviewDisplays(left: WorktreeCardPrDisplay, right: WorktreeCardPrDisplay): number {

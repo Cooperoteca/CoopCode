@@ -1,7 +1,6 @@
 import type { GitRuntimeOptions } from './git-runtime-options'
 import { gitOptionsForWorktree } from './git-runtime-options'
 import { gitExecFileAsync } from './runner'
-import { runWithGitReadCacheInvalidation } from './status'
 
 /**
  * Reject branch names git would parse as an option (`-`/`--…`) or that aren't a
@@ -28,9 +27,7 @@ export async function checkoutBranch(
   options: GitRuntimeOptions = {}
 ): Promise<void> {
   assertValidBranchName(branch)
-  await runWithGitReadCacheInvalidation(() =>
-    gitExecFileAsync(['checkout', branch, '--'], gitOptionsForWorktree(worktreePath, options))
-  )
+  await gitExecFileAsync(['checkout', branch, '--'], gitOptionsForWorktree(worktreePath, options))
 }
 
 /**

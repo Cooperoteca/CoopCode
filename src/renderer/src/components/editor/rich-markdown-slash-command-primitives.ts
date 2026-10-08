@@ -1,7 +1,6 @@
 import type React from 'react'
 import type { Editor } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
-import type { ToggleHeadingVariant } from './details-markdown-html'
 
 export type SlashMenuState = {
   query: string
@@ -17,13 +16,9 @@ export type SlashCommandId =
   | 'heading-1'
   | 'toggle-h1'
   | 'heading-2'
-  | 'toggle-h2'
   | 'heading-3'
-  | 'toggle-h3'
   | 'heading-4'
-  | 'toggle-h4'
   | 'heading-5'
-  | 'toggle-h5'
   | 'task-list'
   | 'bullet-list'
   | 'ordered-list'
@@ -41,13 +36,7 @@ export type SlashCommandIcon =
   | { kind: 'component'; component: React.ComponentType<{ className?: string }> }
   | { kind: 'text'; value: string }
 
-export type SlashCommandGroup =
-  | 'Headings'
-  | 'Toggle headings'
-  | 'Basic blocks'
-  | 'Advanced'
-  | 'Media'
-  | 'Others'
+export type SlashCommandGroup = 'Headings' | 'Basic blocks' | 'Advanced' | 'Media' | 'Others'
 
 export type SlashCommand = {
   id: SlashCommandId
@@ -103,7 +92,7 @@ export function insertCodeBlock(editor: Editor, language: string, text: string):
   })
 }
 
-export function insertToggle(editor: Editor, variant?: ToggleHeadingVariant): void {
+export function insertToggle(editor: Editor, variant?: 'heading-1'): void {
   const insertAt = editor.state.selection.from
 
   editor

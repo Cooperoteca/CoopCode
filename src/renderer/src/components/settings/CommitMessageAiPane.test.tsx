@@ -84,7 +84,6 @@ describe('CommitMessageAiPane', () => {
     expect(markup).toContain('Pull request details')
     expect(markup).toContain('Branch name')
     expect(markup).toContain('Commit failure fixes')
-    expect(markup).toContain('Push failure fixes')
     expect(markup).toContain('Broken checks fixes')
     expect(markup).toContain('Conflict resolution')
     expect(markup).toContain('CLI arguments')

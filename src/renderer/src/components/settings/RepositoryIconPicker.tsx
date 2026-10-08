@@ -8,8 +8,9 @@ import { normalizeRepoBadgeColor } from '../../../../shared/repo-badge-color'
 import { Button } from '../ui/button'
 import { Label } from '../ui/label'
 import { RepoIconGlyph, getRepoLucideIconOptions } from '../repo/repo-icon'
+import { useAppStore } from '@/store'
 import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
-import { getRepoExecutionHostId, parseExecutionHostId } from '../../../../shared/execution-host'
+import { getRuntimeEnvironmentIdForRepo } from '@/lib/repo-runtime-owner'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import { RepositoryIconColorSection } from './RepositoryIconColorSection'
 import { RepositoryIconTabs } from './RepositoryIconTabs'
@@ -32,9 +33,9 @@ export function RepositoryIconPicker({
   const mountedRef = useMountedRef()
   // Why: resolve this repo's upstream/avatar on the host that owns it, not the
   // focused runtime.
-  const selectedHost = parseExecutionHostId(getRepoExecutionHostId(repo))
-  const activeRuntimeEnvironmentId =
-    selectedHost?.kind === 'runtime' ? selectedHost.environmentId : null
+  const activeRuntimeEnvironmentId = useAppStore((state) =>
+    getRuntimeEnvironmentIdForRepo(state, repo.id)
+  )
   const selectedLucideName = repo.repoIcon?.type === 'lucide' ? repo.repoIcon.name : null
   const selectedEmoji = repo.repoIcon?.type === 'emoji' ? repo.repoIcon.emoji : ''
   const selectedBadgeColor = normalizeRepoBadgeColor(repo.badgeColor) ?? DEFAULT_REPO_BADGE_COLOR

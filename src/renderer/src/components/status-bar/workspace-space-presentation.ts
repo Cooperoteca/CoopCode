@@ -1,4 +1,4 @@
-import { classifyTitleActivity, isExplicitAgentStatusFresh } from '@/lib/pane-agent-evidence'
+import { detectAgentStatusFromTitle, isExplicitAgentStatusFresh } from '@/lib/agent-status'
 import { tabHasLivePty } from '@/lib/tab-has-live-pty'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
@@ -82,12 +82,12 @@ function countTitleActiveAgentsForTab(
   const paneTitles = runtimePaneTitlesByTabId[tab.id]
   if (paneTitles && Object.keys(paneTitles).length > 0) {
     return Object.values(paneTitles).filter((title) => {
-      const status = classifyTitleActivity(title)
+      const status = detectAgentStatusFromTitle(title)
       return status === 'working' || status === 'permission'
     }).length
   }
 
-  const status = classifyTitleActivity(tab.title)
+  const status = detectAgentStatusFromTitle(tab.title)
   return status === 'working' || status === 'permission' ? 1 : 0
 }
 

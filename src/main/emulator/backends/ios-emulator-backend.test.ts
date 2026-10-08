@@ -11,8 +11,7 @@ const {
   listServeSimHelperProcessesForDeviceMock,
   shutdownSimulatorDeviceMock,
   sendEmulatorGestureSequenceMock,
-  parseServeSimDetachedSessionMock,
-  netFetchMock
+  parseServeSimDetachedSessionMock
 } = vi.hoisted(() => ({
   ensureSimulatorBootedMock: vi.fn(async () => {}),
   execServeSimCommandMock: vi.fn(async (_executable?: unknown, _args?: string[]) => ({})),
@@ -22,11 +21,8 @@ const {
   listServeSimHelperProcessesForDeviceMock: vi.fn(async (): Promise<ServeSimHelperProcess[]> => []),
   shutdownSimulatorDeviceMock: vi.fn(async () => {}),
   sendEmulatorGestureSequenceMock: vi.fn(async () => {}),
-  parseServeSimDetachedSessionMock: vi.fn(),
-  netFetchMock: vi.fn()
+  parseServeSimDetachedSessionMock: vi.fn()
 }))
-
-vi.mock('electron', () => ({ net: { fetch: netFetchMock } }))
 
 vi.mock('../serve-sim-execution', () => ({
   execServeSimCommand: execServeSimCommandMock,
@@ -85,10 +81,9 @@ describe('IosEmulatorBackend', () => {
     sendEmulatorGestureSequenceMock.mockReset()
     sendEmulatorGestureSequenceMock.mockImplementation(async () => {})
     parseServeSimDetachedSessionMock.mockReset()
-    netFetchMock.mockReset()
   })
 
-  it('advertises the iOS accessibility tree capability', () => {
+  it('declares ios kind, mjpeg codec, and no explicit-verb capabilities', () => {
     const backend = new IosEmulatorBackend()
     expect(backend.kind).toBe('ios')
     expect(backend.streamCodec).toBe('mjpeg')
@@ -96,74 +91,9 @@ describe('IosEmulatorBackend', () => {
       install: false,
       launch: false,
       permissions: false,
-      accessibilityTree: true,
+      accessibilityTree: false,
       logcat: false
     })
-  })
-
-  it('fetches and normalizes the serve-sim accessibility tree', async () => {
-    const raw = [
-      {
-        type: 'Application',
-        role_description: 'application',
-        AXLabel: 'Demo',
-        enabled: true,
-        frame: { x: 0, y: 0, width: 400, height: 800 },
-        children: [
-          {
-            type: 'Button',
-            role_description: 'button',
-            AXLabel: 'Continue',
-            AXValue: '',
-            enabled: true,
-            frame: { x: 100, y: 400, width: 200, height: 50 },
-            children: []
-          }
-        ]
-      }
-    ]
-    netFetchMock.mockResolvedValue(new Response(JSON.stringify(raw), { status: 200 }))
-    const backend = new IosEmulatorBackend()
-
-    await expect(
-      backend.accessibilityTree('device-1', 'http://127.0.0.1:3100/ax')
-    ).resolves.toEqual([
-      {
-        role: 'application',
-        type: 'Application',
-        label: 'Demo',
-        value: '',
-        enabled: true,
-        frame: { x: 0, y: 0, width: 1, height: 1 },
-        children: [
-          {
-            role: 'button',
-            type: 'Button',
-            label: 'Continue',
-            value: '',
-            enabled: true,
-            frame: { x: 0.25, y: 0.5, width: 0.5, height: 0.0625 },
-            children: []
-          }
-        ]
-      }
-    ])
-    expect(netFetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:3100/ax',
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
-    )
-  })
-
-  it('reports missing sessions and temporarily unavailable AX endpoints', async () => {
-    const backend = new IosEmulatorBackend()
-    await expect(backend.accessibilityTree('device-1')).rejects.toMatchObject({
-      code: 'emulator_no_active'
-    })
-
-    netFetchMock.mockResolvedValue(new Response('{"error":"ax_unavailable"}', { status: 503 }))
-    await expect(
-      backend.accessibilityTree('device-1', 'http://127.0.0.1:3100/ax')
-    ).rejects.toMatchObject({ code: 'emulator_helper_failed' })
   })
 
   it('taps via serve-sim with the resolved device', async () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { AgentStatusEntry } from '../../../../shared/agent-status-types'
 import { useAppStore } from '@/store'
 
@@ -47,14 +48,14 @@ function isTypingKeyEvent(event: KeyboardEvent): boolean {
 }
 
 export function StarNagAgentValueMomentObserver(): null {
-  // Why: agentStatusByPaneKey is re-spread to a new object on every status ping
-  // (including high-frequency still-working pings that never change what we
-  // detect), so subscribing to the map re-rendered this always-mounted observer
-  // — and re-ran the app-wide done-transition scan — on every ping. agentStatusEpoch
-  // bumps on exactly the state transitions we care about, so drive off the epoch
-  // and read the map imperatively via getState().
-  const agentStatusEpoch = useAppStore((state) => state.agentStatusEpoch)
+  const { agentStatusByPaneKey, agentStatusEpoch } = useAppStore(
+    useShallow((state) => ({
+      agentStatusByPaneKey: state.agentStatusByPaneKey,
+      agentStatusEpoch: state.agentStatusEpoch
+    }))
+  )
   const previousEntriesRef = useRef<AgentStatusSnapshot | null>(null)
+  const latestEntriesRef = useRef(agentStatusByPaneKey)
   const pendingRef = useRef(false)
   const requestedRef = useRef(false)
   const preparationRef = useRef<AgentValueMomentPreparation | null>(null)
@@ -71,10 +72,7 @@ export function StarNagAgentValueMomentObserver(): null {
         return
       }
       const elapsedSinceTyping = Date.now() - lastTypingAtRef.current
-      if (
-        hasActiveAgent(useAppStore.getState().agentStatusByPaneKey) ||
-        elapsedSinceTyping < QUIET_WINDOW_MS
-      ) {
+      if (hasActiveAgent(latestEntriesRef.current) || elapsedSinceTyping < QUIET_WINDOW_MS) {
         scheduleCheck()
         return
       }
@@ -88,10 +86,7 @@ export function StarNagAgentValueMomentObserver(): null {
           }
         }
         const freshElapsedSinceTyping = Date.now() - lastTypingAtRef.current
-        if (
-          hasActiveAgent(useAppStore.getState().agentStatusByPaneKey) ||
-          freshElapsedSinceTyping < QUIET_WINDOW_MS
-        ) {
+        if (hasActiveAgent(latestEntriesRef.current) || freshElapsedSinceTyping < QUIET_WINDOW_MS) {
           scheduleCheck()
           return
         }
@@ -101,6 +96,10 @@ export function StarNagAgentValueMomentObserver(): null {
       })()
     }, CHECK_DELAY_MS)
   }, [])
+
+  useEffect(() => {
+    latestEntriesRef.current = agentStatusByPaneKey
+  }, [agentStatusByPaneKey, agentStatusEpoch])
 
   useEffect(() => {
     const markTyping = (event: Event): void => {
@@ -120,18 +119,17 @@ export function StarNagAgentValueMomentObserver(): null {
   }, [])
 
   useEffect(() => {
-    const currentEntries = useAppStore.getState().agentStatusByPaneKey
     const previousEntries = previousEntriesRef.current
-    previousEntriesRef.current = currentEntries
+    previousEntriesRef.current = agentStatusByPaneKey
     if (!previousEntries || requestedRef.current) {
       return
     }
-    if (!hasSuccessfulDoneTransition(previousEntries, currentEntries)) {
+    if (!hasSuccessfulDoneTransition(previousEntries, agentStatusByPaneKey)) {
       return
     }
     pendingRef.current = true
     scheduleCheck()
-  }, [agentStatusEpoch, scheduleCheck])
+  }, [agentStatusByPaneKey, agentStatusEpoch, scheduleCheck])
 
   useEffect(() => {
     return () => {

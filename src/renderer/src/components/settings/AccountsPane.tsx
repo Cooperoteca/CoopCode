@@ -7,11 +7,8 @@ import { useEffect, useRef, useState } from 'react'
 import type {
   ClaudeRateLimitAccountsState,
   CodexRateLimitAccountsState,
-  CodexSystemDefaultIdentity,
   GlobalSettings
 } from '../../../../shared/types'
-import { resolveLocalAccountRuntimeTarget } from '../../../../shared/local-account-runtime'
-import { getRendererAppPlatform } from '../../lib/renderer-app-platform'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
@@ -46,14 +43,10 @@ import {
   getAccountsCodexSearchEntries,
   getAccountsGeminiSearchEntries,
   getAccountsLocationSearchEntries,
-  getAccountsGrokSearchEntries,
   getAccountsMiniMaxSearchEntries,
   getAccountsOpencodeSearchEntries,
   getAccountsPaneSearchEntries
 } from './accounts-search'
-import { GrokAccountsSection } from './GrokAccountsSection'
-import { getRemoteAccountsPaneScope } from './provider-account-scope'
-import { ProviderHostScopeControl } from './ProviderHostScopeControl'
 import { SearchableSetting } from './SearchableSetting'
 import { SettingsRow, SettingsSegmentedControl } from './SettingsFormControls'
 import { matchesSettingsSearch } from './settings-search'
@@ -67,29 +60,8 @@ import {
   DialogTitle
 } from '../ui/dialog'
 import { getCodexAccountAuthWarning } from './codex-account-auth-warning'
-import { getCodexConfigSyncWarning } from './codex-config-sync-warning'
-import type { CodexConfigSyncStatus } from '../../../../shared/codex-config-sync-types'
-import {
-  getProviderAccountActiveIdForView,
-  getProviderAccountRuntime,
-  providerAccountIsActiveInView,
-  providerAccountMatchesView,
-  WSL_DEFAULT_DISTRO_KEY,
-  type ProviderAccountRuntimeView
-} from './provider-account-visibility'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
-import { isWebClientLocation } from '@/lib/web-client-location'
-import {
-  emptyClaudeAccountsState,
-  emptyCodexAccountsState,
-  hasRemoteProviderAccountOwner,
-  removeClaudeProviderAccount,
-  removeCodexProviderAccount,
-  selectClaudeProviderAccount,
-  selectCodexProviderAccount,
-  watchProviderAccounts
-} from '@/runtime/runtime-provider-accounts-client'
 
 export { getAccountsPaneSearchEntries }
 
@@ -164,7 +136,6 @@ type AccountsPaneProps = {
   wslAvailable?: boolean
   wslDistros?: string[]
   wslCapabilitiesLoading?: boolean
-  accountOwnerPlatform?: NodeJS.Platform | null
 }
 
 function getHostRuntimeLabel(): string {
@@ -183,27 +154,44 @@ function getCodexAccountLabel(
   return state.accounts.find((account) => account.id === accountId)?.email ?? 'Codex account'
 }
 
-// Why: the system-default row has no stored identity, so surface the real
-// ~/.codex login live — the OAuth email when signed in, a clear custom-provider
-// note for env-key logins, and the generic fallback when signed out.
-function getCodexSystemDefaultSubtitle(
-  identity: CodexSystemDefaultIdentity | undefined,
-  runtimeSentenceLabel: string
-): string {
-  if (identity?.authKind === 'oauth' && identity.email) {
-    return identity.email
+function getActiveCodexAccountIdForRuntime(
+  state: CodexRateLimitAccountsState,
+  runtime: LocalAccountRuntime
+): string | null {
+  if (runtime.runtime === 'host') {
+    return state.activeAccountIdsByRuntime?.host ?? state.activeAccountId
   }
-  if (identity?.authKind === 'api-key') {
-    return translate(
-      'auto.components.settings.AccountsPane.codexSystemDefaultCustomProvider',
-      'Custom provider — no usage tracked.'
-    )
+  if (runtime.wslDistro) {
+    return state.activeAccountIdsByRuntime?.wsl?.[runtime.wslDistro] ?? null
   }
-  return translate(
-    'auto.components.settings.AccountsPane.fcc4093fc1',
-    'Use your current {{value0}} Codex login.',
-    { value0: runtimeSentenceLabel }
+  const defaultSelection = state.activeAccountIdsByRuntime?.wsl?.__default__
+  if (defaultSelection) {
+    return defaultSelection
+  }
+  const selectedIds = Array.from(
+    new Set(Object.values(state.activeAccountIdsByRuntime?.wsl ?? {}).filter(Boolean))
   )
+  return selectedIds.length === 1 ? selectedIds[0] : null
+}
+
+function getActiveClaudeAccountIdForRuntime(
+  state: ClaudeRateLimitAccountsState,
+  runtime: LocalAccountRuntime
+): string | null {
+  if (runtime.runtime === 'host') {
+    return state.activeAccountIdsByRuntime?.host ?? state.activeAccountId
+  }
+  if (runtime.wslDistro) {
+    return state.activeAccountIdsByRuntime?.wsl?.[runtime.wslDistro] ?? null
+  }
+  const defaultSelection = state.activeAccountIdsByRuntime?.wsl?.__default__
+  if (defaultSelection) {
+    return defaultSelection
+  }
+  const selectedIds = Array.from(
+    new Set(Object.values(state.activeAccountIdsByRuntime?.wsl ?? {}).filter(Boolean))
+  )
+  return selectedIds.length === 1 ? selectedIds[0] : null
 }
 
 function getClaudeAccountLabel(
@@ -217,23 +205,21 @@ function getClaudeAccountLabel(
 }
 
 function getCodexAccountRuntimeLabel(
-  account: CodexRateLimitAccountsState['accounts'][number],
-  hostLabel = getHostRuntimeLabel()
+  account: CodexRateLimitAccountsState['accounts'][number]
 ): string {
   if (account.managedHomeRuntime === 'wsl') {
     return account.wslDistro ? `WSL ${account.wslDistro}` : 'WSL'
   }
-  return hostLabel
+  return getHostRuntimeLabel()
 }
 
 function getClaudeAccountRuntimeLabel(
-  account: ClaudeRateLimitAccountsState['accounts'][number],
-  hostLabel = getHostRuntimeLabel()
+  account: ClaudeRateLimitAccountsState['accounts'][number]
 ): string {
   if (account.managedAuthRuntime === 'wsl') {
     return account.wslDistro ? `WSL ${account.wslDistro}` : 'WSL'
   }
-  return hostLabel
+  return getHostRuntimeLabel()
 }
 
 function getCodexAccountErrorDescription(error: unknown): string {
@@ -290,6 +276,26 @@ type LocalAccountRuntime = {
   label: string
 }
 
+function accountMatchesRuntime(
+  account:
+    | CodexRateLimitAccountsState['accounts'][number]
+    | ClaudeRateLimitAccountsState['accounts'][number],
+  runtime: LocalAccountRuntime
+): boolean {
+  const accountRuntime =
+    'authMethod' in account
+      ? (account.managedAuthRuntime ?? 'host')
+      : (account.managedHomeRuntime ?? 'host')
+  const accountDistro = account.wslDistro ?? null
+  if (runtime.runtime === 'host') {
+    return accountRuntime !== 'wsl'
+  }
+  if (accountRuntime !== 'wsl') {
+    return false
+  }
+  return runtime.wslDistro ? accountDistro === runtime.wslDistro : true
+}
+
 function getSelectedAccountRuntime(
   settings: GlobalSettings,
   wslSupportedPlatform: boolean,
@@ -297,16 +303,14 @@ function getSelectedAccountRuntime(
   wslDistros: string[],
   wslCapabilitiesLoading: boolean
 ): LocalAccountRuntime {
-  // Why: the two-option control displays the concrete target behind the persisted auto policy.
-  const resolvedRuntime = resolveLocalAccountRuntimeTarget(settings, getRendererAppPlatform())
-  if (wslSupportedPlatform && resolvedRuntime.runtime === 'wsl') {
+  if (wslSupportedPlatform && settings.localAccountRuntime === 'wsl') {
     if (!wslAvailable && !wslCapabilitiesLoading) {
       return {
         runtime: 'wsl',
         label: translate('auto.components.settings.AccountsPane.8619f9afa9', 'WSL')
       }
     }
-    const configuredDistro = resolvedRuntime.wslDistro?.trim() || null
+    const configuredDistro = settings.localAccountWslDistro?.trim() || null
     const selectedDistro =
       configuredDistro && (wslCapabilitiesLoading || wslDistros.includes(configuredDistro))
         ? configuredDistro
@@ -328,8 +332,7 @@ export function AccountsPane({
   wslSupportedPlatform = false,
   wslAvailable = false,
   wslDistros = EMPTY_WSL_DISTROS,
-  wslCapabilitiesLoading = false,
-  accountOwnerPlatform = null
+  wslCapabilitiesLoading = false
 }: AccountsPaneProps): React.JSX.Element {
   const searchQuery = useAppStore((s) => s.settingsSearchQuery)
   const codexRateLimits = useAppStore((s) => s.rateLimits.codex)
@@ -337,158 +340,61 @@ export function AccountsPane({
   const miniMaxRateLimits = useAppStore((s) => s.rateLimits.minimax)
   const recordFeatureInteraction = useAppStore((s) => s.recordFeatureInteraction)
   const fetchSettings = useAppStore((s) => s.fetchSettings)
-  const runtimeEnvironments = useAppStore((s) => s.runtimeEnvironments)
   const recordedOpenCodeSettingEditsRef = useRef<Set<'cookie' | 'workspaceId'>>(new Set())
   const [miniMaxCookieDraft, setMiniMaxCookieDraft] = useState('')
   const [miniMaxConfigured, setMiniMaxConfigured] = useState(false)
   const [miniMaxCredentialBusy, setMiniMaxCredentialBusy] = useState(false)
-  const localAccountRuntime = getSelectedAccountRuntime(
+  const accountRuntime = getSelectedAccountRuntime(
     settings,
     wslSupportedPlatform,
     wslAvailable,
     wslDistros,
     wslCapabilitiesLoading
   )
-  // Why: with a Remote Orca Server active the server owns provider accounts
-  // (see #7973); every list/select/remove below must scope to it, not host/WSL.
-  const isRemoteAccountScope = hasRemoteProviderAccountOwner(settings)
-  const activeRuntimeEnvironmentId = settings.activeRuntimeEnvironmentId?.trim() || null
-  // Why: keep the real name separate from the prose fallback below; the scope
-  // label must not interpolate the fallback.
-  const remoteServerName = isRemoteAccountScope
-    ? (runtimeEnvironments.find((environment) => environment.id === activeRuntimeEnvironmentId)
-        ?.name ?? null)
-    : null
-  const remoteServerLabel = isRemoteAccountScope
-    ? (remoteServerName ??
-      translate('auto.components.settings.AccountsPane.remoteServerFallback', 'the remote server'))
-    : null
-  const accountRuntime: LocalAccountRuntime = isRemoteAccountScope
-    ? { runtime: 'host', label: remoteServerLabel ?? '' }
-    : localAccountRuntime
   // Why: host runtime labels are standalone UI labels; interpolated prose needs sentence casing.
   const accountRuntimeSentenceLabel =
-    !isRemoteAccountScope &&
-    accountRuntime.runtime === 'host' &&
-    !navigator.userAgent.includes('Windows')
+    accountRuntime.runtime === 'host' && !navigator.userAgent.includes('Windows')
       ? `${accountRuntime.label.charAt(0).toLocaleLowerCase()}${accountRuntime.label.slice(1)}`
       : accountRuntime.label
-  const localAccountRuntimeSentenceLabel =
-    localAccountRuntime.runtime === 'host' && !navigator.userAgent.includes('Windows')
-      ? `${localAccountRuntime.label.charAt(0).toLocaleLowerCase()}${localAccountRuntime.label.slice(1)}`
-      : localAccountRuntime.label
-  // Why: users read the remote-scoped list as their desktop accounts being
-  // deleted (#8186); say they are intact and link the default-runtime control.
-  // The web client has no desktop-owned accounts and cannot select Local
-  // desktop, so promising a switch back would be a dead end there.
-  const remoteAccountScopeNotice =
-    isRemoteAccountScope && !isWebClientLocation() ? (
-      <ProviderHostScopeControl
-        labelPrefix={translate(
-          'auto.components.settings.AccountsPane.accountScopePrefix',
-          'Account scope'
-        )}
-        scope={getRemoteAccountsPaneScope(remoteServerName)}
-        className="text-xs"
-      />
-    ) : null
 
-  const [codexAccounts, setCodexAccounts] =
-    useState<CodexRateLimitAccountsState>(emptyCodexAccountsState)
+  const [codexAccounts, setCodexAccounts] = useState<CodexRateLimitAccountsState>({
+    accounts: [],
+    activeAccountId: null,
+    activeAccountIdsByRuntime: { host: null, wsl: {} }
+  })
   const [codexAccountsLoaded, setCodexAccountsLoaded] = useState(false)
   const [codexAction, setCodexAction] = useState<
     'idle' | 'adding' | `reauth:${string}` | `remove:${string}` | `select:${string | 'system'}`
   >('idle')
-  const [claudeAccounts, setClaudeAccounts] =
-    useState<ClaudeRateLimitAccountsState>(emptyClaudeAccountsState)
+  const [claudeAccounts, setClaudeAccounts] = useState<ClaudeRateLimitAccountsState>({
+    accounts: [],
+    activeAccountId: null,
+    activeAccountIdsByRuntime: { host: null, wsl: {} }
+  })
   const [claudeAction, setClaudeAction] = useState<
     'idle' | 'adding' | `reauth:${string}` | `remove:${string}` | `select:${string | 'system'}`
   >('idle')
-  // Why: capture the account's runtime slot when the dialog opens; the roster
-  // can change underneath an open dialog and lose the slot to diff for restarts.
-  const [removeCodexTarget, setRemoveCodexTarget] = useState<{
-    id: string
-    runtime: ProviderAccountRuntimeView
-  } | null>(null)
-  const [removeClaudeTarget, setRemoveClaudeTarget] = useState<{
-    id: string
-    runtime: ProviderAccountRuntimeView
-  } | null>(null)
-  const accountVisibilityOptions = {
-    remoteOwner: isRemoteAccountScope,
-    ownerPlatform: accountOwnerPlatform
-  }
+  const [removeAccountId, setRemoveAccountId] = useState<string | null>(null)
+  const [removeClaudeAccountId, setRemoveClaudeAccountId] = useState<string | null>(null)
   const visibleClaudeAccounts = claudeAccounts.accounts.filter((account) =>
-    providerAccountMatchesView(account, accountRuntime, accountVisibilityOptions)
+    accountMatchesRuntime(account, accountRuntime)
   )
   const visibleCodexAccounts = codexAccounts.accounts.filter((account) =>
-    providerAccountMatchesView(account, accountRuntime, accountVisibilityOptions)
+    accountMatchesRuntime(account, accountRuntime)
   )
-  const activeCodexAccountId = getProviderAccountActiveIdForView(codexAccounts, accountRuntime)
-  // Why: System default lights only when no account row is active; while a remote
-  // owner's platform is unknown WSL rows hide fail-closed, so check the full roster.
-  const ownerPlatformUnknown = isRemoteAccountScope && accountOwnerPlatform === null
-  const systemCodexActive = !(
-    ownerPlatformUnknown ? codexAccounts.accounts : visibleCodexAccounts
-  ).some((account) =>
-    providerAccountIsActiveInView(account, codexAccounts, accountRuntime, accountVisibilityOptions)
-  )
-  const systemClaudeActive = !(
-    ownerPlatformUnknown ? claudeAccounts.accounts : visibleClaudeAccounts
-  ).some((account) =>
-    providerAccountIsActiveInView(account, claudeAccounts, accountRuntime, accountVisibilityOptions)
-  )
-  // Why: the system default's real identity is host-scoped (it reflects the
-  // runtime's own ~/.codex), so only surface it in the host view. Per-distro
-  // WSL falls back to the generic label.
-  const systemCodexIdentity =
-    accountRuntime.runtime === 'host' ? codexAccounts.systemDefault : undefined
-  // Why: remote snapshots own their system-default identity, but the desktop's
-  // rate-limit poll must not be misattributed to a remote account owner.
+  const activeCodexAccountId = getActiveCodexAccountIdForRuntime(codexAccounts, accountRuntime)
+  const activeClaudeAccountId = getActiveClaudeAccountIdForRuntime(claudeAccounts, accountRuntime)
   const activeCodexAuthWarning = codexAccountsLoaded
     ? getCodexAccountAuthWarning({
-        limits: isRemoteAccountScope ? null : codexRateLimits,
+        limits: codexRateLimits,
         target: codexRateLimitTarget,
         runtime: accountRuntime,
         activeAccountId: activeCodexAccountId,
-        accountId: activeCodexAccountId,
-        authKind: activeCodexAccountId === null ? systemCodexIdentity?.authKind : undefined
+        accountId: activeCodexAccountId
       })
     : null
-  // Why: the mirror keeps serving the last synced settings when ~/.codex is
-  // unusable, so without this the user only sees their edits being ignored.
-  const [codexConfigSync, setCodexConfigSync] = useState<CodexConfigSyncStatus | null>(null)
-  useEffect(() => {
-    // Why: the status resolves the host's own ~/.codex and shared runtime home.
-    // A WSL or remote scope mirrors different homes entirely, so showing it there
-    // would name a config file that has nothing to do with the selected runtime.
-    if (isRemoteAccountScope || accountRuntime.runtime !== 'host') {
-      setCodexConfigSync(null)
-      return
-    }
-    let cancelled = false
-    void window.api.codexConfigSync
-      .status()
-      .then((status) => {
-        if (!cancelled) {
-          setCodexConfigSync(status)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCodexConfigSync(null)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-    // Why: the status resolves whichever home the ACTIVE selection mirrors into
-    // (per-account, shared, or none for the real-home lane), so switching
-    // accounts must refetch or the banner describes the previous account.
-  }, [isRemoteAccountScope, accountRuntime.runtime, activeCodexAccountId, codexAccountsLoaded])
-  const codexConfigSyncWarning = getCodexConfigSyncWarning(codexConfigSync)
-  const systemCodexMissingSignIn = activeCodexAuthWarning === 'missing-sign-in'
-  const systemCodexNeedsSignIn = activeCodexAccountId === null && Boolean(activeCodexAuthWarning)
+  const systemCodexNeedsReauthentication =
+    activeCodexAccountId === null && Boolean(activeCodexAuthWarning)
   const accountRuntimeUnavailable =
     accountRuntime.runtime === 'wsl' && !wslAvailable && !wslCapabilitiesLoading
 
@@ -571,28 +477,21 @@ export function AccountsPane({
   }, [])
 
   useEffect(() => {
-    // Why: remote snapshots stream usage refreshes after the synchronous ready
-    // message, so the watcher stays open for the pane's lifetime; the local
-    // path resolves once and the close() is a no-op.
-    const watcher = watchProviderAccounts(
-      { activeRuntimeEnvironmentId },
-      {
-        onSnapshot: (snapshot) => {
-          // Why: a failed provider's half is a substituted empty roster, not
-          // authoritative data; keep prior state and leave the loaded gate shut.
-          if (!snapshot.failedProviders?.includes('codex')) {
-            setCodexAccounts(snapshot.codex)
-            setCodexAccountsLoaded(true)
-          }
-          if (!snapshot.failedProviders?.includes('claude')) {
-            setClaudeAccounts(snapshot.claude)
-          }
-        },
-        onError: (error) => {
+    let stale = false
+
+    const loadCodexAccounts = async (): Promise<void> => {
+      try {
+        const nextCodex = await window.api.codexAccounts.list()
+        if (!stale) {
+          setCodexAccounts(nextCodex)
+          setCodexAccountsLoaded(true)
+        }
+      } catch (error) {
+        if (!stale) {
           toast.error(
             translate(
-              'auto.components.settings.AccountsPane.loadAccountsFailed',
-              'Could not load provider accounts.'
+              'auto.components.settings.AccountsPane.b8c2905c2b',
+              'Could not load Codex accounts.'
             ),
             {
               description: String((error as Error)?.message ?? error)
@@ -600,27 +499,46 @@ export function AccountsPane({
           )
         }
       }
-    )
+    }
+
+    const loadClaudeAccounts = async (): Promise<void> => {
+      try {
+        const nextClaude = await window.api.claudeAccounts.list()
+        if (!stale) {
+          setClaudeAccounts(nextClaude)
+        }
+      } catch (error) {
+        if (!stale) {
+          toast.error(
+            translate(
+              'auto.components.settings.AccountsPane.9107406589',
+              'Could not load Claude accounts.'
+            ),
+            {
+              description: String((error as Error)?.message ?? error)
+            }
+          )
+        }
+      }
+    }
+
+    void loadCodexAccounts()
+    void loadClaudeAccounts()
 
     return () => {
-      watcher.close()
+      stale = true
     }
-  }, [activeRuntimeEnvironmentId])
+  }, [])
 
   const syncCodexAccounts = async (next: CodexRateLimitAccountsState): Promise<void> => {
     setCodexAccounts(next)
     setCodexAccountsLoaded(true)
-    // Why: remote mutations never change local GlobalSettings account fields.
-    if (!isRemoteAccountScope) {
-      await fetchSettings()
-    }
+    await fetchSettings()
   }
 
   const syncClaudeAccounts = async (next: ClaudeRateLimitAccountsState): Promise<void> => {
     setClaudeAccounts(next)
-    if (!isRemoteAccountScope) {
-      await fetchSettings()
-    }
+    await fetchSettings()
   }
 
   const formatAccountTimestamp = (timestamp: number): string => {
@@ -681,11 +599,11 @@ export function AccountsPane({
             />
             {wslSupportedPlatform && accountRuntime.runtime === 'wsl' ? (
               <Select
-                value={accountRuntime.wslDistro ?? WSL_DEFAULT_DISTRO_KEY}
+                value={accountRuntime.wslDistro ?? '__default__'}
                 onValueChange={(value) =>
                   updateSettings({
                     localAccountRuntime: 'wsl',
-                    localAccountWslDistro: value === WSL_DEFAULT_DISTRO_KEY ? null : value
+                    localAccountWslDistro: value === '__default__' ? null : value
                   })
                 }
                 disabled={wslCapabilitiesLoading || !wslAvailable}
@@ -706,7 +624,7 @@ export function AccountsPane({
                   />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={WSL_DEFAULT_DISTRO_KEY}>
+                  <SelectItem value="__default__">
                     {translate('auto.components.settings.AccountsPane.2358ac71d2', 'WSL default')}
                   </SelectItem>
                   {wslDistros.map((distro) => (
@@ -723,20 +641,17 @@ export function AccountsPane({
     </SearchableSetting>
   ) : null
 
-  // Why: remote Windows flattens host and WSL rows, so mutation follow-up must
-  // compare the selected row's runtime slot instead of the forced host view.
   const runCodexAccountAction = async (
     action: typeof codexAction,
-    operation: () => Promise<CodexRateLimitAccountsState>,
-    actionRuntime: ProviderAccountRuntimeView = accountRuntime
+    operation: () => Promise<CodexRateLimitAccountsState>
   ): Promise<void> => {
-    const previousActiveAccountId = getProviderAccountActiveIdForView(codexAccounts, actionRuntime)
+    const previousActiveAccountId = getActiveCodexAccountIdForRuntime(codexAccounts, accountRuntime)
     setCodexAction(action)
     try {
       const next = await operation()
       await syncCodexAccounts(next)
       recordFeatureInteraction('codex-account-switching')
-      const nextActiveAccountId = getProviderAccountActiveIdForView(next, actionRuntime)
+      const nextActiveAccountId = getActiveCodexAccountIdForRuntime(next, accountRuntime)
       const shouldPromptRestart =
         action === 'adding' ||
         (action.startsWith('select:') && previousActiveAccountId !== nextActiveAccountId) ||
@@ -745,29 +660,9 @@ export function AccountsPane({
           action === `reauth:${nextActiveAccountId}`) ||
         (action.startsWith('remove:') && previousActiveAccountId !== nextActiveAccountId)
       if (shouldPromptRestart) {
-        // Why: `add` creates the managed home against the machine's own distro,
-        // so the slot it wrote is the created account's — not this row's, which
-        // may still say "WSL default". Found by diffing the roster rather than
-        // by the row's active id, which resolves to null once two distro slots
-        // are filled and would send the notice to the wrong lane.
-        const newAccounts =
-          action === 'adding'
-            ? next.accounts.filter(
-                (account) => !codexAccounts.accounts.some((prior) => prior.id === account.id)
-              )
-            : []
-        // Why exactly one: an unloaded prior roster makes every account look new,
-        // and picking one of those would aim the notice at an unrelated lane.
-        // Falling back to the row is the pre-existing behaviour, not a new risk.
-        const addedAccount = newAccounts.length === 1 ? newAccounts[0] : undefined
         void markLiveCodexSessionsForRestart({
           previousAccountLabel: getCodexAccountLabel(codexAccounts, previousActiveAccountId),
-          nextAccountLabel: getCodexAccountLabel(next, nextActiveAccountId),
-          // Why: the mutation wrote this row's slot only, so panes on any other
-          // lane still launch under the account they already had.
-          target: addedAccount ? getProviderAccountRuntime(addedAccount) : actionRuntime,
-          // Why: clearing a distro-less WSL row nulls every distro slot at once.
-          clearsEveryWslDistro: action === 'select:system'
+          nextAccountLabel: getCodexAccountLabel(next, nextActiveAccountId)
         })
       }
     } catch (error) {
@@ -787,16 +682,18 @@ export function AccountsPane({
 
   const runClaudeAccountAction = async (
     action: typeof claudeAction,
-    operation: () => Promise<ClaudeRateLimitAccountsState>,
-    actionRuntime: ProviderAccountRuntimeView = accountRuntime
+    operation: () => Promise<ClaudeRateLimitAccountsState>
   ): Promise<void> => {
-    const previousActiveAccountId = getProviderAccountActiveIdForView(claudeAccounts, actionRuntime)
+    const previousActiveAccountId = getActiveClaudeAccountIdForRuntime(
+      claudeAccounts,
+      accountRuntime
+    )
     setClaudeAction(action)
     try {
       const next = await operation()
       await syncClaudeAccounts(next)
       recordFeatureInteraction('claude-account-switching')
-      const nextActiveAccountId = getProviderAccountActiveIdForView(next, actionRuntime)
+      const nextActiveAccountId = getActiveClaudeAccountIdForRuntime(next, accountRuntime)
       const shouldPromptRestart =
         action === 'adding' ||
         previousActiveAccountId !== nextActiveAccountId ||
@@ -838,7 +735,6 @@ export function AccountsPane({
 
   const visibleSections = [
     wslSupportedPlatform &&
-    !isRemoteAccountScope &&
     matchesSettingsSearch(searchQuery, getAccountsLocationSearchEntries()) ? (
       <section key="account-runtime" id="accounts-runtime" className="space-y-3 scroll-mt-6">
         {accountRuntimeControls}
@@ -874,17 +770,11 @@ export function AccountsPane({
                 {translate('auto.components.settings.AccountsPane.94d351af4a', 'Accounts')}
               </Label>
               <p className="text-xs text-muted-foreground">
-                {isRemoteAccountScope
-                  ? translate(
-                      'auto.components.settings.AccountsPane.remoteScopeAccounts',
-                      'Showing accounts managed by {{value0}}. Add or re-authenticate accounts on that server.',
-                      { value0: accountRuntimeSentenceLabel }
-                    )
-                  : translate(
-                      'auto.components.settings.AccountsPane.c0a52abfc5',
-                      'Showing accounts for {{value0}}. New accounts are added there.',
-                      { value0: accountRuntimeSentenceLabel }
-                    )}
+                {translate(
+                  'auto.components.settings.AccountsPane.c0a52abfc5',
+                  'Showing accounts for {{value0}}. New accounts are added there.',
+                  { value0: accountRuntimeSentenceLabel }
+                )}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
@@ -900,12 +790,7 @@ export function AccountsPane({
                   )
                 }
                 disabled={
-                  // Why: interactive `claude login` needs a desktop browser and
-                  // would authenticate against this device, not the server.
-                  isRemoteAccountScope ||
-                  claudeAction !== 'idle' ||
-                  wslCapabilitiesLoading ||
-                  accountRuntimeUnavailable
+                  claudeAction !== 'idle' || wslCapabilitiesLoading || accountRuntimeUnavailable
                 }
                 className="gap-1.5"
               >
@@ -929,14 +814,13 @@ export function AccountsPane({
               ) : null}
             </div>
           </div>
-          {remoteAccountScopeNotice}
 
           <div className="space-y-2">
             <button
               type="button"
               onClick={() =>
                 void runClaudeAccountAction('select:system', () =>
-                  selectClaudeProviderAccount(settings, {
+                  window.api.claudeAccounts.select({
                     accountId: null,
                     runtime: accountRuntime.runtime,
                     wslDistro: accountRuntime.wslDistro
@@ -945,7 +829,7 @@ export function AccountsPane({
               }
               disabled={claudeAction !== 'idle' || accountRuntimeUnavailable}
               className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${
-                systemClaudeActive
+                activeClaudeAccountId === null
                   ? 'border-foreground/20 bg-accent/15'
                   : 'border-border/70 hover:border-border hover:bg-accent/8'
               } disabled:cursor-default disabled:opacity-100`}
@@ -958,7 +842,7 @@ export function AccountsPane({
                       'System default'
                     )}
                   </span>
-                  {systemClaudeActive ? (
+                  {activeClaudeAccountId === null ? (
                     <Badge
                       variant="outline"
                       className="h-4 shrink-0 rounded px-1.5 text-[10px] font-medium leading-none text-foreground/80"
@@ -978,26 +862,15 @@ export function AccountsPane({
             </button>
             {visibleClaudeAccounts.length === 0 ? (
               <div className="rounded-md border border-dashed border-border/70 px-3 py-4 text-xs text-muted-foreground">
-                {isRemoteAccountScope
-                  ? translate(
-                      'auto.components.settings.AccountsPane.remoteEmptyClaudeAccounts',
-                      'No managed Claude accounts on {{value0}}. It uses its system default Claude login; add accounts on that server.',
-                      { value0: accountRuntimeSentenceLabel }
-                    )
-                  : translate(
-                      'auto.components.settings.AccountsPane.3fe7862418',
-                      "No managed Claude accounts for {{value0}}. Orca will use that environment's system default Claude login until you add one here.",
-                      { value0: accountRuntimeSentenceLabel }
-                    )}
+                {translate(
+                  'auto.components.settings.AccountsPane.3fe7862418',
+                  "No managed Claude accounts for {{value0}}. Orca will use that environment's system default Claude login until you add one here.",
+                  { value0: accountRuntimeSentenceLabel }
+                )}
               </div>
             ) : (
               visibleClaudeAccounts.map((account) => {
-                const isActive = providerAccountIsActiveInView(
-                  account,
-                  claudeAccounts,
-                  accountRuntime,
-                  accountVisibilityOptions
-                )
+                const isActive = activeClaudeAccountId === account.id
                 const isReauthing = claudeAction === `reauth:${account.id}`
                 const isBusy = claudeAction !== 'idle' || accountRuntimeUnavailable
 
@@ -1013,18 +886,15 @@ export function AccountsPane({
                     <div className="flex w-full items-center justify-between gap-3 max-md:flex-col max-md:items-start">
                       <button
                         type="button"
-                        onClick={() => {
-                          const accountRuntimeView = getProviderAccountRuntime(account)
-                          void runClaudeAccountAction(
-                            `select:${account.id}`,
-                            () =>
-                              selectClaudeProviderAccount(settings, {
-                                accountId: account.id,
-                                ...accountRuntimeView
-                              }),
-                            accountRuntimeView
+                        onClick={() =>
+                          void runClaudeAccountAction(`select:${account.id}`, () =>
+                            window.api.claudeAccounts.select({
+                              accountId: account.id,
+                              runtime: account.managedAuthRuntime ?? 'host',
+                              wslDistro: account.wslDistro ?? null
+                            })
                           )
-                        }}
+                        }
                         disabled={isBusy}
                         className="flex min-w-0 flex-1 flex-col gap-0.5 text-left disabled:cursor-default"
                       >
@@ -1034,7 +904,7 @@ export function AccountsPane({
                             variant="outline"
                             className="h-4 shrink-0 rounded px-1.5 text-[10px] font-medium leading-none text-foreground/70"
                           >
-                            {getClaudeAccountRuntimeLabel(account, accountRuntime.label)}
+                            {getClaudeAccountRuntimeLabel(account)}
                           </Badge>
                           {isActive ? (
                             <Badge
@@ -1060,16 +930,11 @@ export function AccountsPane({
                           size="xs"
                           onClick={(event) => {
                             event.stopPropagation()
-                            void runClaudeAccountAction(
-                              `reauth:${account.id}`,
-                              () =>
-                                window.api.claudeAccounts.reauthenticate({
-                                  accountId: account.id
-                                }),
-                              getProviderAccountRuntime(account)
+                            void runClaudeAccountAction(`reauth:${account.id}`, () =>
+                              window.api.claudeAccounts.reauthenticate({ accountId: account.id })
                             )
                           }}
-                          disabled={isRemoteAccountScope || isBusy}
+                          disabled={isBusy}
                           className="h-6 px-2 text-muted-foreground hover:text-foreground"
                         >
                           {isReauthing ? (
@@ -1087,10 +952,7 @@ export function AccountsPane({
                           size="xs"
                           onClick={(event) => {
                             event.stopPropagation()
-                            setRemoveClaudeTarget({
-                              id: account.id,
-                              runtime: getProviderAccountRuntime(account)
-                            })
+                            setRemoveClaudeAccountId(account.id)
                           }}
                           disabled={isBusy}
                           className="h-6 px-2 text-muted-foreground hover:text-destructive"
@@ -1122,16 +984,10 @@ export function AccountsPane({
             )}
           </p>
           <p className="text-xs text-muted-foreground">
-            {isRemoteAccountScope
-              ? translate(
-                  'auto.components.settings.AccountsPane.remoteScopeAuthContext',
-                  'Each account keeps its own sign-in context on {{value0}}.',
-                  { value0: accountRuntimeSentenceLabel }
-                )
-              : translate(
-                  'auto.components.settings.AccountsPane.340d6f7a85',
-                  'Each account keeps its own local sign-in context in Orca. Account auth stays on this device.'
-                )}
+            {translate(
+              'auto.components.settings.AccountsPane.340d6f7a85',
+              'Each account keeps its own local sign-in context in Orca. Account auth stays on this device.'
+            )}
           </p>
         </div>
 
@@ -1161,46 +1017,16 @@ export function AccountsPane({
             <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               <span>
-                {systemCodexMissingSignIn
+                {activeCodexAccountId
                   ? translate(
-                      'auto.components.settings.AccountsPane.codexSystemDefaultNeedsSignIn',
-                      'No Codex sign-in was found for {{value0}}.',
+                      'auto.components.settings.AccountsPane.75ca9b718e',
+                      'Codex reported that the active account needs a fresh sign-in. Re-authenticate it before starting new Codex sessions.'
+                    )
+                  : translate(
+                      'auto.components.settings.AccountsPane.e4a28e8894',
+                      'Codex reported that the {{value0}} login needs a fresh sign-in. Sign in again before starting new Codex sessions.',
                       { value0: accountRuntimeSentenceLabel }
-                    )
-                  : activeCodexAccountId
-                    ? translate(
-                        'auto.components.settings.AccountsPane.75ca9b718e',
-                        'Codex reported that the active account needs a fresh sign-in. Re-authenticate it before starting new Codex sessions.'
-                      )
-                    : translate(
-                        'auto.components.settings.AccountsPane.e4a28e8894',
-                        'Codex reported that the {{value0}} login needs a fresh sign-in. Sign in again before starting new Codex sessions.',
-                        { value0: accountRuntimeSentenceLabel }
-                      )}
-              </span>
-            </div>
-          ) : null}
-          {codexConfigSyncWarning ? (
-            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-              <span>
-                {codexConfigSyncWarning === 'missing-source'
-                  ? translate(
-                      'auto.components.settings.AccountsPane.codexConfigSyncMissingSource',
-                      'Codex is still using the settings it last synced because {{value0}} is missing. Restore that file to resume syncing.',
-                      { value0: codexConfigSync?.systemConfigPath ?? '' }
-                    )
-                  : codexConfigSyncWarning === 'blank-source'
-                    ? translate(
-                        'auto.components.settings.AccountsPane.codexConfigSyncBlankSource',
-                        'Codex is still using the settings it last synced because {{value0}} is empty. That is expected while a synced folder finishes downloading.',
-                        { value0: codexConfigSync?.systemConfigPath ?? '' }
-                      )
-                    : translate(
-                        'auto.components.settings.AccountsPane.codexConfigSyncUnreadableSource',
-                        "Codex is still using the settings it last synced because {{value0}} could not be read. Check that file's permissions.",
-                        { value0: codexConfigSync?.systemConfigPath ?? '' }
-                      )}
+                    )}
               </span>
             </div>
           ) : null}
@@ -1210,17 +1036,11 @@ export function AccountsPane({
                 {translate('auto.components.settings.AccountsPane.94d351af4a', 'Accounts')}
               </Label>
               <p className="text-xs text-muted-foreground">
-                {isRemoteAccountScope
-                  ? translate(
-                      'auto.components.settings.AccountsPane.remoteScopeAccounts',
-                      'Showing accounts managed by {{value0}}. Add or re-authenticate accounts on that server.',
-                      { value0: accountRuntimeSentenceLabel }
-                    )
-                  : translate(
-                      'auto.components.settings.AccountsPane.c0a52abfc5',
-                      'Showing accounts for {{value0}}. New accounts are added there.',
-                      { value0: accountRuntimeSentenceLabel }
-                    )}
+                {translate(
+                  'auto.components.settings.AccountsPane.c0a52abfc5',
+                  'Showing accounts for {{value0}}. New accounts are added there.',
+                  { value0: accountRuntimeSentenceLabel }
+                )}
               </p>
             </div>
             <Button
@@ -1235,12 +1055,7 @@ export function AccountsPane({
                 )
               }
               disabled={
-                // Why: interactive `codex login` needs a desktop browser and
-                // would authenticate against this device, not the server.
-                isRemoteAccountScope ||
-                codexAction !== 'idle' ||
-                wslCapabilitiesLoading ||
-                accountRuntimeUnavailable
+                codexAction !== 'idle' || wslCapabilitiesLoading || accountRuntimeUnavailable
               }
               className="gap-1.5"
             >
@@ -1252,14 +1067,13 @@ export function AccountsPane({
               {translate('auto.components.settings.AccountsPane.b0e948a4f9', 'Add Account')}
             </Button>
           </div>
-          {remoteAccountScopeNotice}
 
           <div className="space-y-2">
             <button
               type="button"
               onClick={() =>
                 void runCodexAccountAction('select:system', () =>
-                  selectCodexProviderAccount(settings, {
+                  window.api.codexAccounts.select({
                     accountId: null,
                     runtime: accountRuntime.runtime,
                     wslDistro: accountRuntime.wslDistro
@@ -1268,9 +1082,9 @@ export function AccountsPane({
               }
               disabled={codexAction !== 'idle' || accountRuntimeUnavailable}
               className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${
-                systemCodexNeedsSignIn
+                systemCodexNeedsReauthentication
                   ? 'border-destructive/50 bg-destructive/5'
-                  : systemCodexActive
+                  : activeCodexAccountId === null
                     ? 'border-foreground/20 bg-accent/15'
                     : 'border-border/70 hover:border-border hover:bg-accent/8'
               } disabled:cursor-default disabled:opacity-100`}
@@ -1283,7 +1097,7 @@ export function AccountsPane({
                       'System default'
                     )}
                   </span>
-                  {systemCodexActive ? (
+                  {activeCodexAccountId === null ? (
                     <Badge
                       variant="outline"
                       className="h-4 shrink-0 rounded px-1.5 text-[10px] font-medium leading-none text-foreground/80"
@@ -1291,7 +1105,7 @@ export function AccountsPane({
                       {translate('auto.components.settings.AccountsPane.e74831fb6b', 'Active')}
                     </Badge>
                   ) : null}
-                  {systemCodexNeedsSignIn ? (
+                  {systemCodexNeedsReauthentication ? (
                     <Badge
                       variant="destructive"
                       className="h-4 shrink-0 rounded px-1.5 text-[10px] font-medium leading-none"
@@ -1305,61 +1119,41 @@ export function AccountsPane({
                 </div>
                 <span
                   className={`truncate text-[11px] ${
-                    systemCodexNeedsSignIn ? 'text-destructive' : 'text-muted-foreground'
+                    systemCodexNeedsReauthentication ? 'text-destructive' : 'text-muted-foreground'
                   }`}
                 >
-                  {systemCodexNeedsSignIn
-                    ? systemCodexMissingSignIn
-                      ? translate(
-                          'auto.components.settings.AccountsPane.codexSystemDefaultNeedsSignIn',
-                          'No Codex sign-in was found for {{value0}}.',
-                          { value0: accountRuntimeSentenceLabel }
-                        )
-                      : translate(
-                          'auto.components.settings.AccountsPane.fd62f37c24',
-                          'Codex reported this {{value0}} login is out of date.',
-                          { value0: accountRuntimeSentenceLabel }
-                        )
-                    : getCodexSystemDefaultSubtitle(
-                        systemCodexIdentity,
-                        accountRuntimeSentenceLabel
+                  {systemCodexNeedsReauthentication
+                    ? translate(
+                        'auto.components.settings.AccountsPane.fd62f37c24',
+                        'Codex reported this {{value0}} login is out of date.',
+                        { value0: accountRuntimeSentenceLabel }
+                      )
+                    : translate(
+                        'auto.components.settings.AccountsPane.fcc4093fc1',
+                        'Use your current {{value0}} Codex login.',
+                        { value0: accountRuntimeSentenceLabel }
                       )}
                 </span>
               </div>
             </button>
             {visibleCodexAccounts.length === 0 ? (
               <div className="rounded-md border border-dashed border-border/70 px-3 py-4 text-xs text-muted-foreground">
-                {isRemoteAccountScope
-                  ? translate(
-                      'auto.components.settings.AccountsPane.remoteEmptyCodexAccounts',
-                      'No managed Codex accounts on {{value0}}. It uses its system default Codex login; add accounts on that server.',
-                      { value0: accountRuntimeSentenceLabel }
-                    )
-                  : translate(
-                      'auto.components.settings.AccountsPane.b4c9450319',
-                      "No managed Codex accounts for {{value0}}. Orca will use that environment's system default Codex login until you add one here.",
-                      { value0: accountRuntimeSentenceLabel }
-                    )}
+                {translate(
+                  'auto.components.settings.AccountsPane.b4c9450319',
+                  "No managed Codex accounts for {{value0}}. Orca will use that environment's system default Codex login until you add one here.",
+                  { value0: accountRuntimeSentenceLabel }
+                )}
               </div>
             ) : (
               visibleCodexAccounts.map((account) => {
-                const isActive = providerAccountIsActiveInView(
-                  account,
-                  codexAccounts,
-                  accountRuntime,
-                  accountVisibilityOptions
-                )
-                // Why: same remote gate as the section-level warning — the
-                // desktop's rate-limit poll says nothing about server accounts.
-                const accountAuthWarning = isRemoteAccountScope
-                  ? null
-                  : getCodexAccountAuthWarning({
-                      limits: codexRateLimits,
-                      target: codexRateLimitTarget,
-                      runtime: accountRuntime,
-                      activeAccountId: activeCodexAccountId,
-                      accountId: account.id
-                    })
+                const isActive = activeCodexAccountId === account.id
+                const accountAuthWarning = getCodexAccountAuthWarning({
+                  limits: codexRateLimits,
+                  target: codexRateLimitTarget,
+                  runtime: accountRuntime,
+                  activeAccountId: activeCodexAccountId,
+                  accountId: account.id
+                })
                 const needsReauthentication = Boolean(accountAuthWarning)
                 const isReauthing = codexAction === `reauth:${account.id}`
                 const isRemoving = codexAction === `remove:${account.id}`
@@ -1379,18 +1173,15 @@ export function AccountsPane({
                     <div className="flex w-full items-center justify-between gap-3 max-md:flex-col max-md:items-start">
                       <button
                         type="button"
-                        onClick={() => {
-                          const accountRuntimeView = getProviderAccountRuntime(account)
-                          void runCodexAccountAction(
-                            `select:${account.id}`,
-                            () =>
-                              selectCodexProviderAccount(settings, {
-                                accountId: account.id,
-                                ...accountRuntimeView
-                              }),
-                            accountRuntimeView
+                        onClick={() =>
+                          void runCodexAccountAction(`select:${account.id}`, () =>
+                            window.api.codexAccounts.select({
+                              accountId: account.id,
+                              runtime: account.managedHomeRuntime ?? 'host',
+                              wslDistro: account.wslDistro ?? null
+                            })
                           )
-                        }}
+                        }
                         disabled={isBusy}
                         className="flex min-w-0 flex-1 flex-col gap-0.5 text-left disabled:cursor-default"
                       >
@@ -1400,7 +1191,7 @@ export function AccountsPane({
                             variant="outline"
                             className="h-4 shrink-0 rounded px-1.5 text-[10px] font-medium leading-none text-foreground/70"
                           >
-                            {getCodexAccountRuntimeLabel(account, accountRuntime.label)}
+                            {getCodexAccountRuntimeLabel(account)}
                           </Badge>
                           {isActive ? (
                             <Badge
@@ -1458,16 +1249,11 @@ export function AccountsPane({
                           size="xs"
                           onClick={(event) => {
                             event.stopPropagation()
-                            void runCodexAccountAction(
-                              `reauth:${account.id}`,
-                              () =>
-                                window.api.codexAccounts.reauthenticate({
-                                  accountId: account.id
-                                }),
-                              getProviderAccountRuntime(account)
+                            void runCodexAccountAction(`reauth:${account.id}`, () =>
+                              window.api.codexAccounts.reauthenticate({ accountId: account.id })
                             )
                           }}
-                          disabled={isRemoteAccountScope || isBusy}
+                          disabled={isBusy}
                           className="h-6 px-2 text-muted-foreground hover:text-foreground"
                         >
                           {isReauthing ? (
@@ -1485,10 +1271,7 @@ export function AccountsPane({
                           size="xs"
                           onClick={(event) => {
                             event.stopPropagation()
-                            setRemoveCodexTarget({
-                              id: account.id,
-                              runtime: getProviderAccountRuntime(account)
-                            })
+                            setRemoveAccountId(account.id)
                           }}
                           disabled={isBusy}
                           className="h-6 px-2 text-muted-foreground hover:text-destructive"
@@ -1556,7 +1339,7 @@ export function AccountsPane({
               {translate(
                 'auto.components.settings.AccountsPane.c2aee76420',
                 'Extracts OAuth credentials from your local Gemini CLI installation to authenticate with Google for {{value0}}. This uses credentials issued to the Gemini CLI app, not Orca. May break if Google updates the CLI. Use at your own risk.',
-                { value0: localAccountRuntimeSentenceLabel }
+                { value0: accountRuntimeSentenceLabel }
               )}
             </p>
           </div>
@@ -1648,14 +1431,14 @@ export function AccountsPane({
             {translate(
               'auto.components.settings.AccountsPane.0023cc336e',
               'Paste either the raw token value (e.g.'
-            )}{' '}
+            )}
             <code className="text-xs">
               {translate('auto.components.settings.AccountsPane.922b51e02d', 'Fe26.2**…')}
             </code>
             {translate(
               'auto.components.settings.AccountsPane.338820326a',
               ') or the full cookie header (e.g.'
-            )}{' '}
+            )}
             <code className="text-xs">
               {translate('auto.components.settings.AccountsPane.8951c5309f', 'auth=Fe26.2**…')}
             </code>
@@ -1954,17 +1737,14 @@ export function AccountsPane({
           </SearchableSetting>
         </div>
       </section>
-    ) : null,
-    matchesSettingsSearch(searchQuery, getAccountsGrokSearchEntries()) ? (
-      <GrokAccountsSection key="grok" />
     ) : null
   ].filter(Boolean)
 
   return (
     <div className="space-y-8">
       <Dialog
-        open={removeCodexTarget !== null}
-        onOpenChange={(open) => !open && setRemoveCodexTarget(null)}
+        open={removeAccountId !== null}
+        onOpenChange={(open) => !open && setRemoveAccountId(null)}
       >
         <DialogContent showCloseButton={false}>
           <DialogHeader>
@@ -1976,27 +1756,25 @@ export function AccountsPane({
             </DialogTitle>
             <DialogDescription>
               {translate(
-                'auto.components.settings.AccountsPane.380a7736cc',
-                'Removing this account permanently deletes its managed Codex home, including all Codex session history and MCP logins stored inside. This cannot be undone. If the account is currently active, Orca falls back to the system default Codex login.'
+                'auto.components.settings.AccountsPane.99c8f9e498',
+                'Orca will delete the managed Codex home for this saved account. If it is currently active, Orca falls back to the system default Codex login.'
               )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRemoveCodexTarget(null)}>
+            <Button variant="outline" onClick={() => setRemoveAccountId(null)}>
               {translate('auto.components.settings.AccountsPane.dbb9626ed1', 'Cancel')}
             </Button>
             <Button
               variant="destructive"
               onClick={() => {
-                const target = removeCodexTarget
-                if (!target) {
+                const accountId = removeAccountId
+                if (!accountId) {
                   return
                 }
-                setRemoveCodexTarget(null)
-                void runCodexAccountAction(
-                  `remove:${target.id}`,
-                  () => removeCodexProviderAccount(settings, target.id),
-                  target.runtime
+                setRemoveAccountId(null)
+                void runCodexAccountAction(`remove:${accountId}`, () =>
+                  window.api.codexAccounts.remove({ accountId })
                 )
               }}
             >
@@ -2006,8 +1784,8 @@ export function AccountsPane({
         </DialogContent>
       </Dialog>
       <Dialog
-        open={removeClaudeTarget !== null}
-        onOpenChange={(open) => !open && setRemoveClaudeTarget(null)}
+        open={removeClaudeAccountId !== null}
+        onOpenChange={(open) => !open && setRemoveClaudeAccountId(null)}
       >
         <DialogContent showCloseButton={false}>
           <DialogHeader>
@@ -2025,21 +1803,19 @@ export function AccountsPane({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRemoveClaudeTarget(null)}>
+            <Button variant="outline" onClick={() => setRemoveClaudeAccountId(null)}>
               {translate('auto.components.settings.AccountsPane.dbb9626ed1', 'Cancel')}
             </Button>
             <Button
               variant="destructive"
               onClick={() => {
-                const target = removeClaudeTarget
-                if (!target) {
+                const accountId = removeClaudeAccountId
+                if (!accountId) {
                   return
                 }
-                setRemoveClaudeTarget(null)
-                void runClaudeAccountAction(
-                  `remove:${target.id}`,
-                  () => removeClaudeProviderAccount(settings, target.id),
-                  target.runtime
+                setRemoveClaudeAccountId(null)
+                void runClaudeAccountAction(`remove:${accountId}`, () =>
+                  window.api.claudeAccounts.remove({ accountId })
                 )
               }}
             >

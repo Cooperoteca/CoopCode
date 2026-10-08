@@ -9,7 +9,6 @@ import type {
 } from '../../../../shared/ai-vault-types'
 import type { ExecutionHostScope } from '../../../../shared/execution-host'
 import { VaultHostScopeMenu, VaultScopeSwitch, VaultViewMenu } from './AiVaultPanelControls'
-import type { AiVaultHostScopeOption } from './ai-vault-host-scope'
 
 type AiVaultPanelHeaderProps = {
   query: string
@@ -21,7 +20,7 @@ type AiVaultPanelHeaderProps = {
   activeProjectKey: string | null
   scope: AiVaultScope
   executionHostScope: ExecutionHostScope
-  hostScopeOptions: readonly AiVaultHostScopeOption[]
+  activeSshExecutionHostScope: ExecutionHostScope | null
   agents: readonly AiVaultAgent[]
   sort: AiVaultSort
   group: AiVaultGroup
@@ -48,7 +47,7 @@ export function AiVaultPanelHeader({
   activeProjectKey,
   scope,
   executionHostScope,
-  hostScopeOptions,
+  activeSshExecutionHostScope,
   agents,
   sort,
   group,
@@ -109,7 +108,7 @@ export function AiVaultPanelHeader({
         <div className="flex shrink-0 items-center gap-1 @max-[300px]/ai-vault:gap-0.5">
           <VaultHostScopeMenu
             executionHostScope={executionHostScope}
-            hostOptions={hostScopeOptions}
+            activeSshExecutionHostScope={activeSshExecutionHostScope}
             onExecutionHostScopeChange={onExecutionHostScopeChange}
           />
           <VaultViewMenu

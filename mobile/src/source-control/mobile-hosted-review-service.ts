@@ -3,7 +3,6 @@ import type {
   HostedReviewCreationBlockedReason,
   HostedReviewCreationEligibility,
   HostedReviewCreationNextAction,
-  HostedReviewLookupOutcome,
   HostedReviewProvider
 } from '../../../src/shared/hosted-review'
 import type { RpcClient } from '../transport/rpc-client'
@@ -63,10 +62,6 @@ export type MobileHostedReviewPrefill = {
   canCreate?: boolean
   blockedReason?: HostedReviewCreationBlockedReason
   nextAction?: HostedReviewCreationNextAction
-  // Why: mobile lacks the desktop refresh/review-lookup signals, so it fails
-  // closed on ambiguity. When the host could not prove the branch has no review
-  // (`unavailable`), create — including the Push & Create path — stays blocked.
-  reviewLookupOutcome?: HostedReviewLookupOutcome
 }
 
 // Resolve the mobile compose prefill from the same hosted-review eligibility
@@ -102,14 +97,7 @@ export async function resolveMobileHostedReviewPrefill(
       behind: args.behind
     })
     if (!eligibility) {
-      // Eligibility itself could not be resolved: the review lookup is unproven.
-      return {
-        ...fallback,
-        canCreate: false,
-        blockedReason: null,
-        nextAction: null,
-        reviewLookupOutcome: 'unavailable'
-      }
+      return { ...fallback, canCreate: false, blockedReason: null, nextAction: null }
     }
     return {
       provider: eligibility.provider,
@@ -118,17 +106,10 @@ export async function resolveMobileHostedReviewPrefill(
       body: eligibility.body || '',
       canCreate: eligibility.canCreate,
       blockedReason: eligibility.blockedReason,
-      nextAction: eligibility.nextAction,
-      reviewLookupOutcome: eligibility.reviewLookupOutcome
+      nextAction: eligibility.nextAction
     }
   } catch {
-    return {
-      ...fallback,
-      canCreate: false,
-      blockedReason: null,
-      nextAction: null,
-      reviewLookupOutcome: 'unavailable'
-    }
+    return { ...fallback, canCreate: false, blockedReason: null, nextAction: null }
   }
 }
 

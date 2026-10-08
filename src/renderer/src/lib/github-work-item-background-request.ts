@@ -25,7 +25,6 @@ import type { TaskSourceContext, WorkspaceRunContext } from '../../../shared/tas
 import type { AgentStartedTelemetry } from '@/lib/worktree-activation'
 import { getRepoExecutionHostId, parseExecutionHostId } from '../../../shared/execution-host'
 import { projectHostSetupProjectionFromRepos } from '../../../shared/project-host-setup-projection'
-import { resolveLocalWindowsAgentStartupShell } from '../../../shared/windows-terminal-shell'
 
 export type GitHubWorkItemBackgroundStoreSnapshot = {
   repos: readonly Repo[]
@@ -44,7 +43,6 @@ export type GitHubWorkItemBackgroundStoreSnapshot = {
           | 'agentCmdOverrides'
           | 'agentDefaultArgs'
           | 'agentDefaultEnv'
-          | 'terminalWindowsShell'
         >
       >
     | null
@@ -187,11 +185,6 @@ export function buildGitHubWorkItemStartupPlan(args: {
   // Why: SSH remotes deploy the CLI shim as plain `orca`, so the Linux-only
   // `orca-ide` rename must not be applied for remote launches.
   const isRemote = repoIsRemote(repo)
-  const shell = resolveLocalWindowsAgentStartupShell({
-    platform,
-    isRemote,
-    terminalWindowsShell: store.settings?.terminalWindowsShell
-  })
   const draftLaunchPlan = draftPrompt
     ? buildAgentDraftLaunchPlan({
         agent,
@@ -200,7 +193,6 @@ export function buildGitHubWorkItemStartupPlan(args: {
         agentArgs: resolveTuiAgentLaunchArgs(agent, store.settings?.agentDefaultArgs),
         agentEnv: resolveTuiAgentLaunchEnv(agent, store.settings?.agentDefaultEnv),
         platform,
-        shell,
         isRemote
       })
     : null
@@ -223,7 +215,6 @@ export function buildGitHubWorkItemStartupPlan(args: {
         agentArgs: resolveTuiAgentLaunchArgs(agent, store.settings?.agentDefaultArgs),
         agentEnv: resolveTuiAgentLaunchEnv(agent, store.settings?.agentDefaultEnv),
         platform,
-        shell,
         isRemote,
         allowEmptyPromptLaunch: true
       })

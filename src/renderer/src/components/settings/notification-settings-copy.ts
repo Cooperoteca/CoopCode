@@ -50,20 +50,10 @@ export function resolveNotificationVolumeDraftState(
     : createNotificationVolumeDraftState(sourceVolume)
 }
 
-export type NotificationTestOutcome = 'delivered' | 'not-displayed' | 'not-sent'
-
-type SendTestNotificationOptions = {
-  /** Why: the onboarding step renders delivery state inline, so the ambiguous
-   *  darwin "check if a banner appeared" toasts would just duplicate (or
-   *  contradict) the card the user is already looking at. */
-  suppressSystemPermissionToasts?: boolean
-}
-
 export async function sendNotificationSettingsTestNotification(
   notificationSettings: GlobalSettings['notifications'],
-  volumeDraft: number,
-  options?: SendTestNotificationOptions
-): Promise<NotificationTestOutcome> {
+  volumeDraft: number
+): Promise<void> {
   const permissionStatus = await window.api.notifications.getPermissionStatus()
   if (!permissionStatus.supported) {
     toast.error(
@@ -72,7 +62,7 @@ export async function sendNotificationSettingsTestNotification(
         'Notifications are not supported on this system'
       )
     )
-    return 'not-sent'
+    return
   }
 
   const result = await window.api.notifications.dispatch({
@@ -94,10 +84,7 @@ export async function sendNotificationSettingsTestNotification(
           'Custom notification sound could not be played'
         )
       )
-      return 'delivered'
-    }
-    if (options?.suppressSystemPermissionToasts) {
-      return 'delivered'
+      return
     }
     const settingsCopy = getSystemNotificationSettingsCopy(permissionStatus.platform)
     if (permissionStatus.platform === 'darwin' && settingsCopy) {
@@ -122,18 +109,15 @@ export async function sendNotificationSettingsTestNotification(
           }
         }
       )
-      return 'delivered'
+      return
     }
     toast.success(
       translate('auto.components.settings.NotificationsPane.d3d54e0915', 'Test notification sent')
     )
-    return 'delivered'
+    return
   }
 
-  if (result.reason === 'not-displayed' || result.reason === 'blocked-by-system') {
-    if (options?.suppressSystemPermissionToasts) {
-      return 'not-displayed'
-    }
+  if (result.reason === 'not-displayed') {
     const settingsCopy = getSystemNotificationSettingsCopy(permissionStatus.platform)
     if (settingsCopy) {
       toast.error(settingsCopy.failureTitle, {
@@ -162,7 +146,7 @@ export async function sendNotificationSettingsTestNotification(
         }
       )
     }
-    return 'not-displayed'
+    return
   }
 
   toast.error(
@@ -176,5 +160,4 @@ export async function sendNotificationSettingsTestNotification(
           'Test notification was not delivered'
         )
   )
-  return 'not-sent'
 }

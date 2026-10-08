@@ -8,7 +8,6 @@ import { translate } from '@/i18n/i18n'
 export function LabelsEditor({
   owner,
   repo,
-  host,
   selected,
   disabled,
   sourceSettings,
@@ -16,19 +15,13 @@ export function LabelsEditor({
 }: {
   owner: string
   repo: string
-  host?: string
   selected: string[]
   disabled?: boolean
   sourceSettings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined
   onChange: (add: string[], remove: string[]) => void | Promise<void>
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
-  const metadata = useRepoLabelsBySlug(
-    open ? owner : null,
-    open ? repo : null,
-    sourceSettings,
-    host
-  )
+  const metadata = useRepoLabelsBySlug(open ? owner : null, open ? repo : null, sourceSettings)
   return (
     <Popover open={open} onOpenChange={(o) => !disabled && setOpen(o)}>
       <PopoverTrigger asChild>

@@ -3,12 +3,12 @@ import { FileKey } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
-import { SshHostAdvancedFields } from './SshHostAdvancedFields'
 import {
-  applyParsedSshHostInput,
-  hasAdvancedConnectionValues,
-  type EditingTarget
-} from './ssh-target-draft'
+  SshTargetAdvancedConnectionSection,
+  hasAdvancedConnectionValues
+} from './SshTargetAdvancedConnectionSection'
+import { SshTargetTerminalPersistenceSection } from './SshTargetTerminalPersistenceSection'
+import { applyParsedSshHostInput, type EditingTarget } from './ssh-target-draft'
 import { translate } from '@/i18n/i18n'
 export { EMPTY_FORM, type EditingTarget } from './ssh-target-draft'
 
@@ -27,10 +27,9 @@ export function SshTargetForm({
   onSave,
   onCancel
 }: SshTargetFormProps): React.JSX.Element {
-  // Why: reveal Advanced by default when editing a target that already has custom proxy/jump/
-  // reuse values, so those aren't hidden; otherwise it starts collapsed.
   const hasAdvancedConnectionFields = hasAdvancedConnectionValues(form)
-  const [advancedOpen, setAdvancedOpen] = useState(hasAdvancedConnectionFields)
+  const [advancedConnectionOpen, setAdvancedConnectionOpen] = useState(hasAdvancedConnectionFields)
+  const [terminalPersistenceOpen, setTerminalPersistenceOpen] = useState(true)
   const lastEditingIdRef = useRef(editingId)
 
   useEffect(() => {
@@ -38,7 +37,8 @@ export function SshTargetForm({
       return
     }
     lastEditingIdRef.current = editingId
-    setAdvancedOpen(hasAdvancedConnectionFields)
+    setAdvancedConnectionOpen(hasAdvancedConnectionFields)
+    setTerminalPersistenceOpen(true)
   }, [editingId, hasAdvancedConnectionFields])
 
   return (
@@ -122,11 +122,16 @@ export function SshTargetForm({
             )}
           </p>
         </div>
-        <SshHostAdvancedFields
-          open={advancedOpen}
-          onOpenChange={setAdvancedOpen}
+        <SshTargetAdvancedConnectionSection
+          open={advancedConnectionOpen}
+          onOpenChange={setAdvancedConnectionOpen}
           form={form}
-          disabled={false}
+          onFormChange={onFormChange}
+        />
+        <SshTargetTerminalPersistenceSection
+          open={terminalPersistenceOpen}
+          onOpenChange={setTerminalPersistenceOpen}
+          form={form}
           onFormChange={onFormChange}
         />
       </div>

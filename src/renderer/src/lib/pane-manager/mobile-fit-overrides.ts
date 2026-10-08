@@ -1,10 +1,10 @@
-// Why: a phone or another desktop may own the shared PTY grid. Non-owners park
-// xterm at that authoritative size so passive fitting cannot start a resize war.
-
-export type FitHoldMode = 'mobile-fit' | 'remote-desktop-fit' | 'desktop-fit'
+// Why: mobile-fit overrides are runtime-owned state that the renderer must
+// respect. When a mobile client resizes a PTY to phone dimensions, the desktop
+// renderer must not auto-fit that PTY back to desktop size. This module stores
+// the override state and provides lookup for safeFit() and transport.resize().
 
 type FitOverride = {
-  mode: 'mobile-fit' | 'remote-desktop-fit'
+  mode: 'mobile-fit'
   cols: number
   rows: number
 }
@@ -24,7 +24,7 @@ function fitBindingKey(tabId: string, paneId: number): string {
 // and trigger safeFit on affected panes.
 type OverrideChangeEvent = {
   ptyId: string
-  mode: FitHoldMode
+  mode: 'mobile-fit' | 'desktop-fit'
   cols: number
   rows: number
   // Why: the dimensions the PTY was at *before* this event fired. For a
@@ -49,9 +49,14 @@ function notifyChange(event: OverrideChangeEvent): void {
   }
 }
 
-export function setFitOverride(ptyId: string, mode: FitHoldMode, cols: number, rows: number): void {
+export function setFitOverride(
+  ptyId: string,
+  mode: 'mobile-fit' | 'desktop-fit',
+  cols: number,
+  rows: number
+): void {
   const prior = overridesByPtyId.get(ptyId) ?? null
-  if (mode === 'mobile-fit' || mode === 'remote-desktop-fit') {
+  if (mode === 'mobile-fit') {
     overridesByPtyId.set(ptyId, { mode, cols, rows })
   } else {
     overridesByPtyId.delete(ptyId)
@@ -64,20 +69,6 @@ export function setFitOverride(ptyId: string, mode: FitHoldMode, cols: number, r
     priorCols: prior?.cols ?? null,
     priorRows: prior?.rows ?? null
   })
-}
-
-export function replaceFitOverridePtyId(replacedPtyId: string, ptyId: string): void {
-  const replaced = overridesByPtyId.get(replacedPtyId)
-  if (!replaced) {
-    return
-  }
-  // Why: handle rotation is the same pane lifecycle. Preserve its hold until
-  // the replacement stream publishes authoritative state, without retaining
-  // an unreachable entry for every old handle.
-  if (!overridesByPtyId.has(ptyId)) {
-    setFitOverride(ptyId, replaced.mode, replaced.cols, replaced.rows)
-  }
-  setFitOverride(replacedPtyId, 'desktop-fit', replaced.cols, replaced.rows)
 }
 
 export function getPaneIdsForPty(ptyId: string): number[] {
@@ -126,12 +117,7 @@ export function unbindPane(paneId: number, tabId?: string): void {
 }
 
 export function hydrateOverrides(
-  overrides: {
-    ptyId: string
-    mode: 'mobile-fit' | 'remote-desktop-fit'
-    cols: number
-    rows: number
-  }[]
+  overrides: { ptyId: string; mode: 'mobile-fit'; cols: number; rows: number }[]
 ): void {
   const previous = new Map(overridesByPtyId)
   overridesByPtyId.clear()
@@ -145,7 +131,7 @@ export function hydrateOverrides(
     const prior = previous.get(ptyId) ?? null
     notifyChange({
       ptyId,
-      mode: override.mode,
+      mode: 'mobile-fit',
       cols: override.cols,
       rows: override.rows,
       priorCols: prior?.cols ?? null,
@@ -168,10 +154,4 @@ export function hydrateOverrides(
 
 export function getAllOverrides(): Map<string, FitOverride> {
   return new Map(overridesByPtyId)
-}
-
-export function getMobileFitOverridePtyIds(): string[] {
-  return [...overridesByPtyId].flatMap(([ptyId, override]) =>
-    override.mode === 'mobile-fit' ? [ptyId] : []
-  )
 }

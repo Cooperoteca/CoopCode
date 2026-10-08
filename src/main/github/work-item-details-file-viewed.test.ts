@@ -13,8 +13,6 @@ const {
   getPRCommentsMock,
   rateLimitGuardMock,
   noteRateLimitSpendMock,
-  repositoryRateLimitGuardMock,
-  noteRepositoryRateLimitSpendMock,
   acquireMock,
   releaseMock
 } = vi.hoisted(() => ({
@@ -26,29 +24,13 @@ const {
   getPRCommentsMock: vi.fn(),
   rateLimitGuardMock: vi.fn<() => RateLimitGuardResult>(() => ({ blocked: false })),
   noteRateLimitSpendMock: vi.fn(),
-  repositoryRateLimitGuardMock: vi.fn<
-    (
-      repository: { host?: string } | null | undefined,
-      bucket: string,
-      options?: { cwd?: string; host?: string }
-    ) => RateLimitGuardResult
-  >(() => ({ blocked: false })),
-  noteRepositoryRateLimitSpendMock:
-    vi.fn<
-      (
-        repository: { host?: string } | null | undefined,
-        bucket: string,
-        cost?: number,
-        options?: { cwd?: string; host?: string }
-      ) => void
-    >(),
   acquireMock: vi.fn(),
   releaseMock: vi.fn()
 }))
 
 vi.mock('./gh-utils', () => ({
   ghExecFileAsync: ghExecFileAsyncMock,
-  getOwnerRepoForRemote: getOwnerRepoMock,
+  getOwnerRepo: getOwnerRepoMock,
   getIssueOwnerRepo: getIssueOwnerRepoMock,
   ghRepoExecOptions: vi.fn((context) => (context.connectionId ? {} : { cwd: context.repoPath })),
   githubRepoContext: vi.fn((repoPath, connectionId) => ({
@@ -61,27 +43,16 @@ vi.mock('./gh-utils', () => ({
 
 vi.mock('./client', () => ({
   getWorkItem: getWorkItemMock,
-  getWorkItemByOwnerRepo: vi.fn(),
   getPRChecks: getPRChecksMock,
   getPRComments: getPRCommentsMock
 }))
 
 vi.mock('./rate-limit', () => ({
   rateLimitGuard: rateLimitGuardMock,
-  noteRateLimitSpend: noteRateLimitSpendMock,
-  repositoryRateLimitGuard: repositoryRateLimitGuardMock,
-  noteRepositoryRateLimitSpend: noteRepositoryRateLimitSpendMock
+  noteRateLimitSpend: noteRateLimitSpendMock
 }))
 
 import { getWorkItemDetails } from './work-item-details'
-
-import { _resetOriginGitHubApiRepositoryCache } from './github-api-repository'
-
-// The origin-repository cache is module-level state; reset it so slugs
-// resolved by one test cannot leak into the next.
-beforeEach(() => {
-  _resetOriginGitHubApiRepositoryCache()
-})
 
 describe('getWorkItemDetails PR file viewed state', () => {
   beforeEach(() => {
@@ -94,9 +65,6 @@ describe('getWorkItemDetails PR file viewed state', () => {
     rateLimitGuardMock.mockReset()
     rateLimitGuardMock.mockReturnValue({ blocked: false })
     noteRateLimitSpendMock.mockReset()
-    repositoryRateLimitGuardMock.mockReset()
-    repositoryRateLimitGuardMock.mockReturnValue({ blocked: false })
-    noteRepositoryRateLimitSpendMock.mockReset()
     acquireMock.mockReset()
     releaseMock.mockReset()
     acquireMock.mockResolvedValue(undefined)
@@ -194,26 +162,10 @@ describe('getWorkItemDetails PR file viewed state', () => {
       '/repo-root',
       42,
       'head-sha',
-      { owner: 'stablyai', repo: 'orca', host: 'github.com' },
+      null,
       undefined,
       undefined
     )
-    expect(repositoryRateLimitGuardMock.mock.calls.length).toBeGreaterThan(0)
-    expect(
-      repositoryRateLimitGuardMock.mock.calls.every(([, bucket, options]) =>
-        bucket === 'graphql'
-          ? options?.cwd === '/repo-root' && options?.host === 'github.com'
-          : true
-      )
-    ).toBe(true)
-    expect(noteRepositoryRateLimitSpendMock.mock.calls.length).toBeGreaterThan(0)
-    expect(
-      noteRepositoryRateLimitSpendMock.mock.calls.every(([, bucket, , options]) =>
-        bucket === 'graphql'
-          ? options?.cwd === '/repo-root' && options?.host === 'github.com'
-          : true
-      )
-    ).toBe(true)
   })
 
   it('keeps PR details loadable when checks lookup fails', async () => {

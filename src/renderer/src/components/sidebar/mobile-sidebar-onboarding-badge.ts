@@ -1,5 +1,4 @@
-import { useCallback, useState } from 'react'
-import { usePairedMobileDevices } from '../mobile/paired-mobile-devices'
+import { useCallback, useEffect, useState } from 'react'
 
 const DISMISS_KEY = 'orca.mobile.sidebar-onboarding-dismissed'
 
@@ -11,7 +10,7 @@ function readDismissed(): boolean {
   }
 }
 
-export function shouldShowMobileSidebarOnboardingBadge(
+export function shouldLoadMobileSidebarOnboardingBadge(
   enabled: boolean,
   dismissed: boolean
 ): boolean {
@@ -23,11 +22,32 @@ export function shouldShowMobileSidebarOnboardingBadge(
 // permanently, mirroring the once-and-done feel of an inbox unread dot.
 export function useMobileSidebarOnboardingBadge(enabled = true): {
   visible: boolean
-  hasPairedDevice: boolean
   dismiss: () => void
 } {
   const [dismissed, setDismissed] = useState<boolean>(() => readDismissed())
-  const mobileDevices = usePairedMobileDevices({ enabled })
+  const [hasPairedDevice, setHasPairedDevice] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    if (!shouldLoadMobileSidebarOnboardingBadge(enabled, dismissed)) {
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await window.api.mobile.listDevices()
+        if (!cancelled) {
+          setHasPairedDevice(result.devices.length > 0)
+        }
+      } catch {
+        if (!cancelled) {
+          setHasPairedDevice(false)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [dismissed, enabled])
 
   const dismiss = useCallback(() => {
     if (dismissed) {
@@ -42,14 +62,7 @@ export function useMobileSidebarOnboardingBadge(enabled = true): {
   }, [dismissed])
 
   return {
-    visible:
-      shouldShowMobileSidebarOnboardingBadge(enabled, dismissed) &&
-      mobileDevices.loaded &&
-      // Why: a failed load also lands loaded:true with no devices; don't show
-      // the onboarding badge until we actually know the device list is empty.
-      !mobileDevices.error &&
-      !mobileDevices.hasPairedDevice,
-    hasPairedDevice: mobileDevices.hasPairedDevice,
+    visible: enabled && !dismissed && hasPairedDevice === false,
     dismiss
   }
 }

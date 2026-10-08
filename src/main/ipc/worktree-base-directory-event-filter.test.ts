@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { join, win32 } from 'node:path'
+import { join } from 'node:path'
 import {
-  classifyWorktreeBaseChange,
   matchingWorktreeBaseRepoIds,
   type WorktreeBaseWatchTarget
 } from './worktree-base-directory-event-filter'
@@ -18,183 +17,29 @@ function makeGitCommonTarget(): WorktreeBaseWatchTarget {
 }
 
 describe('matchingWorktreeBaseRepoIds (git-common)', () => {
-  it('classifies linked-worktree structural metadata under worktrees/', () => {
+  it('matches linked-worktree metadata under worktrees/', () => {
     const target = makeGitCommonTarget()
     expect(
-      classifyWorktreeBaseChange(target, {
+      matchingWorktreeBaseRepoIds(target, {
         type: 'update',
         path: join(COMMON_DIR, 'worktrees', 'wt-a', 'HEAD')
       })
-    ).toEqual({
-      structureRepoIds: ['repo-1'],
-      gitStatusRepoIds: [],
-      headIdentityRepoIds: []
-    })
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'create',
-        path: join(COMMON_DIR, 'worktrees', 'wt-b')
-      })
-    ).toEqual({
-      structureRepoIds: ['repo-1'],
-      gitStatusRepoIds: [],
-      headIdentityRepoIds: []
-    })
+    ).toEqual(['repo-1'])
     expect(
       matchingWorktreeBaseRepoIds(target, {
-        type: 'delete',
+        type: 'create',
         path: join(COMMON_DIR, 'worktrees', 'wt-b')
       })
     ).toEqual(['repo-1'])
   })
 
-  it('classifies primary-checkout branch metadata as structural and index as status-only', () => {
+  it('matches primary-checkout branch/index metadata at the common-dir top level', () => {
     const target = makeGitCommonTarget()
-    for (const file of ['HEAD', 'packed-refs']) {
+    for (const file of ['HEAD', 'packed-refs', 'index']) {
       expect(
-        classifyWorktreeBaseChange(target, {
-          type: 'update',
-          path: join(COMMON_DIR, file)
-        })
-      ).toEqual({
-        structureRepoIds: ['repo-1'],
-        gitStatusRepoIds: [],
-        headIdentityRepoIds: []
-      })
+        matchingWorktreeBaseRepoIds(target, { type: 'update', path: join(COMMON_DIR, file) })
+      ).toEqual(['repo-1'])
     }
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'update',
-        path: join(COMMON_DIR, 'index')
-      })
-    ).toEqual({
-      structureRepoIds: [],
-      gitStatusRepoIds: ['repo-1'],
-      headIdentityRepoIds: []
-    })
-  })
-
-  it('classifies linked-worktree index as status-only', () => {
-    const target = makeGitCommonTarget()
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'update',
-        path: join(COMMON_DIR, 'worktrees', 'wt-a', 'index')
-      })
-    ).toEqual({
-      structureRepoIds: [],
-      gitStatusRepoIds: ['repo-1'],
-      headIdentityRepoIds: []
-    })
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'update',
-        path: join(COMMON_DIR, 'worktrees', 'wt-a', 'index.lock')
-      })
-    ).toEqual({
-      structureRepoIds: [],
-      gitStatusRepoIds: [],
-      headIdentityRepoIds: []
-    })
-  })
-
-  it('classifies HEAD reflog appends as head-identity triggers for linked and primary checkouts', () => {
-    const target = makeGitCommonTarget()
-    // commit --amend / reset --soft move HEAD without touching index or HEAD.
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'update',
-        path: join(COMMON_DIR, 'worktrees', 'wt-a', 'logs', 'HEAD')
-      })
-    ).toEqual({
-      structureRepoIds: [],
-      gitStatusRepoIds: [],
-      headIdentityRepoIds: ['repo-1']
-    })
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'update',
-        path: join(COMMON_DIR, 'logs', 'HEAD')
-      })
-    ).toEqual({
-      structureRepoIds: [],
-      gitStatusRepoIds: [],
-      headIdentityRepoIds: ['repo-1']
-    })
-    // Per-ref reflogs churn on fetches and stay ignored.
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'update',
-        path: join(COMMON_DIR, 'logs', 'refs', 'heads', 'main')
-      })
-    ).toEqual({
-      structureRepoIds: [],
-      gitStatusRepoIds: [],
-      headIdentityRepoIds: []
-    })
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'update',
-        path: join(COMMON_DIR, 'worktrees', 'wt-a', 'logs', 'refs', 'heads', 'main')
-      })
-    ).toEqual({
-      structureRepoIds: [],
-      gitStatusRepoIds: [],
-      headIdentityRepoIds: []
-    })
-  })
-
-  it('classifies worktree-scoped config as structural for sparse-flag freshness', () => {
-    const target = makeGitCommonTarget()
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'update',
-        path: join(COMMON_DIR, 'worktrees', 'wt-a', 'config.worktree')
-      })
-    ).toEqual({
-      structureRepoIds: ['repo-1'],
-      gitStatusRepoIds: [],
-      headIdentityRepoIds: []
-    })
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'create',
-        path: join(COMMON_DIR, 'config.worktree')
-      })
-    ).toEqual({
-      structureRepoIds: ['repo-1'],
-      gitStatusRepoIds: [],
-      headIdentityRepoIds: []
-    })
-  })
-
-  it('classifies Windows-shaped linked metadata paths', () => {
-    const commonDir = win32.join('C:\\', 'repos', 'project', '.git')
-    const target: WorktreeBaseWatchTarget = {
-      ...makeGitCommonTarget(),
-      key: `git-common:local:${commonDir}`,
-      path: commonDir
-    }
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'update',
-        path: win32.join(commonDir, 'worktrees', 'wt a', 'gitdir')
-      })
-    ).toEqual({
-      structureRepoIds: ['repo-1'],
-      gitStatusRepoIds: [],
-      headIdentityRepoIds: []
-    })
-    expect(
-      classifyWorktreeBaseChange(target, {
-        type: 'update',
-        path: win32.join(commonDir, 'worktrees', 'wt a', 'index')
-      })
-    ).toEqual({
-      structureRepoIds: [],
-      gitStatusRepoIds: ['repo-1'],
-      headIdentityRepoIds: []
-    })
   })
 
   it('ignores non-status common-dir churn', () => {

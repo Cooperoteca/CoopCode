@@ -8,11 +8,6 @@ const MAX_LABEL_LENGTH = 80
 
 export type DevInstanceIdentity = AppIdentity & {
   appUserModelId: string
-  // Why: drives app.setName → the macOS safeStorage Keychain item name
-  // ("<appName> Safe Storage"). Kept stable across dev branches (unlike the
-  // per-branch `name`) so every dev instance shares one Keychain key instead of
-  // creating a new one per branch and re-prompting. Distinct from prod's 'Orca'.
-  appName: string
 }
 
 function cleanEnvValue(value: string | undefined): string | null {
@@ -27,7 +22,7 @@ function cleanEnvValue(value: string | undefined): string | null {
 
 function lastPathSegment(value: string): string {
   const normalized = value.replace(/\\/g, '/')
-  return normalized.split('/').findLast(Boolean) ?? value
+  return normalized.split('/').filter(Boolean).at(-1) ?? value
 }
 
 function formatLabel(branch: string | null, worktreeName: string | null): string | null {
@@ -55,7 +50,6 @@ export function getDevInstanceIdentity(
   if (!isDev) {
     return {
       name: BASE_APP_NAME,
-      appName: BASE_APP_NAME,
       isDev: false,
       devLabel: null,
       devBranch: null,
@@ -77,10 +71,6 @@ export function getDevInstanceIdentity(
 
   return {
     name: dockTitle,
-    // Why: one stable Keychain key ('Orca Dev Safe Storage') for all dev
-    // branches; the per-branch identity still shows via `name` (window title,
-    // app menu, renderer label).
-    appName: `${BASE_APP_NAME} Dev`,
     isDev: true,
     devLabel,
     devBranch: branch,

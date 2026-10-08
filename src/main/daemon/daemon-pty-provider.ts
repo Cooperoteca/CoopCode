@@ -1,6 +1,5 @@
 import { DaemonClient } from './client'
 import type { DaemonEvent, CreateOrAttachResult } from './types'
-import type { PtyIncarnationId } from '../../shared/pty-incarnation'
 
 export type DaemonPtyProviderOptions = {
   socketPath: string
@@ -19,7 +18,6 @@ export type DaemonSpawnOptions = {
 
 export type DaemonSpawnResult = {
   id: string
-  incarnationId?: PtyIncarnationId
   isNew: boolean
   pid: number | null
 }
@@ -27,11 +25,7 @@ export type DaemonSpawnResult = {
 export class DaemonPtyProvider {
   private client: DaemonClient
   private dataListeners: ((payload: { id: string; data: string }) => void)[] = []
-  private exitListeners: ((payload: {
-    id: string
-    code: number
-    incarnationId?: PtyIncarnationId
-  }) => void)[] = []
+  private exitListeners: ((payload: { id: string; code: number }) => void)[] = []
   private removeEventListener: (() => void) | null = null
 
   constructor(opts: DaemonPtyProviderOptions) {
@@ -57,7 +51,6 @@ export class DaemonPtyProvider {
 
     return {
       id: opts.sessionId,
-      ...(result.incarnationId ? { incarnationId: result.incarnationId } : {}),
       isNew: result.isNew,
       pid: result.pid
     }
@@ -71,17 +64,8 @@ export class DaemonPtyProvider {
     this.client.notify('resize', { sessionId: id, cols, rows })
   }
 
-  async shutdown(
-    id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
-  ): Promise<void> {
-    // Why: convert the absolute teardown deadline to a relative timeout only here,
-    // at the RPC leaf; undefined keeps the DaemonClient 30s default.
-    await this.client.request(
-      'kill',
-      { sessionId: id, immediate: opts.immediate ?? false },
-      opts.deadlineMs !== undefined ? Math.max(1, opts.deadlineMs - Date.now()) : undefined
-    )
+  async shutdown(id: string, opts: { immediate?: boolean; keepHistory?: boolean }): Promise<void> {
+    await this.client.request('kill', { sessionId: id, immediate: opts.immediate ?? false })
   }
 
   onData(callback: (payload: { id: string; data: string }) => void): () => void {
@@ -94,9 +78,7 @@ export class DaemonPtyProvider {
     }
   }
 
-  onExit(
-    callback: (payload: { id: string; code: number; incarnationId?: PtyIncarnationId }) => void
-  ): () => void {
+  onExit(callback: (payload: { id: string; code: number }) => void): () => void {
     this.exitListeners.push(callback)
     return () => {
       const idx = this.exitListeners.indexOf(callback)
@@ -129,11 +111,7 @@ export class DaemonPtyProvider {
         }
       } else if (event.event === 'exit') {
         for (const listener of this.exitListeners) {
-          listener({
-            id: event.sessionId,
-            code: event.payload.code,
-            ...(event.payload.incarnationId ? { incarnationId: event.payload.incarnationId } : {})
-          })
+          listener({ id: event.sessionId, code: event.payload.code })
         }
       }
     })

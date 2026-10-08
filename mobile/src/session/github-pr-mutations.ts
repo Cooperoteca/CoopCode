@@ -1,6 +1,6 @@
 import type { GitHubPRMergeMethod } from '../../../src/shared/types'
 import type { RpcClient } from '../transport/rpc-client'
-import { buildGithubPrParams, githubPrRepoSlugParam, type GitHubPrRepoSlug } from './github-pr-rpc'
+import { buildGithubPrParams, type GitHubPrRepoSlug } from './github-pr-rpc'
 
 // Mutation wrappers for the github.* PR surface, split out so github-pr-rpc.ts
 // stays under the max-lines budget. They mirror the read wrappers' shape but
@@ -101,10 +101,16 @@ export async function fetchUpdatePRTitle(
   args: { prNumber: number; title: string; prRepo?: GitHubPrRepoSlug | null }
 ): Promise<GitHubPrMutationOutcome> {
   const params: Record<string, unknown> = { prNumber: args.prNumber, title: args.title }
+  // updatePRTitle accepts prRepo for fork PRs, but it is not in the centralized
+  // METHODS_ACCEPTING_PR_REPO read allow-list — pass it explicitly so it reaches the
+  // host schema (which declares it optional/nullable).
+  if (args.prRepo) {
+    params.prRepo = { owner: args.prRepo.owner, repo: args.prRepo.repo }
+  }
   const response = await sendRaw(
     client,
     'github.updatePRTitle',
-    buildGithubPrParams('github.updatePRTitle', worktreeId, params, { prRepo: args.prRepo })
+    buildGithubPrParams('github.updatePRTitle', worktreeId, params)
   )
   if (!response.ok) {
     return { ok: false, error: response.error || 'Request failed: github.updatePRTitle' }
@@ -141,51 +147,48 @@ export async function fetchSetPRAutoMerge(
 export async function fetchUpdatePRState(
   client: Pick<RpcClient, 'sendRequest'>,
   worktreeId: string,
-  args: { prNumber: number; state: 'open' | 'closed'; prRepo?: GitHubPrRepoSlug | null }
+  args: { prNumber: number; state: 'open' | 'closed' }
 ): Promise<GitHubPrMutationOutcome> {
+  // updatePRState does NOT accept prRepo (KTD3) — buildGithubPrParams omits it.
   return sendGithubPrMutation(
     client,
     'github.updatePRState',
-    buildGithubPrParams(
-      'github.updatePRState',
-      worktreeId,
-      { prNumber: args.prNumber, updates: { state: args.state } },
-      { prRepo: args.prRepo }
-    )
+    buildGithubPrParams('github.updatePRState', worktreeId, {
+      prNumber: args.prNumber,
+      updates: { state: args.state }
+    })
   )
 }
 
 export async function fetchRequestPRReviewers(
   client: Pick<RpcClient, 'sendRequest'>,
   worktreeId: string,
-  args: { prNumber: number; reviewers: string[]; prRepo?: GitHubPrRepoSlug | null }
+  args: { prNumber: number; reviewers: string[] }
 ): Promise<GitHubPrMutationOutcome> {
+  // requestPRReviewers does NOT accept prRepo (KTD3).
   return sendGithubPrMutation(
     client,
     'github.requestPRReviewers',
-    buildGithubPrParams(
-      'github.requestPRReviewers',
-      worktreeId,
-      { prNumber: args.prNumber, reviewers: args.reviewers },
-      { prRepo: args.prRepo }
-    )
+    buildGithubPrParams('github.requestPRReviewers', worktreeId, {
+      prNumber: args.prNumber,
+      reviewers: args.reviewers
+    })
   )
 }
 
 export async function fetchRemovePRReviewers(
   client: Pick<RpcClient, 'sendRequest'>,
   worktreeId: string,
-  args: { prNumber: number; reviewers: string[]; prRepo?: GitHubPrRepoSlug | null }
+  args: { prNumber: number; reviewers: string[] }
 ): Promise<GitHubPrMutationOutcome> {
+  // removePRReviewers does NOT accept prRepo (KTD3).
   return sendGithubPrMutation(
     client,
     'github.removePRReviewers',
-    buildGithubPrParams(
-      'github.removePRReviewers',
-      worktreeId,
-      { prNumber: args.prNumber, reviewers: args.reviewers },
-      { prRepo: args.prRepo }
-    )
+    buildGithubPrParams('github.removePRReviewers', worktreeId, {
+      prNumber: args.prNumber,
+      reviewers: args.reviewers
+    })
   )
 }
 
@@ -219,12 +222,16 @@ export async function fetchAddPRReviewCommentReply(
   if (typeof args.line === 'number') {
     params.line = args.line
   }
+  // addPRReviewCommentReply accepts prRepo for fork PRs, but it is not in the
+  // centralized METHODS_ACCEPTING_PR_REPO allow-list (read-focused) — pass it
+  // explicitly so it reaches the host schema, which declares it optional.
+  if (args.prRepo) {
+    params.prRepo = { owner: args.prRepo.owner, repo: args.prRepo.repo }
+  }
   return sendGithubPrMutation(
     client,
     'github.addPRReviewCommentReply',
-    buildGithubPrParams('github.addPRReviewCommentReply', worktreeId, params, {
-      prRepo: args.prRepo
-    })
+    buildGithubPrParams('github.addPRReviewCommentReply', worktreeId, params)
   )
 }
 
@@ -239,10 +246,13 @@ export async function fetchAddIssueComment(
     body: args.body,
     type: 'pr'
   }
+  if (args.prRepo) {
+    params.prRepo = { owner: args.prRepo.owner, repo: args.prRepo.repo }
+  }
   return sendGithubPrMutation(
     client,
     'github.addIssueComment',
-    buildGithubPrParams('github.addIssueComment', worktreeId, params, { prRepo: args.prRepo })
+    buildGithubPrParams('github.addIssueComment', worktreeId, params)
   )
 }
 
@@ -252,17 +262,15 @@ export async function fetchAddIssueComment(
 export async function fetchResolveReviewThread(
   client: Pick<RpcClient, 'sendRequest'>,
   worktreeId: string,
-  args: { threadId: string; resolve: boolean; prRepo?: GitHubPrRepoSlug | null }
+  args: { threadId: string; resolve: boolean }
 ): Promise<GitHubPrMutationOutcome> {
   const response = await sendRaw(
     client,
     'github.resolveReviewThread',
-    buildGithubPrParams(
-      'github.resolveReviewThread',
-      worktreeId,
-      { threadId: args.threadId, resolve: args.resolve },
-      { prRepo: args.prRepo }
-    )
+    buildGithubPrParams('github.resolveReviewThread', worktreeId, {
+      threadId: args.threadId,
+      resolve: args.resolve
+    })
   )
   if (!response.ok) {
     return {
@@ -284,10 +292,11 @@ export async function fetchResolveReviewThread(
 // GitHubProjectMutationResult `{ ok }` envelope sendGithubPrMutation reads.
 export async function fetchUpdateIssueComment(
   client: Pick<RpcClient, 'sendRequest'>,
-  args: { owner: string; repo: string; host?: string; commentId: number; body: string }
+  args: { owner: string; repo: string; commentId: number; body: string }
 ): Promise<GitHubPrMutationOutcome> {
   return sendGithubPrMutation(client, 'github.project.updateIssueCommentBySlug', {
-    ...githubPrRepoSlugParam(args),
+    owner: args.owner,
+    repo: args.repo,
     commentId: args.commentId,
     body: args.body
   })
@@ -296,10 +305,11 @@ export async function fetchUpdateIssueComment(
 // Delete a root conversation (issue) comment. Slug-addressed like the edit wrapper.
 export async function fetchDeleteIssueComment(
   client: Pick<RpcClient, 'sendRequest'>,
-  args: { owner: string; repo: string; host?: string; commentId: number }
+  args: { owner: string; repo: string; commentId: number }
 ): Promise<GitHubPrMutationOutcome> {
   return sendGithubPrMutation(client, 'github.project.deleteIssueCommentBySlug', {
-    ...githubPrRepoSlugParam(args),
+    owner: args.owner,
+    repo: args.repo,
     commentId: args.commentId
   })
 }
@@ -307,13 +317,9 @@ export async function fetchDeleteIssueComment(
 export async function fetchRerunPRChecks(
   client: Pick<RpcClient, 'sendRequest'>,
   worktreeId: string,
-  args: {
-    prNumber: number
-    headSha?: string | null
-    failedOnly?: boolean
-    prRepo?: GitHubPrRepoSlug | null
-  }
+  args: { prNumber: number; headSha?: string | null; failedOnly?: boolean }
 ): Promise<GitHubPrMutationOutcome> {
+  // rerunPRChecks does NOT accept prRepo (KTD3); headSha is a plain param here.
   const params: Record<string, unknown> = { prNumber: args.prNumber }
   if (args.failedOnly !== undefined) {
     params.failedOnly = args.failedOnly
@@ -324,6 +330,6 @@ export async function fetchRerunPRChecks(
   return sendGithubPrMutation(
     client,
     'github.rerunPRChecks',
-    buildGithubPrParams('github.rerunPRChecks', worktreeId, params, { prRepo: args.prRepo })
+    buildGithubPrParams('github.rerunPRChecks', worktreeId, params)
   )
 }

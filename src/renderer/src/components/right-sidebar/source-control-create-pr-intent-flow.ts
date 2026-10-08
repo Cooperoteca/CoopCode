@@ -1,7 +1,4 @@
-import {
-  isBehindOnlyUpstream,
-  shouldForcePushWithLeaseForUpstream
-} from '../../../../shared/git-upstream-status'
+import { shouldForcePushWithLeaseForUpstream } from '../../../../shared/git-upstream-status'
 import type { HostedReviewCreationEligibility } from '../../../../shared/hosted-review'
 import {
   normalizeHostedReviewBaseRef,
@@ -11,13 +8,7 @@ import type { GitStatusEntry, GitUpstreamStatus } from '../../../../shared/types
 import { summarizeCommitFailure } from './commit-failure-summary'
 import { getStageAllPaths } from './discard-all-sequence'
 
-export type CreatePrIntentRemoteStep =
-  | 'publish'
-  | 'push'
-  | 'force_push'
-  | 'fast_forward'
-  | 'blocked'
-  | 'none'
+export type CreatePrIntentRemoteStep = 'publish' | 'push' | 'force_push' | 'blocked' | 'none'
 
 export type CreatePrIntentRunToken = {
   repoId: string
@@ -112,15 +103,10 @@ export function resolveCreatePrIntentReviewBase({
   eligibilityDefaultBaseRef?: string | null
   composerBaseRef?: string | null
 }): string {
-  // Why: prefer the remote-validated eligibility default over the raw compare
-  // base. The intent flow auto-submits, and its eligibility is recomputed from
-  // this same compare base right before creation — so `eligibilityDefaultBaseRef`
-  // already keeps a pushed base verbatim and corrects a local-only stacked parent
-  // to the repo default. Using it keeps the one-click path consistent with the
-  // composer instead of submitting a base the remote cannot resolve. Fall back to
-  // the compare base only when eligibility supplied no default.
+  // Why: the compare-base picker is the user's latest target; eligibility can
+  // lag behind while Create PR intent is preparing the branch.
   return normalizeHostedReviewBaseRef(
-    eligibilityDefaultBaseRef?.trim() || currentBaseRef?.trim() || composerBaseRef?.trim() || ''
+    currentBaseRef?.trim() || eligibilityDefaultBaseRef?.trim() || composerBaseRef?.trim() || ''
   )
 }
 
@@ -147,16 +133,15 @@ export function resolveCreatePrIntentRemoteStep({
     return 'push'
   }
 
+  if (
+    hostedReviewCreation.blockedReason === 'needs_sync' &&
+    shouldForcePushWithLeaseForUpstream(upstreamStatus)
+  ) {
+    return 'force_push'
+  }
+
   if (hostedReviewCreation.blockedReason === 'needs_sync') {
-    if (shouldForcePushWithLeaseForUpstream(upstreamStatus)) {
-      return 'force_push'
-    }
-    // Why: auto-prepare only a behind-only branch, and only via `--ff-only`.
-    // Plain sync/merge could create a merge commit if the branch diverges mid
-    // flight or the user has pull.ff=no; --ff-only enforces the no-consent-
-    // merge invariant at execution time. Genuinely diverged branches keep the
-    // explicit sync-first stop.
-    return isBehindOnlyUpstream(upstreamStatus) ? 'fast_forward' : 'blocked'
+    return 'blocked'
   }
 
   return 'none'

@@ -8,7 +8,6 @@ import { translate } from '@/i18n/i18n'
 export function AssigneesEditor({
   owner,
   repo,
-  host,
   selected,
   disabled,
   sourceSettings,
@@ -16,7 +15,6 @@ export function AssigneesEditor({
 }: {
   owner: string
   repo: string
-  host?: string
   selected: string[]
   disabled?: boolean
   sourceSettings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined
@@ -31,8 +29,7 @@ export function AssigneesEditor({
     open ? owner : null,
     open ? repo : null,
     seedKey ? seedKey.split(',') : [],
-    sourceSettings,
-    host
+    sourceSettings
   )
   return (
     <Popover open={open} onOpenChange={(o) => !disabled && setOpen(o)}>

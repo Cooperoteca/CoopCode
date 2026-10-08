@@ -123,23 +123,14 @@ export function readReviewSummary(value: unknown): GitHubPRReviewSummary | null 
   if (!isRecord(value)) {
     return null
   }
-  // Desktop maps latestReviews to top-level `login`. Raw `gh pr view --json`
-  // keeps nested `author.login` — accept both so mobile never drops reviewers.
-  const nestedAuthor = isRecord(value.author) ? value.author : null
-  const login =
-    readString(value.login) ?? (nestedAuthor ? readString(nestedAuthor.login) : undefined)
+  const login = readString(value.login)
   if (login === undefined) {
     return null
   }
-  const avatarUrl =
-    readString(value.avatarUrl) ??
-    (nestedAuthor
-      ? (readString(nestedAuthor.avatarUrl) ?? readString(nestedAuthor.avatar_url) ?? null)
-      : null)
   return {
     login,
     state: readString(value.state) ?? null,
-    avatarUrl
+    avatarUrl: readString(value.avatarUrl) ?? null
   }
 }
 
@@ -153,10 +144,7 @@ export function readRepoIdentity(value: unknown): GitHubRepositoryIdentity | und
   if (!owner || !repo) {
     return undefined
   }
-  // Why: dropping `host` here would strip the GHES identity before every
-  // subsequent PR RPC, forcing the host to re-derive it per call.
-  const host = readString(value.host)
-  return { owner, repo, ...(host ? { host } : {}) }
+  return { owner, repo }
 }
 
 function readMergeMethod(value: unknown): GitHubPRMergeMethod | undefined {

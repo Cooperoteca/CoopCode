@@ -12,7 +12,6 @@ export type SetupHostOption = {
   label: string
   detail: string
   isAvailable: boolean
-  canUsePathActions: boolean
 }
 
 export function getSetupStateLabel(setupState: ProjectHostSetupState): string {
@@ -51,21 +50,11 @@ export function buildSetupHostOptions({
     .filter((host) => !setupHostIds.has(host.id))
     .map((host) => {
       const availability = getHostSetupAvailability(host)
-      // Why: import and clone require live remote providers, while an offline
-      // host can still be recorded as a placeholder for later setup.
-      const canUsePathActions = host.health === 'local' || host.health === 'available'
       return {
         id: host.id,
         label: host.label || getExecutionHostLabel(host.id),
-        detail:
-          availability.isAvailable && !canUsePathActions
-            ? translate(
-                'auto.components.settings.RepositoryPane.hostSetupConnectionRequired',
-                'Connect this host before importing or cloning the project'
-              )
-            : availability.detail,
-        isAvailable: availability.isAvailable,
-        canUsePathActions
+        detail: availability.detail,
+        isAvailable: availability.isAvailable
       }
     })
 }

@@ -1,12 +1,5 @@
 import type React from 'react'
-import {
-  ChevronDown,
-  LocateFixed,
-  MessageSquarePlus,
-  MoreHorizontal,
-  PanelTopOpen,
-  Play
-} from 'lucide-react'
+import { ChevronDown, LocateFixed, MoreHorizontal, PanelTopOpen, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -52,7 +45,6 @@ export function SessionRowTrailingActions({
   showJumpToWorktree,
   onJumpToWorktree,
   onResume,
-  onContinueInNewSession,
   onCopyResume,
   onCopyId,
   onCopyPath,
@@ -72,8 +64,7 @@ export function SessionRowTrailingActions({
   showJumpToWorktree: boolean
   onJumpToWorktree?: () => void
   onResume: () => void
-  onContinueInNewSession?: () => void
-  onCopyResume?: () => void
+  onCopyResume: () => void
   onCopyId: () => void
   onCopyPath: () => void
   onOpenLog?: () => void
@@ -158,36 +149,6 @@ export function SessionRowTrailingActions({
             {resumeLabel}
           </TooltipContent>
         </Tooltip>
-        {onContinueInNewSession ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={translate(
-                  'components.agentSessionContinuation.continueInNewSession',
-                  'Continue in New Session…'
-                )}
-                draggable={false}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onContinueInNewSession()
-                }}
-                data-testid="ai-vault-session-continue-in-new-session"
-                className="can-hover:pointer-events-none group-hover/session-row:pointer-events-auto group-focus-within/session-row:pointer-events-auto focus-visible:pointer-events-auto"
-              >
-                <MessageSquarePlus className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}>
-              {translate(
-                'components.agentSessionContinuation.continueInNewSession',
-                'Continue in New Session…'
-              )}
-            </TooltipContent>
-          </Tooltip>
-        ) : null}
       </div>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -250,7 +211,6 @@ export function SessionRowTrailingActions({
             resumeDisabled={resumeDisabled}
             resumeLabel={resumeLabel}
             onResume={onResume}
-            onContinueInNewSession={onContinueInNewSession}
             onJumpToOriginalPane={onJumpToOriginalPane}
             showJumpToWorktree={showJumpToWorktree}
             onJumpToWorktree={onJumpToWorktree}

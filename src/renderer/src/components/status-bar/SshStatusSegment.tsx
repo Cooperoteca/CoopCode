@@ -147,22 +147,6 @@ export function isConnectedRuntimeHostState(state: RuntimeHostConnectionState): 
   return state === 'connected'
 }
 
-export async function connectRuntimeHostForNavigation(args: {
-  environmentId: string
-  refreshStatus: (environmentId: string, timeoutMs: number) => Promise<boolean>
-  fetchRepos: (environmentId: string) => Promise<{ id: string }[]>
-  fetchWorktrees: (repoId: string) => Promise<unknown>
-  fetchLineage: () => Promise<unknown>
-}): Promise<boolean> {
-  if (!(await args.refreshStatus(args.environmentId, 5_000))) {
-    return false
-  }
-  const repos = await args.fetchRepos(args.environmentId)
-  await Promise.all(repos.map((repo) => args.fetchWorktrees(repo.id)))
-  await args.fetchLineage()
-  return true
-}
-
 export function SshStatusSegment({
   compact,
   iconOnly
@@ -175,6 +159,7 @@ export function SshStatusSegment({
   const settings = useAppStore((s) => s.settings)
   const runtimeEnvironments = useAppStore((s) => s.runtimeEnvironments)
   const runtimeStatusByEnvironmentId = useAppStore((s) => s.runtimeStatusByEnvironmentId)
+  const switchRuntimeEnvironment = useAppStore((s) => s.switchRuntimeEnvironment)
   const setRuntimeEnvironmentStatus = useAppStore((s) => s.setRuntimeEnvironmentStatus)
   const hydrateRuntimeEnvironmentStatuses = useAppStore((s) => s.hydrateRuntimeEnvironmentStatuses)
   const refreshRuntimeEnvironmentStatus = useAppStore((s) => s.refreshRuntimeEnvironmentStatus)
@@ -229,14 +214,7 @@ export function SshStatusSegment({
   const disconnectedTargets = targets.filter((target) => target.status !== 'connected')
   const connectRuntimeHost = useCallback(
     async (environmentId: string): Promise<void> => {
-      const store = useAppStore.getState()
-      const reachable = await connectRuntimeHostForNavigation({
-        environmentId,
-        refreshStatus: refreshRuntimeEnvironmentStatus,
-        fetchRepos: store.fetchRuntimeEnvironmentRepos,
-        fetchWorktrees: store.fetchWorktrees,
-        fetchLineage: store.fetchWorktreeLineage
-      })
+      const reachable = await refreshRuntimeEnvironmentStatus(environmentId, 5_000)
       if (!reachable) {
         toast.error(
           translate(
@@ -246,13 +224,22 @@ export function SshStatusSegment({
         )
         return
       }
-      recordFeatureInteraction('ssh')
+      const switched = await switchRuntimeEnvironment(environmentId)
+      if (switched) {
+        recordFeatureInteraction('ssh')
+      }
     },
-    [recordFeatureInteraction, refreshRuntimeEnvironmentStatus]
+    [recordFeatureInteraction, refreshRuntimeEnvironmentStatus, switchRuntimeEnvironment]
   )
   const disconnectRuntimeHost = useCallback(
-    async (environmentId: string): Promise<void> => {
+    async (environmentId: string, isActive: boolean): Promise<void> => {
       try {
+        if (isActive) {
+          const switched = await switchRuntimeEnvironment(null)
+          if (!switched) {
+            return
+          }
+        }
         await window.api.runtimeEnvironments.disconnect({ selector: environmentId })
         setRuntimeEnvironmentStatus(environmentId, { status: null, checkedAt: Date.now() })
         recordFeatureInteraction('ssh')
@@ -267,7 +254,7 @@ export function SshStatusSegment({
         )
       }
     },
-    [recordFeatureInteraction, setRuntimeEnvironmentStatus]
+    [recordFeatureInteraction, setRuntimeEnvironmentStatus, switchRuntimeEnvironment]
   )
 
   if (targets.length === 0 && runtimeHosts.length === 0) {
@@ -368,7 +355,7 @@ export function SshStatusSegment({
             state={host.state}
             detail={runtimeHostConnectionDetail(host.remoteControl)}
             onConnect={() => connectRuntimeHost(host.id)}
-            onDisconnect={() => disconnectRuntimeHost(host.id)}
+            onDisconnect={() => disconnectRuntimeHost(host.id, host.active)}
           />
         ))}
         {connectedTargets.map((t) => (
@@ -387,7 +374,7 @@ export function SshStatusSegment({
             state={host.state}
             detail={runtimeHostConnectionDetail(host.remoteControl)}
             onConnect={() => connectRuntimeHost(host.id)}
-            onDisconnect={() => disconnectRuntimeHost(host.id)}
+            onDisconnect={() => disconnectRuntimeHost(host.id, host.active)}
           />
         ))}
         {disconnectedTargets.map((t) => (

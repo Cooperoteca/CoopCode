@@ -203,7 +203,6 @@ export function LinearIssueEditSection({
           patchLinearIssue(issue.id, { state: prevState }, { sourceContext })
         },
         onSuccess: () => {
-          useAppStore.getState().invalidateLinearIssueLists({ sourceContext })
           useAppStore.getState().recordFeatureInteraction('linear-tasks')
         },
         onError: (err) => toast.error(err)
@@ -224,7 +223,7 @@ export function LinearIssueEditSection({
 
   const handlePriorityChange = useCallback(
     (value: string) => {
-      const priority = Number.parseInt(value, 10)
+      const priority = parseInt(value, 10)
       const prevPriority = localPriority
       run('priority', {
         mutate: () =>
@@ -238,7 +237,6 @@ export function LinearIssueEditSection({
           patchLinearIssue(issue.id, { priority: prevPriority }, { sourceContext })
         },
         onSuccess: () => {
-          useAppStore.getState().invalidateLinearIssueLists({ sourceContext })
           useAppStore.getState().recordFeatureInteraction('linear-tasks')
         },
         onError: (err) => toast.error(err)
@@ -330,7 +328,6 @@ export function LinearIssueEditSection({
           patchLinearIssue(issue.id, { assignee: prevAssignee }, { sourceContext })
         },
         onSuccess: () => {
-          useAppStore.getState().invalidateLinearIssueLists({ sourceContext })
           useAppStore.getState().recordFeatureInteraction('linear-tasks')
         },
         onError: (err) => toast.error(err)
@@ -386,7 +383,6 @@ export function LinearIssueEditSection({
           )
         },
         onSuccess: () => {
-          useAppStore.getState().invalidateLinearIssueLists({ sourceContext })
           useAppStore.getState().recordFeatureInteraction('linear-tasks')
         },
         onError: (err) => toast.error(err)

@@ -47,7 +47,6 @@ export function mergeWorktree(
     ...(meta?.automationProvenance !== undefined
       ? { automationProvenance: meta.automationProvenance }
       : {}),
-    ...(meta?.cliProvenance !== undefined ? { cliProvenance: meta.cliProvenance } : {}),
     ...(meta?.pendingFirstAgentMessageRename !== undefined
       ? { pendingFirstAgentMessageRename: meta.pendingFirstAgentMessageRename }
       : {}),

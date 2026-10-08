@@ -41,8 +41,7 @@ describe('GitHubItemDialog source host boundaries', () => {
     )
     expect(section).toContain("'github.requestPRReviewers'")
     expect(section).toContain("'github.removePRReviewers'")
-    expect(section).toContain('resolvePullRequestRepo(item, projectOrigin)')
-    expect(section.match(/prRepo: reviewRepo/g)).toHaveLength(4)
+    expect(section).toContain('{ repo: runtimeRepo, prNumber: item.number, reviewers: logins }')
     expect(section).toContain('notifyWorkItemDetailsMutation(')
     expect(section).toContain('{ local: false }')
   })
@@ -58,8 +57,7 @@ describe('GitHubItemDialog source host boundaries', () => {
 
     expect(section).toContain('getTaskSourceRuntimeSettings(sourceContext)')
     expect(section).toContain('useRepoLabels(')
-    expect(section).toContain('useRepoLabelsBySlug(')
-    expect(section).toContain('projectOrigin?.host')
+    expect(section).toContain('useRepoLabelsBySlug(slugOwner, slugRepo, sourceSettings)')
     expect(section).toContain('useRepoAssignees(')
     expect(section).toContain('useRepoAssigneesBySlug(')
     expect(section).toContain('sourceSettings')
@@ -69,9 +67,6 @@ describe('GitHubItemDialog source host boundaries', () => {
     expect(helperSection).toContain("'github.project.updatePullRequestBySlug'")
     expect(helperSection).toContain("args.sourceContext?.provider === 'github'")
     expect(helperSection).toContain('getTaskSourceRuntimeSettings(args.sourceContext)')
-    expect(helperSection).toContain(
-      'getGitHubMutationRoutingSettings(useAppStore.getState(), args.repoId, args.sourceContext)'
-    )
     expect(helperSection).toContain('notifyWorkItemDetailsMutation(')
     expect(helperSection).toContain(
       "repo: getGitHubRuntimeRepoId(args.sourceContext, args.repoId ?? '')"
@@ -187,7 +182,7 @@ describe('GitHubItemDialog source host boundaries', () => {
     expect(source).toContain('notifyWorkItemMutated({')
   })
 
-  it('routes merge actions through the repo owner host (#6957)', () => {
+  it('routes merge actions through the task source context', () => {
     const source = componentSource('GitHubItemDialog.tsx')
     const actionsSection = sourceBetween(
       source,
@@ -195,17 +190,13 @@ describe('GitHubItemDialog source host boundaries', () => {
       'function CommentReactions'
     )
 
-    expect(actionsSection).toContain(
-      'getGitHubMutationRoutingSettings(s, item.repoId ?? repoId ?? null, sourceContext)'
-    )
+    expect(actionsSection).toContain('getTaskSourceRuntimeSettings(sourceContext)')
     expect(actionsSection).toContain('getActiveRuntimeTarget(sourceSettings)')
     expect(actionsSection).toContain(
       'const canMergeWithRepoContext = !!repoPath || mergeTarget.kind ==='
     )
     expect(actionsSection).toContain("'github.mergePR'")
     expect(actionsSection).toContain("'github.setPRAutoMerge'")
-    expect(actionsSection).toContain('const prRepo = resolvePullRequestRepo(item, projectOrigin)')
-    expect(actionsSection).not.toContain('prRepo: item.prRepo ?? null')
     expect(actionsSection).toContain(
       'repo: getGitHubRuntimeRepoId(sourceContext, repoId ?? item.repoId)'
     )
@@ -233,16 +224,5 @@ describe('GitHubItemDialog source host boundaries', () => {
     expect(checksSection).toContain('window.api.gh.prChecks({')
     expect(checksSection).toContain('window.api.gh.rerunPRChecks({')
     expect(checksSection).toContain('prCheckDetails({')
-  })
-
-  it('uses hydrated work item details for the page checks tab', () => {
-    const source = componentSource('GitHubItemDialog.tsx')
-    const checksTab = sourceBetween(
-      source,
-      '<TabsContent value="checks"',
-      '<TabsContent value="files"'
-    )
-
-    expect(checksTab).toContain('item={displayWorkItem ?? workItem}')
   })
 })

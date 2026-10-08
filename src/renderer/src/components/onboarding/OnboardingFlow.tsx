@@ -116,21 +116,22 @@ export default function OnboardingFlow({
   const shouldShowFooterBusy = Boolean(busyLabel)
   const footerPrimaryLabel =
     busyLabel ?? (currentStep.id === 'notifications' ? 'Add your first project' : 'Continue')
+  const canDismissCurrentStep = currentStep.id !== 'notifications'
   const [skipConfirmOpen, setSkipConfirmOpen] = useState(false)
   const skipConfirmAdvancedViaRef = useRef<'button' | 'keyboard'>('button')
   const { next: flowNext, dismissOnboarding: flowDismissOnboarding } = flow
 
   const requestSkipConfirmation = useCallback(
     (advancedVia: 'button' | 'keyboard') => {
-      // Why: click-off / Escape dismissal stays available on every step,
-      // including the final notifications step, so the modal never feels stuck.
-      if (busyLabel || skipConfirmOpen) {
+      // Why: the final notifications step hands off to Add Project, so all
+      // dismiss paths are disabled there, not just the visible Skip button.
+      if (!canDismissCurrentStep || busyLabel || skipConfirmOpen) {
         return
       }
       skipConfirmAdvancedViaRef.current = advancedVia
       setSkipConfirmOpen(true)
     },
-    [busyLabel, skipConfirmOpen]
+    [busyLabel, canDismissCurrentStep, skipConfirmOpen]
   )
 
   const confirmSkipOnboarding = useCallback(() => {
@@ -217,7 +218,7 @@ export default function OnboardingFlow({
             </div>
 
             <div className="mt-10 flex items-center gap-2 transition-[margin-top] duration-[760ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none">
-              {flow.progressSteps.map(({ step, index: realStepIndex }, progressIdx) => {
+              {flow.progressSteps.map(({ step, index: realStepIndex, isSkipped }, progressIdx) => {
                 const isActive = realStepIndex === stepIndex
                 const isDone = realStepIndex < stepIndex
                 return (
@@ -233,7 +234,8 @@ export default function OnboardingFlow({
                             ? 'w-10 bg-foreground'
                             : isDone
                               ? 'w-6 bg-muted-foreground/70 hover:bg-foreground/80'
-                              : 'w-6 bg-muted-foreground/25 hover:bg-muted-foreground/45'
+                              : 'w-6 bg-muted-foreground/25 hover:bg-muted-foreground/45',
+                          isSkipped && 'cursor-default hover:bg-muted-foreground/25'
                         )}
                         aria-label={translate(
                           'auto.components.onboarding.OnboardingFlow.adaa0aa627',
@@ -241,6 +243,7 @@ export default function OnboardingFlow({
                           { value0: progressIdx + 1, value1: stepTooltipLabels[step.id] }
                         )}
                         aria-current={isActive ? 'step' : undefined}
+                        disabled={isSkipped}
                         onClick={() => flow.jumpToStep(realStepIndex)}
                       />
                     </TooltipTrigger>

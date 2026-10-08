@@ -25,7 +25,7 @@ export type RelayProcess = {
 export function spawnRelay(
   entryPath: string,
   args: string[] = [],
-  options: Pick<SpawnOptions, 'cwd' | 'env'> = {}
+  options: Pick<SpawnOptions, 'env'> = {}
 ): RelayProcess {
   const proc = spawn('node', [entryPath, ...args], {
     stdio: ['pipe', 'pipe', 'pipe'],

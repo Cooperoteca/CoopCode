@@ -32,10 +32,14 @@ import {
   type AiVaultScope,
   type AiVaultSort
 } from '../../../../shared/ai-vault-types'
-import { getExecutionHostLabel, type ExecutionHostScope } from '../../../../shared/execution-host'
+import {
+  ALL_EXECUTION_HOSTS_SCOPE,
+  getExecutionHostLabel,
+  LOCAL_EXECUTION_HOST_ID,
+  type ExecutionHostScope
+} from '../../../../shared/execution-host'
 import { agentLabel, type AiVaultSessionGroup } from './ai-vault-session-filters'
 import { translate } from '@/i18n/i18n'
-import type { AiVaultHostScopeOption } from './ai-vault-host-scope'
 
 const VAULT_HEADER_CONTROL_CLASS = 'size-6 shrink-0'
 
@@ -180,15 +184,19 @@ export function VaultScopeSwitch({
 
 export function VaultHostScopeMenu({
   executionHostScope,
-  hostOptions,
+  activeSshExecutionHostScope,
   onExecutionHostScopeChange
 }: {
   executionHostScope: ExecutionHostScope
-  hostOptions: readonly AiVaultHostScopeOption[]
+  activeSshExecutionHostScope: ExecutionHostScope | null
   onExecutionHostScopeChange: (scope: ExecutionHostScope) => void
 }): React.JSX.Element {
-  const selectedOption = hostOptions.find((option) => option.id === executionHostScope)
-  const label = selectedOption?.label ?? getExecutionHostLabel(executionHostScope)
+  const hostOptions = [
+    LOCAL_EXECUTION_HOST_ID,
+    ...(activeSshExecutionHostScope ? [activeSshExecutionHostScope] : []),
+    ALL_EXECUTION_HOSTS_SCOPE
+  ] as const
+  const label = getExecutionHostLabel(executionHostScope)
 
   return (
     <DropdownMenu>
@@ -216,9 +224,9 @@ export function VaultHostScopeMenu({
           value={executionHostScope}
           onValueChange={(value) => onExecutionHostScopeChange(value as ExecutionHostScope)}
         >
-          {hostOptions.map((option) => (
-            <DropdownMenuRadioItem key={option.id} value={option.id}>
-              {option.label}
+          {hostOptions.map((scope) => (
+            <DropdownMenuRadioItem key={scope} value={scope}>
+              {getExecutionHostLabel(scope)}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

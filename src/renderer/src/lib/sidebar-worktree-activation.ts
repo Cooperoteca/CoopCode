@@ -15,12 +15,7 @@ export async function activateWorktreeFromSidebar(worktreeId: string): Promise<v
 
   if (typeof window !== 'undefined' && window.api?.ephemeralVm?.resumeWorkspace) {
     try {
-      const runtime = await window.api.ephemeralVm.resumeWorkspace({ workspaceId: worktreeId })
-      if (runtime?.runtimeEnvironmentId) {
-        const store = (await import('@/store')).useAppStore
-        store.getState().setRuntimeEnvironments(await window.api.runtimeEnvironments.list())
-        await store.getState().refreshRuntimeEnvironmentStatus(runtime.runtimeEnvironmentId)
-      }
+      await window.api.ephemeralVm.resumeWorkspace({ workspaceId: worktreeId })
     } catch (error) {
       toast.error(
         translate(

@@ -1,9 +1,8 @@
 import type { Page, TestInfo } from '@stablyai/playwright-test'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { test, expect } from './helpers/orca-app'
-import { runNodeScriptInTerminal } from './helpers/run-node-script-in-terminal'
 import {
   ensureTerminalVisible,
   getActiveWorktreeId,
@@ -23,22 +22,28 @@ type HiddenTuiWindow = Window & {
   __terminalPtyDataInjection?: {
     inject: (paneKey: string, data: string, meta?: { seq?: number; rawLength?: number }) => boolean
   }
-  // Why: only the mode-2031 fact-reply counter survives Phase 6 — the
-  // hidden-skip counters were deleted with the renderer skip grammar.
   __terminalPtyOutputDebug?: {
     reset: () => void
     snapshot: () => {
+      hiddenRendererSkipCount: number
+      hiddenRendererSkippedChars: number
       hiddenRendererMode2031ReplyCount: number
     }
   }
 }
 
+type HiddenTuiDebugSnapshot = {
+  hiddenRendererSkipCount: number
+  hiddenRendererSkippedChars: number
+  hiddenRendererMode2031ReplyCount: number
+}
+
 type TuiCursorState = {
   hidden: boolean | null
   initialized: boolean | null
+  cursorElementVisible: boolean
+  cursorCanvasPresent: boolean
 }
-
-const HIDDEN_FRAME_SCRIPT_DELAY_MS = 750
 
 function tuiFrame(runId: string, frame: number): string {
   const progress = `${'█'.repeat((frame % 8) + 1)}${'░'.repeat(8 - ((frame % 8) + 1))}`
@@ -74,43 +79,23 @@ function lowRiskRestoreFrame(runId: string, frame: number): string {
 }
 
 async function resetHiddenDebug(page: Page): Promise<void> {
-  await page.evaluate(async () => {
+  await page.evaluate(() => {
     ;(window as HiddenTuiWindow).__terminalPtyOutputDebug?.reset()
-    // Why: under the Phase-4 hidden-delivery gate the withheld-output signal
-    // lives in main's delivery debug counters, not the renderer skip path.
-    await window.api.pty.resetRendererDeliveryDebug()
   })
 }
 
 function writeHiddenFrameScript(scriptPath: string, runId: string): void {
   const frames = Array.from({ length: 25 }, (_, frame) => tuiFrame(runId, frame))
-  mkdirSync(path.dirname(scriptPath), { recursive: true })
-  writeFileSync(
-    scriptPath,
-    `setTimeout(() => process.stdout.write(${JSON.stringify(frames.join(''))}), ${HIDDEN_FRAME_SCRIPT_DELAY_MS})\n`
-  )
-}
-
-function writeLowRiskFrameScript(scriptPath: string, frame: string): void {
-  mkdirSync(path.dirname(scriptPath), { recursive: true })
-  writeFileSync(
-    scriptPath,
-    `setTimeout(() => process.stdout.write(${JSON.stringify(frame)}), ${HIDDEN_FRAME_SCRIPT_DELAY_MS})\n`
-  )
+  writeFileSync(scriptPath, `process.stdout.write(${JSON.stringify(frames.join(''))})\n`)
 }
 
 async function writeHiddenFrames(page: Page, ptyId: string, scriptPath: string): Promise<void> {
   await sendToTerminal(page, ptyId, `node ${JSON.stringify(scriptPath)}\r`)
 }
 
-// Why: Phase-4 hidden-delivery gate contract — hidden PTY bytes are dropped
-// in main after model ingestion and never reach the renderer, so "hidden
-// output was withheld" is observed via main's dropped-chars counter instead
-// of the old renderer hidden-skip counters.
-async function readMainHiddenDeliveryDroppedChars(page: Page): Promise<number> {
-  return page.evaluate(async () => {
-    const snapshot = await window.api.pty.getRendererDeliveryDebugSnapshot()
-    return snapshot.hiddenDeliveryDroppedChars
+async function readHiddenDebug(page: Page): Promise<HiddenTuiDebugSnapshot | null> {
+  return page.evaluate(() => {
+    return (window as HiddenTuiWindow).__terminalPtyOutputDebug?.snapshot() ?? null
   })
 }
 
@@ -135,9 +120,23 @@ async function readTuiCursorState(page: Page): Promise<TuiCursorState> {
         _core?: { coreService?: { isCursorHidden?: boolean; isCursorInitialized?: boolean } }
       }
     )._core
+    const cursorElement = pane.container.querySelector<HTMLElement>('.xterm-cursor')
+    const cursorRect = cursorElement?.getBoundingClientRect()
+    const cursorStyle = cursorElement ? window.getComputedStyle(cursorElement) : null
     return {
       hidden: terminalCore?.coreService?.isCursorHidden ?? null,
-      initialized: terminalCore?.coreService?.isCursorInitialized ?? null
+      initialized: terminalCore?.coreService?.isCursorInitialized ?? null,
+      // Why: a blinking DOM cursor may be transparent during the sampled frame;
+      // disappearance regressions remove the laid-out cursor element/layer.
+      cursorElementVisible:
+        !!cursorElement &&
+        !!cursorRect &&
+        cursorRect.width > 0 &&
+        cursorRect.height > 0 &&
+        cursorStyle?.display !== 'none' &&
+        cursorStyle?.visibility !== 'hidden',
+      cursorCanvasPresent:
+        pane.container.querySelector<HTMLCanvasElement>('.xterm-cursor-layer canvas') !== null
     }
   })
 }
@@ -206,8 +205,7 @@ async function writeHiddenSideEffectBurst(
 ): Promise<void> {
   const payload = `\x07\x1b]0;${title}\x07${marker}\n`
   const script = `process.stdout.write(${JSON.stringify(payload)}); setTimeout(() => process.exit(0), 30000)`
-  // Why: delivered via a temp file — `node -e` quoting is not PowerShell-safe (#8521).
-  await runNodeScriptInTerminal(page, ptyId, script, { prefix: 'orca-hidden-side-effect' })
+  await sendToTerminal(page, ptyId, `node -e ${JSON.stringify(script)}\r`)
 }
 
 test.describe('Hidden terminal TUI visual restore', () => {
@@ -247,23 +245,13 @@ test.describe('Hidden terminal TUI visual restore', () => {
     writeHiddenFrameScript(scriptPath, runId)
     await resetHiddenDebug(orcaPage)
     await writeHiddenFrames(orcaPage, hiddenPane.ptyId, scriptPath)
-    await resetHiddenDebug(orcaPage)
 
-    // Why: hidden-delivery gate contract — the bulk TUI frames must be
-    // withheld in main (dropped after model ingestion), not delivered and
-    // skipped renderer-side.
     await expect
-      .poll(() => readMainHiddenDeliveryDroppedChars(orcaPage), {
+      .poll(async () => (await readHiddenDebug(orcaPage))?.hiddenRendererSkipCount ?? 0, {
         timeout: 10_000,
-        message: 'visually rich hidden TUI output was not withheld from the renderer'
+        message: 'visually rich hidden TUI output should stay on the live xterm path'
       })
-      .toBeGreaterThan(1024)
-    await expect
-      .poll(() => readMainSnapshotSource(orcaPage, hiddenPane.ptyId!), {
-        timeout: 10_000,
-        message: 'visually rich hidden TUI source did not come from headless model'
-      })
-      .toBe('headless')
+      .toBe(0)
 
     await switchToWorktree(orcaPage, secondWorktreeId)
     await ensureTerminalVisible(orcaPage)
@@ -291,7 +279,6 @@ test.describe('Hidden terminal TUI visual restore', () => {
         hidden: false,
         initialized: true
       })
-
     const screenshotPath = testInfo.outputPath('hidden-tui-restore-final.png')
     await orcaPage.screenshot({ path: screenshotPath, fullPage: true })
     await testInfo.attach('hidden-tui-restore-final.png', {
@@ -301,9 +288,8 @@ test.describe('Hidden terminal TUI visual restore', () => {
     rmSync(scriptPath, { force: true })
   })
 
-  test('keeps newer live output correct after plain hidden output restores', async ({
-    orcaPage,
-    testRepoPath
+  test('keeps newer live output correct after hidden output stayed live', async ({
+    orcaPage
   }, testInfo: TestInfo) => {
     await waitForSessionReady(orcaPage)
     const firstWorktreeId = await waitForActiveWorktree(orcaPage)
@@ -337,20 +323,18 @@ test.describe('Hidden terminal TUI visual restore', () => {
     const hiddenFrame = lowRiskRestoreFrame(runId, 40)
     const liveFrame = lowRiskRestoreFrame(runId, 41)
     const finalMarker = `VISUAL_RESTORE_FINAL_${runId}_41`
-    const scriptPath = path.join(testRepoPath, `.orca-low-risk-hidden-${runId}.mjs`)
-    writeLowRiskFrameScript(scriptPath, hiddenFrame)
     await resetHiddenDebug(orcaPage)
-    await sendToTerminal(orcaPage, hiddenPane.ptyId, `node ${JSON.stringify(scriptPath)}\r`)
-    await resetHiddenDebug(orcaPage)
+    await injectPaneData(orcaPage, paneKey, hiddenFrame, {
+      seq: hiddenFrame.length,
+      rawLength: hiddenFrame.length
+    })
 
-    // Why: hidden-delivery gate contract — even plain hidden output is
-    // dropped in main, so the withheld signal is main's dropped counter.
     await expect
-      .poll(() => readMainHiddenDeliveryDroppedChars(orcaPage), {
+      .poll(async () => (await readHiddenDebug(orcaPage))?.hiddenRendererSkipCount ?? 0, {
         timeout: 10_000,
-        message: 'plain hidden injected output was not withheld from the renderer'
+        message: 'hidden injected output should stay on the live xterm path for release'
       })
-      .toBeGreaterThan(0)
+      .toBe(0)
 
     await switchToWorktree(orcaPage, secondWorktreeId)
     await ensureTerminalVisible(orcaPage)
@@ -363,7 +347,7 @@ test.describe('Hidden terminal TUI visual restore', () => {
     await expect
       .poll(() => getTerminalContent(orcaPage, 12_000), {
         timeout: 10_000,
-        message: 'newer live TUI frame did not render after hidden output restored'
+        message: 'newer live TUI frame did not render after hidden output stayed live'
       })
       .toContain(finalMarker)
 
@@ -377,7 +361,7 @@ test.describe('Hidden terminal TUI visual restore', () => {
     await expect
       .poll(() => readTuiCursorState(orcaPage), {
         timeout: 5_000,
-        message: 'live TUI cursor stayed hidden after hidden output restored'
+        message: 'live TUI cursor stayed hidden after hidden output stayed live'
       })
       .toMatchObject({
         hidden: false,
@@ -389,102 +373,9 @@ test.describe('Hidden terminal TUI visual restore', () => {
       path: screenshotPath,
       contentType: 'image/png'
     })
-    rmSync(scriptPath, { force: true })
   })
 
-  test('restores rich synchronized TUI output from the headless model', async ({
-    orcaPage,
-    testRepoPath
-  }, testInfo: TestInfo) => {
-    await waitForSessionReady(orcaPage)
-    const firstWorktreeId = await waitForActiveWorktree(orcaPage)
-    const secondWorktreeId = (await getAllWorktreeIds(orcaPage)).find(
-      (id) => id !== firstWorktreeId
-    )
-    test.skip(!secondWorktreeId, 'hidden TUI restore needs the seeded secondary worktree')
-    if (!secondWorktreeId) {
-      return
-    }
-
-    await switchToWorktree(orcaPage, secondWorktreeId)
-    await ensureTerminalVisible(orcaPage)
-    await waitForActiveTerminalManager(orcaPage, 30_000)
-    const hiddenSnapshot = await waitForPaneIdentitySnapshot(orcaPage, 1)
-    const hiddenPane = hiddenSnapshot.panes[0]
-    if (!hiddenPane?.ptyId) {
-      throw new Error('hidden rich model pane did not bind a PTY')
-    }
-    await switchToWorktree(orcaPage, firstWorktreeId)
-    await expect
-      .poll(() => getActiveWorktreeId(orcaPage), {
-        timeout: 10_000,
-        message: 'first worktree did not become active before hidden rich model restore'
-      })
-      .toBe(firstWorktreeId)
-
-    const runId = randomUUID()
-    const finalMarker = `VISUAL_RESTORE_FINAL_${runId}_24`
-    const scriptPath = path.join(testRepoPath, `.orca-hidden-rich-model-${runId}.mjs`)
-    writeHiddenFrameScript(scriptPath, runId)
-    await resetHiddenDebug(orcaPage)
-    try {
-      await writeHiddenFrames(orcaPage, hiddenPane.ptyId, scriptPath)
-      await resetHiddenDebug(orcaPage)
-
-      // Why: hidden-delivery gate contract — synchronized rich frames are
-      // withheld in main; the headless model snapshot is the restore source.
-      await expect
-        .poll(() => readMainHiddenDeliveryDroppedChars(orcaPage), {
-          timeout: 10_000,
-          message: 'rich hidden TUI output was not withheld from the renderer'
-        })
-        .toBeGreaterThan(0)
-      await expect
-        .poll(() => readMainSnapshotSource(orcaPage, hiddenPane.ptyId!), {
-          timeout: 10_000,
-          message: 'rich hidden TUI source did not come from headless model'
-        })
-        .toBe('headless')
-
-      await switchToWorktree(orcaPage, secondWorktreeId)
-      await ensureTerminalVisible(orcaPage)
-      await waitForActiveTerminalManager(orcaPage, 30_000)
-
-      await expect
-        .poll(() => getTerminalContent(orcaPage, 12_000), {
-          timeout: 10_000,
-          message: 'rich headless TUI frame did not restore when visible'
-        })
-        .toContain(finalMarker)
-
-      const content = await getTerminalContent(orcaPage, 12_000)
-      expect(content).toContain(`Frame 024`)
-      expect(content).toContain('╭')
-      expect(content).toContain('├')
-      expect(content).toContain('█')
-      expect(content).not.toContain('Orca skipped hidden terminal output')
-      await expect
-        .poll(() => readTuiCursorState(orcaPage), {
-          timeout: 5_000,
-          message: 'rich headless TUI cursor stayed hidden after restore'
-        })
-        .toMatchObject({
-          hidden: false,
-          initialized: true
-        })
-
-      const screenshotPath = testInfo.outputPath('hidden-rich-model-restore-final.png')
-      await orcaPage.screenshot({ path: screenshotPath, fullPage: true })
-      await testInfo.attach('hidden-rich-model-restore-final.png', {
-        path: screenshotPath,
-        contentType: 'image/png'
-      })
-    } finally {
-      rmSync(scriptPath, { force: true })
-    }
-  })
-
-  test('keeps hidden terminal side effects live while hidden output may restore', async ({
+  test('keeps hidden terminal side effects live while hidden output stays live', async ({
     orcaPage
   }) => {
     await waitForSessionReady(orcaPage)
@@ -520,6 +411,12 @@ test.describe('Hidden terminal TUI visual restore', () => {
     await resetHiddenDebug(orcaPage)
     await writeHiddenSideEffectBurst(orcaPage, hiddenPane.ptyId, hiddenTitle, marker)
 
+    await expect
+      .poll(async () => (await readHiddenDebug(orcaPage))?.hiddenRendererSkipCount ?? 0, {
+        timeout: 10_000,
+        message: 'hidden side-effect output should stay on the live xterm path for release'
+      })
+      .toBe(0)
     await expect
       .poll(() => getRuntimePaneTitle(orcaPage, hiddenSnapshot.tabId, hiddenPane.numericPaneId), {
         timeout: 10_000,

@@ -1,16 +1,19 @@
-import type {
-  CreateSparseCheckoutRequest,
-  GitPushTarget,
-  SetupDecision,
-  TuiAgent
-} from '../../../src/shared/types'
-import { getWorkspaceSourceName } from '../../../src/shared/new-workspace/workspace-source'
+import type { TuiAgent } from '../../../src/shared/types'
 import { resolveMobileWorkspaceCreateName } from './mobile-workspace-name'
 import type { WorkspaceAgentChoice } from './workspace-agent-selection'
 
-export type WorkspaceCreateSetupDecision = SetupDecision
-export type WorkspaceCreateSparseCheckout = CreateSparseCheckoutRequest
-export type WorkspaceCreateGitPushTarget = GitPushTarget
+export type WorkspaceCreateSetupDecision = 'inherit' | 'run' | 'skip'
+
+export type WorkspaceCreateSparseCheckout = {
+  directories: string[]
+  presetId?: string
+}
+
+export type WorkspaceCreateGitPushTarget = {
+  remoteName: string
+  branchName: string
+  remoteUrl?: string
+}
 
 export type WorkspaceCreateHostedStartPoint = {
   baseBranch: string
@@ -45,8 +48,6 @@ type WorkspaceCreateLinearItem = {
     identifier: string
     title: string
     url: string
-    workspaceId?: string
-    organizationUrlKey?: string
   }
 }
 
@@ -57,22 +58,6 @@ export type WorkspaceCreateTaskItem =
 
 export type WorkspaceCreateParams = Record<string, unknown>
 
-/**
- * `worktree.create` fields for launching the picked agent in a fresh session.
- *
- * Why: send the agent id so the host resolves launch args (permission flags)
- * and host-shell quoting, matching the "+" new-tab and CLI paths.
- */
-export function agentLaunchCreateFields(agentId: TuiAgent | undefined): {
-  startupAgent?: TuiAgent
-  createdWithAgent?: TuiAgent
-} {
-  if (!agentId) {
-    return {}
-  }
-  return { startupAgent: agentId, createdWithAgent: agentId }
-}
-
 export function buildTaskWorkspaceCreateParams(args: {
   item: WorkspaceCreateTaskItem
   targetRepoId: string
@@ -81,12 +66,9 @@ export function buildTaskWorkspaceCreateParams(args: {
   workspaceName?: string
   note?: string
   baseBranch?: string
-  compareBaseRef?: string
   branchNameOverride?: string
-  pushTarget?: WorkspaceCreateGitPushTarget
   sparseCheckout?: WorkspaceCreateSparseCheckout
   hostedStartPoint?: WorkspaceCreateHostedStartPoint
-  nameIsAutoManaged?: boolean
 }): WorkspaceCreateParams {
   const {
     item,
@@ -96,41 +78,22 @@ export function buildTaskWorkspaceCreateParams(args: {
     workspaceName,
     note,
     baseBranch,
-    compareBaseRef,
     branchNameOverride,
-    pushTarget,
     sparseCheckout,
-    hostedStartPoint,
-    nameIsAutoManaged = true
+    hostedStartPoint
   } = args
   const shouldLaunchAgent = agent !== 'blank'
   const createdWithAgent = shouldLaunchAgent ? (agent as TuiAgent) : undefined
   const comment = note?.trim()
   const selectedBaseBranch = baseBranch || hostedStartPoint?.baseBranch
-  const selectedPushTarget = pushTarget ?? hostedStartPoint?.pushTarget
-  // Why: desktop only sends displayName while the name is still auto-derived; a
-  // user-edited name suppresses it so the runtime keeps the user's chosen name.
-  const sourceName =
-    item.provider === 'linear'
-      ? getWorkspaceSourceName({
-          provider: 'linear',
-          type: 'issue',
-          number: 0,
-          title: item.source.title,
-          url: item.source.url,
-          linearIdentifier: item.source.identifier
-        })
-      : getWorkspaceSourceName({ provider: item.provider, ...item.source })
-  const displayName = nameIsAutoManaged ? { displayName: sourceName.displayName } : {}
   const common = {
     setupDecision,
     activate: true,
     ...(shouldLaunchAgent ? { startupDraft: item.source.url } : {}),
     ...(createdWithAgent ? { createdWithAgent } : {}),
     ...(selectedBaseBranch ? { baseBranch: selectedBaseBranch } : {}),
-    ...(compareBaseRef ? { compareBaseRef } : {}),
     ...(branchNameOverride ? { branchNameOverride } : {}),
-    ...(selectedPushTarget ? { pushTarget: selectedPushTarget } : {}),
+    ...(hostedStartPoint?.pushTarget ? { pushTarget: hostedStartPoint.pushTarget } : {}),
     ...(sparseCheckout ? { sparseCheckout } : {}),
     ...(comment ? { comment } : {})
   }
@@ -140,7 +103,7 @@ export function buildTaskWorkspaceCreateParams(args: {
     return {
       repo: `id:${item.source.repoId}`,
       name: resolveMobileWorkspaceCreateName({ draft: workspaceName, fallback }),
-      ...displayName,
+      displayName: item.source.title,
       ...common,
       ...(item.source.type === 'issue'
         ? { linkedIssue: item.source.number }
@@ -153,7 +116,7 @@ export function buildTaskWorkspaceCreateParams(args: {
     return {
       repo: `id:${item.source.repoId}`,
       name: resolveMobileWorkspaceCreateName({ draft: workspaceName, fallback }),
-      ...displayName,
+      displayName: item.source.title,
       ...common,
       ...(item.source.type === 'issue'
         ? { linkedGitLabIssue: item.source.number }
@@ -167,12 +130,8 @@ export function buildTaskWorkspaceCreateParams(args: {
       draft: workspaceName,
       fallback: item.source.identifier.toLowerCase()
     }),
-    ...displayName,
+    displayName: item.source.title,
     linkedLinearIssue: item.source.identifier,
-    ...(item.source.workspaceId ? { linkedLinearIssueWorkspaceId: item.source.workspaceId } : {}),
-    ...(item.source.organizationUrlKey
-      ? { linkedLinearIssueOrganizationUrlKey: item.source.organizationUrlKey }
-      : {}),
     ...common
   }
 }

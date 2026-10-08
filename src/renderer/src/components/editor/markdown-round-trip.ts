@@ -1,9 +1,11 @@
 import { Editor } from '@tiptap/core'
 import { encodeRawMarkdownHtmlForRichEditor } from './raw-markdown-html'
 import { createRichMarkdownExtensions } from './rich-markdown-extensions'
-import { createRichMarkdownEditorCodec } from './rich-markdown-source-transport'
-import { createRichMarkdownHtmlSuperscriptLinkContext } from './rich-markdown-html-superscript-link-context'
 
+// Why: extensions are lazily created on first use to avoid eager instantiation
+// at import time. A single shared instance is safe here because only one
+// round-trip Editor is alive at a time (created and destroyed synchronously).
+let roundTripExtensions: ReturnType<typeof createRichMarkdownExtensions> | null = null
 const roundTripCache = new Map<string, string | null>()
 const MAX_CACHE_ENTRIES = 20
 
@@ -21,23 +23,13 @@ export function getRichMarkdownRoundTripOutput(content: string): string | null {
   let output: string | null = null
 
   try {
-    const codec = createRichMarkdownEditorCodec()
-    const context = createRichMarkdownHtmlSuperscriptLinkContext({
-      sourceFilePath: '',
-      worktreeId: '',
-      worktreeRoot: null,
-      sourceOwner: { kind: 'unknown' }
-    })
+    if (!roundTripExtensions) {
+      roundTripExtensions = createRichMarkdownExtensions()
+    }
     const editor = new Editor({
       element: null,
-      extensions: createRichMarkdownExtensions({
-        codec,
-        htmlSuperscriptLinks: true,
-        htmlSuperscriptLinkContext: context
-      }),
-      content: encodeRawMarkdownHtmlForRichEditor(content, codec, {
-        htmlSuperscriptLinks: true
-      }),
+      extensions: roundTripExtensions,
+      content: encodeRawMarkdownHtmlForRichEditor(content),
       contentType: 'markdown'
     })
     try {

@@ -45,7 +45,6 @@ type LinearUserNode = {
 
 type LinearProjectNode = {
   id: string
-  slugId?: string | null
   name: string
   description?: string | null
   content?: string | null
@@ -189,7 +188,6 @@ export type LinearProjectCreateInput = {
 
 const ORCA_PROJECT_FIELDS = `
   id
-  slugId
   name
   description
   content
@@ -607,7 +605,6 @@ function mapProjectForWorkspace(
 ): LinearProjectSummary {
   return {
     id: project.id,
-    slugId: project.slugId ?? undefined,
     workspaceId: entry.workspace.id,
     workspaceName: entry.workspace.organizationName,
     name: project.name,

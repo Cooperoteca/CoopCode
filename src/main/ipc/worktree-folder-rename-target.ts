@@ -26,7 +26,6 @@ export function planWorktreeFolderRename(args: {
   repoId: string
   repoPath: string
   oldWorktreePath: string
-  worktreeIdSuffix?: string
   newLeaf: string
   settings: WorktreePathSettings
   platform: NodeJS.Platform
@@ -50,8 +49,6 @@ export function planWorktreeFolderRename(args: {
   return {
     oldPath: args.oldWorktreePath,
     newPath,
-    // Why: folder workspaces can have multiple live instances backed by the
-    // same folder path, so preserve any synthetic instance suffix when re-keying.
-    newWorktreeId: `${args.repoId}${WORKTREE_ID_SEPARATOR}${newPath}${args.worktreeIdSuffix ?? ''}`
+    newWorktreeId: `${args.repoId}${WORKTREE_ID_SEPARATOR}${newPath}`
   }
 }

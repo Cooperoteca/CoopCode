@@ -2,10 +2,6 @@ import React from 'react'
 import type { GitHubOwnerRepo } from '../../../../shared/types'
 import RepoBadgeLabel from '@/components/repo/RepoBadgeLabel'
 import { cn } from '@/lib/utils'
-import {
-  githubRepoIdentityKey,
-  isDefaultGitHubHost
-} from '../../../../shared/github-repository-identity-key'
 
 export type IssueSourceIndicatorProps = {
   /** Resolved issue-source owner/repo. `null` means the source hasn't been
@@ -27,8 +23,12 @@ export type IssueSourceIndicatorProps = {
   className?: string
 }
 
-// Why: never leak the local remote name ("upstream" / "origin"); it would imply
-// Orca maintains a stable mapping between UI labels and git config.
+// Why: host-agnostic copy per parent design doc §2 — never mention "GitHub"
+// and never leak the local remote name ("upstream" / "origin"). The slug
+// alone is what the user needs to verify before filing an issue or using a
+// task as a work-item source. Leaking the remote name would imply Orca
+// maintains a stable mapping between UI labels and git config, which is not
+// something we want to promise.
 const LABEL_PREFIX_LIST = 'Issues from '
 const LABEL_PREFIX_ITEM = 'Issue from '
 
@@ -39,9 +39,13 @@ export function sameGitHubOwnerRepo(
   if (!left || !right) {
     return false
   }
-  // Why: names are case-insensitive, but the same slug on github.com and GHES
-  // identifies different repositories and must not suppress source routing.
-  return githubRepoIdentityKey(left) === githubRepoIdentityKey(right)
+  // Why: GitHub treats owner/repo names case-insensitively, so remotes with
+  // different casing (e.g. StablyAI/Orca vs stablyai/orca) resolve to the
+  // same repo and must suppress the indicator.
+  return (
+    left.owner.toLowerCase() === right.owner.toLowerCase() &&
+    left.repo.toLowerCase() === right.repo.toLowerCase()
+  )
 }
 
 /**
@@ -68,11 +72,7 @@ export default function IssueSourceIndicator({
   if (sameGitHubOwnerRepo(issues, prs)) {
     return null
   }
-  const host = issues.host?.trim()
-  const slug =
-    host && !isDefaultGitHubHost(host)
-      ? `${host}/${issues.owner}/${issues.repo}`
-      : `${issues.owner}/${issues.repo}`
+  const slug = `${issues.owner}/${issues.repo}`
   const prefix = variant === 'item' ? LABEL_PREFIX_ITEM : LABEL_PREFIX_LIST
   return (
     <span

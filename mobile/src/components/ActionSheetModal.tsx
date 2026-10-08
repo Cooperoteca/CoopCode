@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { ActivityIndicator, View, Text, Pressable, StyleSheet } from 'react-native'
 import { Edit3, Trash2, type LucideIcon } from 'lucide-react-native'
 import { colors, spacing, typography } from '../theme/mobile-theme'
@@ -13,7 +13,6 @@ export type ActionSheetAction = {
   hint?: string
   loading?: boolean
   skipAutoClose?: boolean
-  closeBeforePress?: boolean
   onPress: () => void
 }
 
@@ -108,37 +107,9 @@ export function ActionSheetContent({ title, message, actions, onClose }: Content
 }
 
 export function ActionSheetModal({ visible, title, message, actions, onClose }: Props) {
-  const pendingActionRef = useRef<(() => void) | null>(null)
-  const sequencedActions = actions.map((action) =>
-    action.closeBeforePress
-      ? {
-          ...action,
-          onPress: () => {
-            pendingActionRef.current = action.onPress
-          }
-        }
-      : action
-  )
-
   return (
-    <BottomDrawer
-      visible={visible}
-      onClose={onClose}
-      onAfterClose={() => {
-        // Why: iOS cannot present a second native modal until the action
-        // sheet's native window has fully unmounted.
-        const pendingAction = pendingActionRef.current
-        pendingActionRef.current = null
-        pendingAction?.()
-      }}
-      dragContentToDismiss
-    >
-      <ActionSheetContent
-        title={title}
-        message={message}
-        actions={sequencedActions}
-        onClose={onClose}
-      />
+    <BottomDrawer visible={visible} onClose={onClose} dragContentToDismiss>
+      <ActionSheetContent title={title} message={message} actions={actions} onClose={onClose} />
     </BottomDrawer>
   )
 }

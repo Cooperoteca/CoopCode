@@ -70,7 +70,6 @@ describe('FileExplorerVirtualRows add-as-project action', () => {
       deleteShortcutLabel: 'Del',
       onClick: vi.fn(),
       onDoubleClick: vi.fn(),
-      onViewFile: vi.fn(),
       onContextMenuSelect: vi.fn(),
       onCopyPaths: vi.fn(),
       onStartNew: vi.fn(),

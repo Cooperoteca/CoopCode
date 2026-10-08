@@ -21,7 +21,6 @@ import type {
 import type { GitHistoryOptions, GitHistoryResult } from '../../shared/git-history'
 import { buildHostedRemoteCommitUrl, buildHostedRemoteFileUrl } from '../git/hosted-remote-url'
 import { JsonRpcErrorCode } from '../ssh/relay-protocol'
-import { requestGitStreamable } from '../ssh/ssh-git-response-stream-reader'
 import type { CommitMessageDraftContext } from '../../shared/commit-message-generation'
 import type { CommitMessagePlan } from '../../shared/commit-message-plan'
 import type { RemoteCommitMessageExecResult } from '../text-generation/commit-message-text-generation'
@@ -31,7 +30,6 @@ import {
   isMaxBufferOverflowError
 } from '../git/max-buffer-overflow'
 import { InFlightPromiseDedupe, stableInFlightKey } from '../../shared/in-flight-promise-dedupe'
-import { gitExecMutatesRepository } from '../../shared/git-exec-mutation'
 
 type NonInteractiveExecQueueEntry = {
   started: boolean
@@ -45,26 +43,6 @@ function isJsonRpcMethodNotFoundError(error: unknown): boolean {
     return false
   }
   return (error as { code?: unknown }).code === JsonRpcErrorCode.MethodNotFound
-}
-
-// Why: the relay returns the durable ref it wrote; re-deriving it on the client
-// can disagree (URL normalization) and leave resolve looking at the wrong path.
-function readDurableReviewHeadLocalRef(
-  result: unknown,
-  kind: 'pull request' | 'merge request'
-): string {
-  if (result && typeof result === 'object' && 'localRef' in result) {
-    const localRef = (result as { localRef: unknown }).localRef
-    if (typeof localRef === 'string') {
-      const trimmed = localRef.trim()
-      if (trimmed.startsWith('refs/orca/')) {
-        return trimmed
-      }
-    }
-  }
-  throw new Error(
-    `This SSH host did not return the durable ${kind} head ref. Reconnect to deploy the latest relay, then try again.`
-  )
 }
 
 function formatStatusEntriesForCleanCheck(entries: GitStatusResult['entries']): string | undefined {
@@ -126,12 +104,10 @@ export class SshGitProvider implements IGitProvider {
     const upstreamCacheBypassArgs = options?.bypassEffectiveUpstreamNegativeCache
       ? { bypassEffectiveUpstreamNegativeCache: true }
       : {}
-    const lineStatsReuseArgs = options?.reuseLineStats ? { reuseLineStats: true } : {}
     const request = {
       worktreePath,
       ...includeIgnoredArgs,
-      ...upstreamCacheBypassArgs,
-      ...lineStatsReuseArgs
+      ...upstreamCacheBypassArgs
     }
     return (await (options?.signal
       ? this.mux.request('git.status', request, { signal: options.signal })
@@ -397,7 +373,7 @@ export class SshGitProvider implements IGitProvider {
     return this.gitDiffReadDedupe.run(
       stableInFlightKey(['diff', worktreePath, filePath, staged, compareAgainstHead]),
       async () =>
-        (await requestGitStreamable(this.mux, 'git.diff', {
+        (await this.mux.request('git.diff', {
           worktreePath,
           filePath,
           staged,
@@ -577,16 +553,14 @@ export class SshGitProvider implements IGitProvider {
     worktreePath: string,
     remote: string,
     branch: string,
-    ref: string,
-    options?: { skipAutoMaintenance?: boolean }
+    ref: string
   ): Promise<void> {
     await this.runWithDiffDedupeClear(async () => {
       await this.mux.request('git.fetchRemoteTrackingRef', {
         worktreePath,
         remote,
         branch,
-        ref,
-        ...(options?.skipAutoMaintenance ? { skipAutoMaintenance: true } : {})
+        ref
       })
     })
   }
@@ -595,58 +569,14 @@ export class SshGitProvider implements IGitProvider {
     worktreePath: string,
     remote: string,
     mrIid: number
-  ): Promise<string> {
-    try {
-      return await this.runWithDiffDedupeClear(async () => {
-        // Why: the durable-ref RPC is a NEW method name. Old relays only implement
-        // FETCH_HEAD-semantics git.fetchGitLabMergeRequestHead, so calling the ref
-        // variant makes them return -32601 rather than silently no-op the durable
-        // ref (which would leave the client resolving a stale/missing MR head).
-        const result = await this.mux.request('git.fetchGitLabMergeRequestHeadRef', {
-          worktreePath,
-          remote,
-          mrIid
-        })
-        // Why: use the host-written path; a second client-side get-url can disagree.
-        return readDurableReviewHeadLocalRef(result, 'merge request')
+  ): Promise<void> {
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.fetchGitLabMergeRequestHead', {
+        worktreePath,
+        remote,
+        mrIid
       })
-    } catch (error) {
-      if (isJsonRpcMethodNotFoundError(error)) {
-        // Why: older SSH relays predate the durable-ref MR fetch; surface a
-        // reconnect prompt instead of a raw JSON-RPC method-not-found error.
-        throw new Error(
-          'This SSH host is running an older Orca relay that cannot fetch merge request heads. Reconnect to deploy the latest relay, then try again.'
-        )
-      }
-      throw error
-    }
-  }
-
-  async fetchGitHubPullRequestHead(
-    worktreePath: string,
-    remote: string,
-    prNumber: number
-  ): Promise<string> {
-    try {
-      return await this.runWithDiffDedupeClear(async () => {
-        const result = await this.mux.request('git.fetchGitHubPullRequestHead', {
-          worktreePath,
-          remote,
-          prNumber
-        })
-        // Why: use the host-written path; a second client-side get-url can disagree.
-        return readDurableReviewHeadLocalRef(result, 'pull request')
-      })
-    } catch (error) {
-      if (isJsonRpcMethodNotFoundError(error)) {
-        // Why: older SSH relays predate git.fetchGitHubPullRequestHead; surface a
-        // reconnect prompt instead of a raw JSON-RPC method-not-found error.
-        throw new Error(
-          'This SSH host is running an older Orca relay that cannot fetch pull request heads. Reconnect to deploy the latest relay, then try again.'
-        )
-      }
-      throw error
-    }
+    })
   }
 
   async getBranchDiff(
@@ -665,7 +595,7 @@ export class SshGitProvider implements IGitProvider {
         keyOptions.oldPath ?? null
       ]),
       async () =>
-        (await requestGitStreamable(this.mux, 'git.branchDiff', {
+        (await this.mux.request('git.branchDiff', {
           worktreePath,
           baseRef,
           ...options
@@ -687,7 +617,7 @@ export class SshGitProvider implements IGitProvider {
         args.oldPath ?? null
       ]),
       async () =>
-        (await requestGitStreamable(this.mux, 'git.commitDiff', {
+        (await this.mux.request('git.commitDiff', {
           worktreePath,
           ...args
         })) as GitDiffResult
@@ -828,13 +758,9 @@ export class SshGitProvider implements IGitProvider {
     cwd: string,
     options?: { signal?: AbortSignal; timeoutMs?: number }
   ): Promise<{ stdout: string; stderr: string }> {
-    const run = () =>
-      options
-        ? requestGitStreamable(this.mux, 'git.exec', { args, cwd }, options)
-        : requestGitStreamable(this.mux, 'git.exec', { args, cwd })
-    const result = gitExecMutatesRepository(args)
-      ? await this.runWithDiffDedupeClear(run)
-      : await run()
+    const result = options
+      ? await this.mux.request('git.exec', { args, cwd }, options)
+      : await this.mux.request('git.exec', { args, cwd })
     return result as {
       stdout: string
       stderr: string
@@ -850,7 +776,6 @@ export class SshGitProvider implements IGitProvider {
       onProgress?: (progress: { phase: string; percent: number }) => void
     }
   ): Promise<{ stdout: string; stderr: string }> {
-    this.gitDiffReadDedupe.clear()
     const progressId = `clone-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const unsubscribe = options?.onProgress
       ? this.mux.onNotificationByMethod('git.cloneProgress', (params) => {
@@ -883,7 +808,6 @@ export class SshGitProvider implements IGitProvider {
       throw error
     } finally {
       unsubscribe?.()
-      this.gitDiffReadDedupe.clear()
     }
   }
 

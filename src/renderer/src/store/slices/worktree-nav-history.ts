@@ -9,10 +9,17 @@ import {
 } from '../../../../shared/task-source-context'
 import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
 
-// Why: bound per-session history growth; 50 keeps goBack/goForward's linear scans cheap yet is never hit in normal use.
+// Why: cap the per-session history so a long-lived workspace with many
+// worktree jumps cannot grow the array unbounded. 50 is generous enough
+// that the cap is never visible in normal use but small enough that the
+// linear skip-deleted scan in goBack/goForward stays trivially cheap.
 const MAX_HISTORY = 50
 
-// Why: entries may be page sentinels, not just worktree IDs; names keep the "worktree" prefix for call-site stability.
+// Why: entries are worktree IDs OR page sentinels for full-page visits.
+// The slice, selector, and action names retain the
+// "worktree"/"WorktreeHistory" prefix for call-site stability — renaming
+// across ~20 sites would churn for no behavior win. View entries are
+// always live (never skipped by findPrev/NextLiveWorktreeHistoryIndex).
 export type WorktreeNavHistorySimpleViewEntry = 'tasks' | 'automations'
 export type WorktreeNavHistoryTaskDetailEntry =
   | {
@@ -48,9 +55,13 @@ export type WorktreeNavHistoryEntry = string | WorktreeNavHistoryViewEntry
 export type WorktreeNavHistorySlice = {
   // Linear history, oldest -> newest.
   worktreeNavHistory: WorktreeNavHistoryEntry[]
-  // Index into worktreeNavHistory pointing at the active entry; -1 means empty.
+  // Index into worktreeNavHistory; points at the currently-active entry.
+  // -1 means empty (no worktree ever activated this session).
   worktreeNavHistoryIndex: number
-  // Why: true during goBack/goForward so recordWorktreeVisit skips re-recording a history-driven navigation.
+  // Why: set while goBack/goForward are calling activateAndRevealWorktree so
+  // the activation path's recordWorktreeVisit step can skip re-recording a
+  // history-driven navigation. Kept in-store (rather than as a module-level
+  // mutable) so tests can drive the slice in isolation.
   isNavigatingHistory: boolean
 
   recordWorktreeVisit: (worktreeId: string) => void
@@ -62,7 +73,10 @@ export type WorktreeNavHistorySlice = {
 type ActivateFn = (worktreeId: string) => unknown
 type ViewActivateFn = (entry: WorktreeNavHistoryViewEntry) => void
 
-// Why: injected via setWorktreeNavActivator to avoid an import cycle (activation imports the store).
+// Why: the slice must call activateAndRevealWorktree from goBack/goForward, but
+// importing it directly would create a cycle (activation imports the store).
+// Install the reference at module init via setWorktreeNavActivator and keep
+// the slice itself unaware of the activation module.
 let activator: ActivateFn | null = null
 let viewActivator: ViewActivateFn | null = null
 
@@ -70,12 +84,15 @@ export function setWorktreeNavActivator(fn: ActivateFn | null): void {
   activator = fn
 }
 
-// Why: injected to avoid an import cycle — the UI slice already depends on this module.
+// Why: installed by App-level init so the slice can dispatch page entries
+// to setActiveView(...) without importing the UI slice directly (the UI
+// slice already transitively depends on this module via the store creator).
 export function setWorktreeNavViewActivator(fn: ViewActivateFn | null): void {
   viewActivator = fn
 }
 
-// Why: view entries count as live unconditionally — findWorktreeById can't resolve page sentinels.
+// Why: view entries short-circuit as live unconditionally — findWorktreeById
+// takes a worktree id and would always return undefined for page sentinels.
 function isViewEntry(entry: WorktreeNavHistoryEntry): entry is WorktreeNavHistoryViewEntry {
   return entry === 'tasks' || entry === 'automations' || typeof entry === 'object'
 }
@@ -133,18 +150,22 @@ function appendHistoryEntry(
   s: { worktreeNavHistory: WorktreeNavHistoryEntry[]; worktreeNavHistoryIndex: number },
   entry: WorktreeNavHistoryEntry
 ): { worktreeNavHistory: WorktreeNavHistoryEntry[]; worktreeNavHistoryIndex: number } {
-  // Why: de-dup only against the current entry so A -> B -> A stays a valid stack.
+  // Why: re-visiting the same entry must not pollute history. The de-dup
+  // applies only to the current entry so that A -> B -> A remains a valid
+  // stack (user left B, returned to A). Same rule covers page re-opens:
+  // Tasks data changes and repeated Automations opens collapse to one entry.
   const current = s.worktreeNavHistory[s.worktreeNavHistoryIndex]
   if (current !== undefined && getHistoryEntryKey(current) === getHistoryEntryKey(entry)) {
     return s
   }
 
-  // Truncate forward entries so appending starts a new branch.
+  // Truncate any forward entries, then append and advance the index.
   const truncated = s.worktreeNavHistory.slice(0, s.worktreeNavHistoryIndex + 1)
   truncated.push(entry)
   let nextIndex = s.worktreeNavHistoryIndex + 1
 
-  // Why: shift index left by the eviction count so it still points at the just-appended entry.
+  // Why: cap eviction drops the oldest entries. The index must shift left
+  // by the same count so it still points at the just-appended current entry.
   if (truncated.length > MAX_HISTORY) {
     const evict = truncated.length - MAX_HISTORY
     truncated.splice(0, evict)
@@ -244,30 +265,44 @@ function navigateToIndex(
   }
   const targetEntry = state.worktreeNavHistory[targetIndex]
 
-  // Why: capture-and-restore (not force false) so re-entrant navigation doesn't clobber the flag.
+  // Why: capture-and-restore (not force false) so re-entrant navigation
+  // (e.g. a store subscriber synchronously triggers another goBack) does
+  // not race on the boolean — the outer call's `finally` restores its own
+  // prior value rather than clobbering state set by an inner call.
   const prevNavigating = get().isNavigatingHistory
   set({ isNavigatingHistory: true } as Partial<AppState>)
   try {
     if (isViewEntry(targetEntry)) {
       if (!viewActivator) {
-        // Why: warn (not a silent no-op) so a page-entry chord isn't a broken-looking no-op.
+        // Why: a silent no-op would mean the back/forward chord lands on a
+        // page history entry and appears broken. See setWorktreeNavActivator
+        // rationale above.
         console.warn(
           `go${direction === 'back' ? 'Back' : 'Forward'}Worktree: view activator not registered`
         )
         return
       }
-      // Why: use setActiveView (not open*Page) so replay doesn't mutate previousViewBefore* or fire page-open side effects.
+      // Why: dispatch via setActiveView (installed as viewActivator) rather
+      // than open*Page so we don't mutate previousViewBefore* or fire
+      // page-open side effects during replay. activateAndRevealWorktree on the
+      // other branch already switches activeView back to 'terminal'.
       viewActivator(targetEntry)
       set({ worktreeNavHistoryIndex: targetIndex } as Partial<AppState>)
     } else {
       if (!activator) {
-        // Why: warn (not a silent no-op) so a missing activator is diagnosable.
+        // Why: a silent no-op here would mean the back/forward chord simply
+        // does nothing with no diagnostic. The activator is registered at
+        // module init by worktree-activation.ts, so a missing activator means
+        // either test setup forgot to install one or the production import
+        // graph regressed.
         console.warn(
           `go${direction === 'back' ? 'Back' : 'Forward'}Worktree called before worktree activator was registered`
         )
         return
       }
-      // Why: `false` is the activator's only failure signal — advance the index only on success.
+      // Why: activateAndRevealWorktree returns `ActivateAndRevealResult | false`;
+      // `false` is the only observable failure signal. Advance the index only on
+      // success so the slice stays consistent with what the user actually sees.
       const result = activator(targetEntry)
       if (result !== false) {
         set({ worktreeNavHistoryIndex: targetIndex } as Partial<AppState>)

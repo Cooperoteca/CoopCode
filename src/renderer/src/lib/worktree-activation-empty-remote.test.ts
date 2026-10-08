@@ -39,9 +39,7 @@ function makeWorktree(): Worktree {
     isPinned: false,
     sortOrder: 0,
     lastActivityAt: 0,
-    createdWithAgent: 'codex',
-    hostId: 'local',
-    runtimeOwnerEnvironmentId: 'web-runtime-1'
+    createdWithAgent: 'codex'
   }
 }
 
@@ -109,9 +107,7 @@ describe('empty remote worktree activation', () => {
         method: 'session.tabs.createTerminal',
         params: expect.objectContaining({
           worktree: `id:${worktree.id}`,
-          activate: false,
-          select: true,
-          navigation: 'caller'
+          activate: true
         })
       })
     )

@@ -1,6 +1,5 @@
 import { getLinearIssueWorkspaceName } from '../../../shared/workspace-name'
 import type { LinearIssue } from '../../../shared/types'
-import { getUsableLinearBranchName } from '../../../shared/new-workspace/workspace-source'
 
 const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
 
@@ -23,7 +22,7 @@ export function formatLinearIssueRelativeTime(input: string): string {
 }
 
 export function buildLinearIssueBranchName(issue: LinearIssue): string {
-  return getUsableLinearBranchName(issue.branchName) ?? getLinearIssueWorkspaceName(issue)
+  return getLinearIssueWorkspaceName(issue)
 }
 
 export function buildLinearIssuePrompt(issue: LinearIssue): string {

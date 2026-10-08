@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   appendCommitFailureCustomInstruction,
+  buildCommitFailureAgentCommandInput,
   buildFixCommitFailurePrompt
-} from '../../../../shared/source-control-commit-failure'
-import { buildCommitFailureAgentCommandInput } from '../../../../shared/source-control-commit-failure-agent-command'
+} from './SourceControl'
 
 describe('SourceControl commit failure recovery prompt', () => {
   it('builds a provider-neutral AI prompt for fixing a failed commit hook', () => {

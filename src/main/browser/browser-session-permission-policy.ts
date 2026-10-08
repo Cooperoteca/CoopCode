@@ -9,10 +9,7 @@ const AUTO_GRANTED_BROWSER_PERMISSIONS = new Set([
   'notifications',
   // Chromium can request this at runtime even though Electron's TS union does
   // not list it; chatgpt.com uses it to keep browser storage from eviction.
-  'persistent-storage',
-  // Chromium still requires user activation, so this only removes Orca's
-  // otherwise unactionable denial for immersive browser apps.
-  'pointerLock'
+  'persistent-storage'
 ])
 
 export function isAutoGrantedBrowserSessionPermission(permission: string): boolean {

@@ -1,14 +1,9 @@
 import { WebglAddon } from '@xterm/addon-webgl'
 import type { ManagedPaneInternal } from './pane-manager-types'
-import { recordTerminalWebglDiagnostic } from '../../../../shared/terminal-webgl-diagnostics'
-import { getLivePaneCensus } from './pane-manager-registry'
-import { forceRepaintThroughRenderPause } from './terminal-render-pause-release'
 import {
   getTerminalWebglAutoDecision,
   resetTerminalWebglAutoDecision
 } from './terminal-webgl-auto-policy'
-import { safeFitAndThen } from './pane-fit'
-import { releaseAbandonedSynchronizedOutput } from './terminal-synchronized-output-release'
 
 export const ENABLE_WEBGL_RENDERER = true
 let suggestedRendererType: 'dom' | undefined
@@ -93,11 +88,8 @@ export function disposeWebgl(
     pane.pendingWebglRefreshRafId = requestAnimationFrame(() => {
       pane.pendingWebglRefreshRafId = null
       try {
-        // Why: context loss can coincide with snapshot parsing; refresh only
-        // after the replay-aware fit has authoritative renderer dimensions.
-        safeFitAndThen(pane, 'webgl-fallback-refresh', () => {
-          pane.terminal.refresh(0, pane.terminal.rows - 1)
-        })
+        pane.fitAddon.fit()
+        pane.terminal.refresh(0, pane.terminal.rows - 1)
       } catch {
         /* ignore — pane may have been disposed in the meantime */
       }
@@ -130,24 +122,13 @@ export function resetWebglTextureAtlas(pane: ManagedPaneInternal): void {
     return
   }
   try {
-    // Why first: a TUI hidden mid-`?2026h` leaves synchronized output latched,
-    // and RenderService buffers every refresh while it holds — so the repaint
-    // below would render nothing at all. See terminal-synchronized-output-release.
-    releaseAbandonedSynchronizedOutput(pane.terminal)
     // Why: rapid TUI redraws can corrupt xterm's WebGL glyph atlas without a
     // context-loss event. Clearing the atlas preserves GPU rendering and forces
     // a fresh paint when the pane becomes visible/focused again.
     pane.webglAddon?.clearTextureAtlas()
-    // Why: on reveal xterm's IntersectionObserver can still report the pane as
-    // not intersecting, so a plain refresh() is swallowed by RenderService's
-    // paused-render gate and the cleared model never repaints (stale bottom rows
-    // until a drag-select forces a redraw). Force the paused render through
-    // first; only fall back to refresh() when the terminal was not gated.
-    if (!forceRepaintThroughRenderPause(pane.terminal)) {
-      // Why: refresh even without a WebGL addon so recovery never silently
-      // no-ops — a DOM-rendered pane can hold stale pixels after reveal too.
-      pane.terminal.refresh(0, pane.terminal.rows - 1)
-    }
+    // Why: refresh even without a WebGL addon so recovery never silently
+    // no-ops — a DOM-rendered pane can hold stale pixels after reveal too.
+    pane.terminal.refresh(0, pane.terminal.rows - 1)
   } catch {
     /* ignore — pane may have been disposed in the meantime */
   }
@@ -181,18 +162,6 @@ export function attachWebgl(pane: ManagedPaneInternal): void {
         pane.id,
         '— falling back to DOM renderer'
       )
-      // Why: a lost context is the decisive signal for a post-wake garble
-      // report — it means the glyph atlas was wiped (needs a full reset), not
-      // just a missed repaint. Silent breadcrumb; the console.warn stays.
-      // Census rides along: a GPU-process death loses every pane's context at
-      // once, and the crash-report ring coalesces repeats, so the count has to
-      // be in the payload rather than in the number of crumbs.
-      const census = getLivePaneCensus()
-      recordTerminalWebglDiagnostic('webgl-context-loss', {
-        paneId: pane.id,
-        livePanes: census.panes,
-        livePaneManagers: census.managers
-      })
       // Why: Chromium starts reclaiming terminal contexts under pressure.
       // Recreating WebGL for this pane can loop context loss and leave xterm
       // visually blank, so keep the pane on the DOM renderer until the next

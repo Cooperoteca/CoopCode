@@ -14,15 +14,6 @@ type TerminalSearchProps = {
   searchStateRef: React.RefObject<SearchState>
 }
 
-function clearTerminalSearch(searchAddon: SearchAddon | null): void {
-  if (!searchAddon) {
-    return
-  }
-  searchAddon.clearDecorations()
-  // Why: xterm keeps the active match selected after decorations are cleared.
-  searchAddon.findNext('')
-}
-
 export default function TerminalSearch({
   isOpen,
   onClose,
@@ -81,24 +72,17 @@ export default function TerminalSearch({
     input?.focus()
   }, [])
 
-  useEffect(
-    () => () => {
-      clearTerminalSearch(searchAddon)
-    },
-    [searchAddon]
-  )
-
   useEffect(() => {
     // Keep the ref in sync so the keyboard handler (Cmd+G / Cmd+Shift+G)
     // can read the current search state without lifting it to parent state.
     searchStateRef.current = { query: requestQuery ?? '', caseSensitive, regex }
 
     if (!isOpen) {
-      clearTerminalSearch(searchAddon)
+      searchAddon?.clearDecorations()
       return
     }
     if (!requestQuery) {
-      clearTerminalSearch(searchAddon)
+      searchAddon?.clearDecorations()
       return
     }
     if (searchAddon) {

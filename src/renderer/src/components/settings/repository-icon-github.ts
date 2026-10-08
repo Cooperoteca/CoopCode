@@ -1,6 +1,5 @@
 import type { GitHubRepositoryIdentity, Repo } from '../../../../shared/types'
 import { githubAvatarIcon, type RepoIcon } from '../../../../shared/repo-icon'
-import { githubRepoIdentityKey } from '../../../../shared/github-repository-identity-key'
 import { callRuntimeRpc, type getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 
 type RuntimeTarget = ReturnType<typeof getActiveRuntimeTarget>
@@ -78,7 +77,7 @@ function sameRepositoryIdentity(
   if (!a || !b) {
     return a === b
   }
-  return githubRepoIdentityKey(a) === githubRepoIdentityKey(b)
+  return a.owner === b.owner && a.repo === b.repo
 }
 
 function sameRepoIcon(a: RepoIcon | null | undefined, b: RepoIcon | null | undefined): boolean {

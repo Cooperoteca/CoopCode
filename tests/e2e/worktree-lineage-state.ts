@@ -5,11 +5,8 @@ export type LineageScenario = {
   childId: string
 }
 
-export async function seedLineageScenario(
-  page: Page,
-  options: { inlineOnly?: boolean } = {}
-): Promise<LineageScenario> {
-  return page.evaluate(({ inlineOnly }) => {
+export async function seedLineageScenario(page: Page): Promise<LineageScenario> {
+  return page.evaluate(() => {
     const store = window.__store
     if (!store) {
       throw new Error('window.__store is not available')
@@ -38,50 +35,38 @@ export async function seedLineageScenario(
     if (!parent.instanceId || !child.instanceId) {
       throw new Error('Worktree lineage E2E needs instance-stamped worktrees')
     }
-    const lineage = {
-      worktreeId: child.id,
-      worktreeInstanceId: child.instanceId,
-      parentWorktreeId: parent.id,
-      parentWorktreeInstanceId: parent.instanceId,
-      origin: 'manual' as const,
-      capture: { source: 'manual-action' as const, confidence: 'explicit' as const },
-      createdAt: Date.now()
-    }
     store.setState((current) => ({
       worktreesByRepo: Object.fromEntries(
         Object.entries(current.worktreesByRepo).map(([repoId, repoWorktrees]) => [
           repoId,
           repoWorktrees.map((worktree) => {
             if (worktree.id === parent.id) {
-              return {
-                ...worktree,
-                displayName: 'E2E lineage parent',
-                sortOrder: 0,
-                ...(inlineOnly
-                  ? { parentWorktreeId: null, childWorktreeIds: [child.id], lineage: null }
-                  : {})
-              }
+              return { ...worktree, displayName: 'E2E lineage parent', sortOrder: 0 }
             }
             if (worktree.id === child.id) {
-              return {
-                ...worktree,
-                displayName: 'E2E lineage child',
-                sortOrder: 1,
-                ...(inlineOnly
-                  ? { parentWorktreeId: parent.id, childWorktreeIds: [], lineage }
-                  : {})
-              }
+              return { ...worktree, displayName: 'E2E lineage child', sortOrder: 1 }
             }
             return worktree
           })
         ])
       ),
-      worktreeLineageById: inlineOnly ? {} : { ...current.worktreeLineageById, [child.id]: lineage }
+      worktreeLineageById: {
+        ...current.worktreeLineageById,
+        [child.id]: {
+          worktreeId: child.id,
+          worktreeInstanceId: child.instanceId,
+          parentWorktreeId: parent.id,
+          parentWorktreeInstanceId: parent.instanceId,
+          origin: 'manual',
+          capture: { source: 'manual-action', confidence: 'explicit' },
+          createdAt: Date.now()
+        }
+      }
     }))
 
     store.getState().setActiveWorktree(parent.id)
     return { parentId: parent.id, childId: child.id }
-  }, options)
+  })
 }
 
 export async function seedWorkspaceAgentStatus(

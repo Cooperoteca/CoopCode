@@ -77,9 +77,7 @@ describe('ensureVirtualDisplayForHeadlessServe', () => {
     expect(ensureVirtualDisplayForHeadlessServe({ isServeMode: true })).toBe(true)
     expect(spawnMock).not.toHaveBeenCalled()
     expect(process.env.DISPLAY).toBe(':0')
-    expect(appMock.disableHardwareAcceleration).toHaveBeenCalled()
     expect(appMock.commandLine.appendSwitch).toHaveBeenCalledWith('disable-dev-shm-usage')
-    expect(appMock.commandLine.appendSwitch).toHaveBeenCalledWith('disable-gpu')
   })
 
   it('reports unsupported (no spawn) when Xvfb is not installed', async () => {

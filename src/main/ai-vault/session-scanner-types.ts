@@ -1,5 +1,5 @@
+import type { AiVaultAgent } from '../../shared/ai-vault-types'
 import type {
-  AiVaultAgent,
   AiVaultScanIssue,
   AiVaultSession,
   AiVaultSessionPreviewMessage
@@ -10,12 +10,8 @@ export type AiVaultScanOptions = {
   claudeProjectsDir?: string
   codexSessionsDir?: string
   additionalCodexSessionsDirs?: readonly string[]
-  // Why: tests inject a sandbox "real ~/.codex" so real-home attribution
-  // (codexHome null → unprefixed resume) is testable without the user's home.
-  defaultCodexHomeDir?: string
   wslHomeDirs?: readonly string[]
   geminiSessionsDir?: string
-  antigravityBrainDir?: string
   copilotSessionsDir?: string
   cursorProjectsDir?: string
   opencodeStorageDir?: string
@@ -29,7 +25,6 @@ export type AiVaultScanOptions = {
   openclawStateDir?: string
   openclawLegacyStateDir?: string
   piSessionsDir?: string
-  ompSessionsDir?: string
   droidSessionsDir?: string
   droidProjectsDir?: string
   kimiSessionsDir?: string
@@ -46,22 +41,12 @@ export type FileWithMtime = {
   path: string
   mtimeMs: number
   modifiedAt: string
-  // Present when discovery statted the file; lets the parse cache detect
-  // unchanged/truncated files without a second stat. Synthetic candidates
-  // such as OpenCode SQLite rows omit it.
-  sizeBytes?: number
-  // Present when discovery can prove filesystem identity. Codex dual-root
-  // scans use a multi-link inode to collapse only actual hardlink aliases.
-  dev?: number
-  ino?: number
-  nlink?: number
 }
 
 export type SessionFileCandidate = {
   agent: AiVaultAgent
   file: FileWithMtime
   codexHome: string | null
-  antigravityHistoryPath?: string
 }
 
 export type SessionFileDiscovery = {
@@ -73,26 +58,6 @@ export type SessionFileDiscovery = {
 export type SessionParseResult = {
   session: AiVaultSession | null
   issue: AiVaultScanIssue | null
-}
-
-export type ResumableParseFinalizeOptions = {
-  executionHostId?: ExecutionHostId
-  executionHostPlatform?: NodeJS.Platform | null
-}
-
-// One in-progress parse of an append-only transcript, resumable across scans.
-// The parse cache stores a state per file and feeds it only newly appended
-// lines; `clone` must deep-copy anything `consumeLine` mutates so a failed
-// read or a display-only trailing line can never corrupt the cached fold.
-export type ResumableSessionParseState = {
-  consumeLine(line: string): void
-  clone(): ResumableSessionParseState
-  // Refresh per-scan file metadata (mtime display string) without re-parsing.
-  touchFile(file: FileWithMtime): void
-  finalize(
-    platform: NodeJS.Platform,
-    options?: ResumableParseFinalizeOptions
-  ): Promise<AiVaultSession | null> | AiVaultSession | null
 }
 
 export type SessionAccumulator = {
@@ -110,10 +75,6 @@ export type SessionAccumulator = {
   messageCount: number
   totalTokens: number
   previewMessages: AiVaultSessionPreviewMessage[]
-  lastUserPrompt: string | null
-  // Recoverable signal for a zero-turn transcript (see AiVaultSession).
-  queuedMessageCount: number
-  subagentTranscriptCount: number
   latestTimestampMs: number
 }
 

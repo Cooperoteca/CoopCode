@@ -206,25 +206,12 @@ export async function getEffectiveGitUpstreamStatus(
     }
   }
 
-  return getGitUpstreamStatusForUpstreamName(
-    runGit,
-    upstream.upstreamName,
-    getBehindCommitsArePatchEquivalent
-  )
-}
-
-/**
- * Ahead/behind status for an already-resolved upstream name. Split out so
- * callers that cached the resolution (a pure function of branch/config state)
- * can refresh the counts with a single rev-list spawn instead of re-running
- * the whole resolution chain.
- */
-export async function getGitUpstreamStatusForUpstreamName(
-  runGit: GitCommandRunner,
-  upstreamName: string,
-  getBehindCommitsArePatchEquivalent?: (upstreamName: string) => Promise<boolean>
-): Promise<GitUpstreamStatus> {
-  const { stdout } = await runGit(['rev-list', '--left-right', '--count', `HEAD...${upstreamName}`])
+  const { stdout } = await runGit([
+    'rev-list',
+    '--left-right',
+    '--count',
+    `HEAD...${upstream.upstreamName}`
+  ])
   const counts = parseGitRevListAheadBehindCounts(stdout)
   if (counts.status === 'unexpected-field-count') {
     throw new Error(`Unexpected git rev-list output: ${JSON.stringify(stdout)}`)
@@ -235,12 +222,12 @@ export async function getGitUpstreamStatusForUpstreamName(
 
   const behindCommitsArePatchEquivalent =
     counts.ahead > 0 && counts.behind > 0 && getBehindCommitsArePatchEquivalent
-      ? await getBehindCommitsArePatchEquivalent(upstreamName)
+      ? await getBehindCommitsArePatchEquivalent(upstream.upstreamName)
       : undefined
 
   return {
     hasUpstream: true,
-    upstreamName,
+    upstreamName: upstream.upstreamName,
     ahead: counts.ahead,
     behind: counts.behind,
     ...(behindCommitsArePatchEquivalent !== undefined ? { behindCommitsArePatchEquivalent } : {})

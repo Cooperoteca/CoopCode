@@ -14,7 +14,6 @@ export type TerminalPaneTabDetachStore = Pick<
   | 'setActiveTabType'
   | 'setTabLayout'
   | 'syncPaneDetachPtyOwnership'
-  | 'tabsByWorktree'
   | 'terminalLayoutsByTabId'
 >
 
@@ -279,10 +278,7 @@ export function detachTerminalPaneToTab(args: {
   }
 
   const latestStore = args.getStore()
-  const sourceShellOverride = latestStore.tabsByWorktree[args.worktreeId]?.find(
-    (candidate) => candidate.id === args.sourceTabId
-  )?.shellOverride
-  const tab = latestStore.createTab(args.worktreeId, args.targetGroupId, sourceShellOverride, {
+  const tab = latestStore.createTab(args.worktreeId, args.targetGroupId, undefined, {
     activate: true,
     initialPtyId: ptyId ?? undefined,
     recordInteraction: true
@@ -298,7 +294,6 @@ export function detachTerminalPaneToTab(args: {
   afterCreateStore.setTabLayout(args.sourceTabId, detached.sourceLayout)
   afterCreateStore.setTabLayout(tab.id, detachedLayout)
   afterCreateStore.syncPaneDetachPtyOwnership({
-    detachedLeafId: sourceLeafId,
     detachedPtyId: ptyId,
     sourceLayout: detached.sourceLayout,
     sourceTabId: args.sourceTabId,

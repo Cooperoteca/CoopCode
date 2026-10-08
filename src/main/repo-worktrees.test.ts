@@ -60,21 +60,17 @@ describe('repo-worktrees', () => {
     listWorktreesMock.mockResolvedValue([
       { path: '/workspace/repo', head: 'abc', branch: '', isBare: false, isMainWorktree: true }
     ])
-    const signal = new AbortController().signal
 
-    const result = await listRepoWorktrees(
-      {
-        id: 'repo-1',
-        path: '/workspace/repo',
-        displayName: 'repo',
-        badgeColor: '#000',
-        addedAt: 0,
-        kind: 'git'
-      },
-      { signal }
-    )
+    const result = await listRepoWorktrees({
+      id: 'repo-1',
+      path: '/workspace/repo',
+      displayName: 'repo',
+      badgeColor: '#000',
+      addedAt: 0,
+      kind: 'git'
+    })
 
-    expect(listWorktreesMock).toHaveBeenCalledWith('/workspace/repo', { signal })
+    expect(listWorktreesMock).toHaveBeenCalledWith('/workspace/repo')
     expect(result).toHaveLength(1)
   })
 

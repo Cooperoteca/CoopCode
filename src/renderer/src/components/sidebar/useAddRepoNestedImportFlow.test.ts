@@ -78,7 +78,6 @@ function useTestAddRepoNestedImportFlow(
     nestedGroupName: 'platform',
     nestedImportScanId: 'scan-1',
     activeRuntimeEnvironmentId: null,
-    closeModal: mocks.state.closeModal,
     fetchWorktrees: vi.fn(),
     importNestedRepos: vi.fn<() => Promise<ProjectGroupImportResult | null>>(),
     getNestedRepoRuntimeKind: vi.fn(() => 'local' as const),

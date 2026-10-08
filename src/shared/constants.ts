@@ -10,7 +10,6 @@ import type {
   WorkspaceSessionState,
   AgentActivityDisplayMode
 } from './types'
-import { EMPTY_CODEX_RESET_CREDIT_ATTEMPT_LEDGER } from './codex-reset-credit-attempt-ledger'
 import { DEFAULT_STATUS_BAR_ITEMS } from './status-bar-defaults'
 import { DEFAULT_TERMINAL_FONT_WEIGHT } from './terminal-fonts'
 import { getDefaultTerminalQuickCommands } from './terminal-quick-commands'
@@ -32,8 +31,6 @@ import {
 import { DEFAULT_SOURCE_CONTROL_GROUP_ORDER } from './source-control-group-order'
 import { DEFAULT_SETUP_AGENT_STARTUP_POLICY } from './setup-agent-startup-policy'
 import { DESKTOP_TERMINAL_SCROLLBACK_ROWS_DEFAULT } from './terminal-scrollback-policy'
-import { DEFAULT_USAGE_PERCENTAGE_DISPLAY } from './usage-percentage-display'
-import { DEFAULT_STATUS_BAR_USAGE_MODE } from './status-bar-usage-mode'
 
 export { DEFAULT_STATUS_BAR_ITEMS } from './status-bar-defaults'
 export {
@@ -56,15 +53,20 @@ export function normalizeAgentActivityDisplayMode(value: unknown): AgentActivity
   return value === 'full' || value === 'compact' ? value : DEFAULT_AGENT_ACTIVITY_DISPLAY_MODE
 }
 
-// Why: onboarding wizard's last step index, centralized so backfill, clamps, and UI agree on the bound.
+// Why: the onboarding wizard's last step index. Centralized so backfill,
+// clamps, and UI step references all agree on the same upper bound.
 export const ONBOARDING_FINAL_STEP = 5
 export const ONBOARDING_FLOW_VERSION = 4
 
 export const ORCA_BROWSER_PARTITION = 'persist:orca-browser'
-// Why: inert blank-tab URL shared by main/renderer so the attach policy can allow just this one data URL and reject others.
+// Why: blank browser tabs must start from an inert guest URL that does not
+// navigate the privileged main window to about:blank. Renderer and main both
+// need the exact same value so the attach policy can allow only this one safe
+// data URL while still rejecting arbitrary renderer-provided data URLs.
 export const ORCA_BROWSER_BLANK_URL = 'data:text/html,'
 
-// Why: Electron's invoke error path preserves only message text, so signal reconnect via this stable token.
+// Why: Electron's invoke error path preserves message text, not arbitrary
+// custom Error fields. Keep this stable token shared across main/renderer.
 export const SSH_TERMINATE_RECONNECT_REQUIRED = 'SSH_TERMINATE_RECONNECT_REQUIRED'
 
 export const BROWSER_FAMILY_LABELS: Record<string, string> = {
@@ -80,7 +82,9 @@ export const BROWSER_FAMILY_LABELS: Record<string, string> = {
   manual: 'File'
 }
 
-// Why: only the initial value shown in Settings; buildFontFamily() adds the real cross-platform fallback chain.
+// Pick a default terminal font that is likely to exist on the current OS.
+// buildFontFamily() adds the full cross-platform fallback chain, so this only
+// affects what users see in Settings as the initial value.
 function defaultTerminalFontFamily(): string {
   const platform = typeof process !== 'undefined' ? process.platform : ''
   if (platform === 'win32') {
@@ -96,24 +100,31 @@ export const getDefaultPrimarySelectionMiddleClickPaste = (
   platform = typeof process !== 'undefined' ? process.platform : ''
 ): boolean => platform === 'linux' || platform === 'darwin'
 
-export const getDefaultTerminalRightClickToPaste = (
-  platform = typeof process !== 'undefined' ? process.platform : ''
-): boolean => platform === 'win32'
-
-/** Why: ProseMirror's full-document tree lags on large files; above this, fall back to source mode (Monaco). */
+/**
+ * Why: ProseMirror builds an in-memory tree for the entire document, so large
+ * markdown files cause noticeable typing lag in the rich editor. Files above
+ * this threshold fall back to source mode (Monaco) which handles large files
+ * efficiently via virtualized line rendering.
+ */
 export const RICH_MARKDOWN_MAX_SIZE_BYTES = 300 * 1024
 
 export const DEFAULT_EDITOR_AUTO_SAVE_DELAY_MS = 1000
 export const MIN_EDITOR_AUTO_SAVE_DELAY_MS = 250
 export const MAX_EDITOR_AUTO_SAVE_DELAY_MS = 10_000
 
-// Why: first-time seed only — doubles on each dismissal without starring; later thresholds live in starNagNextThreshold.
+// Why: initial threshold of agents spawned (since last update) before we show
+// the star-on-GitHub notification. Doubles each time the user dismisses
+// without starring — e.g. 35 → 70 → 140 → 280. Past dismissals are encoded
+// in starNagNextThreshold, so this constant is only the first-time seed.
 export const STAR_NAG_INITIAL_THRESHOLD = 35
 
-/** Synthetic worktree id for PTYs not tied to any worktree; shared so main and renderer agree on the sentinel. */
+/** Synthetic worktree id used by the memory collector to bucket PTYs that
+ *  are not associated with any worktree. Shared across main and renderer so
+ *  the collector and the status-bar popover agree on the sentinel. */
 export const ORPHAN_WORKTREE_ID = '__orphan__'
 
-// Why: synthetic local workspace; persistence pruning must classify it without the repo catalog.
+// Why: the floating workspace is a local synthetic workspace, so persistence
+// pruning must classify it without consulting the repo catalog.
 export const FLOATING_TERMINAL_WORKTREE_ID = 'global-floating-terminal'
 
 export const REPO_COLORS = [
@@ -192,9 +203,6 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     editorAutoSave: false,
     editorAutoSaveDelayMs: DEFAULT_EDITOR_AUTO_SAVE_DELAY_MS,
     editorMinimapEnabled: false,
-    // Why empty: the editor keeps following the terminal font unless the user opts in.
-    editorFontFamily: '',
-    editorWordWrap: true,
     richMarkdownSpellcheckEnabled: true,
     markdownReviewToolsEnabled: true,
     primarySelectionMiddleClickPaste: getDefaultPrimarySelectionMiddleClickPaste(),
@@ -210,9 +218,13 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     terminalFastScrollSensitivity: 5,
     terminalTuiScrollSensitivity: 1,
     terminalTuiScrollSensitivityDefaultedToOne: true,
-    // Why: "auto" uses WebGL when supported, falling back to DOM on renderer failure or software/unknown GPU.
+    // Why: "auto" should use WebGL when supported while keeping DOM fallback
+    // for renderer failures and Linux software/unknown GPU renderers.
     terminalGpuAcceleration: 'auto',
-    // Why 'auto': enable ligatures only for known ligature fonts, never forced. Resolver in shared/terminal-ligatures.ts.
+    // Why 'auto': when the user has picked a known ligature font we want the
+    // feature enabled by default, but we never force it if they pick a font
+    // that lacks ligatures or if they've explicitly opted out. The resolver
+    // is in shared/terminal-ligatures.ts.
     terminalLigatures: 'auto',
     terminalCursorStyle: 'block',
     terminalCursorStyleDefaultedToBlock: true,
@@ -227,33 +239,29 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     terminalActivePaneOpacity: 1,
     terminalPaneOpacityTransitionMs: 140,
     terminalDividerThicknessPx: 3,
-    // Why: Windows paste-on-right-click matches native convention; macOS/Linux keep right-click for the context menu.
-    terminalRightClickToPaste: getDefaultTerminalRightClickToPaste(),
-    terminalRightClickToPasteDefaultedForPlatform: true,
+    // Default true so Windows users get native right-click paste out of the
+    // box. Other platforms ignore this field because the UI never exposes it,
+    // and Ctrl+right-click still opens the context menu when paste is enabled.
+    terminalRightClickToPaste: true,
     terminalWindowsShell: 'powershell.exe',
     terminalWindowsWslDistro: null,
-    localAccountRuntime: 'auto',
-    localAccountRuntimeDefaultedToAutoForAllUsers: true,
+    localAccountRuntime: 'host',
     localAccountWslDistro: null,
     localWindowsRuntimeDefault: { kind: 'windows-host' },
-    // Why: prefer modern PowerShell when installed, falling back to inbox Windows PowerShell.
+    // Why: Windows users expect "PowerShell" to mean modern PowerShell when it
+    // is installed, with a safe fallback to the inbox Windows PowerShell.
     terminalWindowsPowerShellImplementation: 'auto',
     terminalMouseHideWhileTyping: false,
     terminalQuickCommands: getDefaultTerminalQuickCommands(),
-    // Why: opt-in only, matching Ghostty's default (upgrades never enable it unexpectedly).
+    // Default false: opt-in only (matches Ghostty's default). Existing users
+    // on upgrade inherit this default via persistence.ts's
+    // { ...defaults.settings, ...parsed.settings } merge, so enabling
+    // focus-follows-mouse never happens unexpectedly.
     terminalFocusFollowsMouse: false,
     windowBackgroundBlur: false,
     minimizeToTrayOnClose: false,
-    // Why: default-on everywhere so it round-trips across platforms; only darwin acts on it.
-    showMenuBarIcon: true,
     terminalClipboardOnSelect: false,
-    // Why: default on so Zellij/tmux/nvim copy works out of the box. Query
-    // replies stay disabled and payload size is capped in the OSC 52 handler.
-    // This default only covers new profiles; existing ones persisted `false`
-    // and are flipped once by the stamp below (shared/osc52-clipboard-settings.ts,
-    // applied by both the Electron store and the web client's localStorage store).
-    terminalAllowOsc52Clipboard: true,
-    terminalAllowOsc52ClipboardDefaultedOnForAllUsers: true,
+    terminalAllowOsc52Clipboard: false,
     claudeAgentTeamsMode: 'off',
     setupScriptLaunchMode: 'new-tab',
     terminalScrollbackRows: DESKTOP_TERMINAL_SCROLLBACK_ROWS_DEFAULT,
@@ -265,7 +273,6 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     openLinksInAppPreferencePrompted: false,
     openAgentTabsInChatByDefault: false,
     experimentalNativeChat: false,
-    nativeChatSessionOptions: {},
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     rightSidebarOpenByDefault: true,
     showGitIgnoredFiles: true,
@@ -276,9 +283,9 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     showTasksButton: true,
     showAutomationsButton: true,
     showMobileButton: true,
-    showPinnedWorktreesInGroups: false,
     ctrlTabOrderMode: 'mru',
-    // Why: Orca-first keeps core shortcuts working from a focused terminal; TUI-ownership users opt in.
+    // Why: switching worktrees and opening command surfaces from a focused
+    // terminal is a core Orca workflow; users who prefer TUI ownership opt in.
     terminalShortcutPolicy: 'orca-first',
     floatingTerminalEnabled: true,
     floatingTerminalDefaultedForAllUsers: true,
@@ -290,7 +297,6 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     diffDefaultView: 'inline',
     diffWordWrap: false,
     combinedDiffFileTreeVisibleByDefault: false,
-    prBotAuthorOverrides: [],
     promptCacheTimerEnabled: false,
     promptCacheTtlMs: 300_000,
     codexManagedAccounts: [],
@@ -299,16 +305,8 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     claudeManagedAccounts: [],
     activeClaudeManagedAccountId: null,
     terminalScopeHistoryByWorktree: true,
-    terminalHiddenViewParking: true,
-    terminalMainSideEffectAuthority: true,
-    terminalHiddenDeliveryGate: true,
-    terminalModelQueryAuthority: true,
     defaultTuiAgent: null,
     disabledTuiAgents: [...DEFAULT_DISABLED_TUI_AGENTS],
-    pluginSystemEnabled: false,
-    disabledPlugins: [],
-    pluginConsents: {},
-    devPluginPaths: [],
     claudeAgentTeamsDefaultDisabledMigrated: true,
     skipDeleteWorktreeConfirm: false,
     skipCloseTerminalWithRunningProcessConfirm: false,
@@ -333,7 +331,12 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     tabAutoGenerateTitle: false,
     confirmClosePinnedTab: true,
     keepComputerAwakeWhileAgentsRun: false,
-    // Why: 'auto' probes keyboard layout so non-US users can type Option chars like @/€/[ out of the box (issue #903). See src/renderer/src/lib/keyboard-layout/*.
+    // Why: 'auto' runs a layout-aware probe at boot (see
+    // src/renderer/src/lib/keyboard-layout/*) that picks 'true' for US and
+    // US-International and 'false' for every other layout. This mirrors
+    // Ghostty's detectOptionAsAlt() and ensures users on Turkish, German,
+    // French, etc. can type Option+Q/L/E characters like @, €, [, ] out of
+    // the box (issue #903) while US users keep Option-as-Alt readline chords.
     terminalMacOptionAsAlt: 'auto',
     terminalMacOptionAsAltMigrated: false,
     terminalJISYenToBackslash: false,
@@ -341,16 +344,14 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     mobileEmulatorEnabled: true,
     mobileEmulatorDefaultDeviceUdid: null,
     androidSdkPath: null,
-    // Why: indefinite hold — the "Restore" banner is the explicit return action, no wall-clock guess. See docs/mobile-fit-hold.md.
+    // Why: indefinite hold by default — the desktop "Restore" banner is the
+    // explicit return-to-desktop-size action, no wall-clock guess.
+    // See docs/mobile-fit-hold.md.
     mobileAutoRestoreFitMs: null,
-    // Why: Anywhere (Relay + local) is the default; local-only is written only on explicit same-network choice.
-    mobilePairingConnectionMode: 'automatic',
-    // Why: off keeps the cosmetic overlay unmounted for users who never opt in.
+    // Why: off by default — opt-in cosmetic joke feature. Leaving the default
+    // false keeps the overlay unmounted for users who never enable it.
     experimentalPet: false,
     experimentalActivity: false,
-    experimentalAgentDashboardPopout: false,
-    // Why: in-window screen popover is the default surface; users opt into a separate pop-out window.
-    experimentalAgentDashboardMode: 'in-window',
     experimentalActivityDefaultedOffForAllUsers: true,
     experimentalTerminalAttention: false,
     experimentalAgentHibernation: false,
@@ -358,16 +359,24 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     experimentalNewWorktreeCardStyle: false,
     experimentalEphemeralVms: false,
     compactWorktreeCards: false,
-    // Why: local desktop stays the default until the user picks a saved runtime environment.
+    experimentalWorktreeSymlinks: false,
+    // Why: local desktop remains the default server until the user explicitly
+    // selects a saved runtime environment.
     activeRuntimeEnvironmentId: null,
-    // Why: hydrate a stable empty shape so renderer optional-chained reads never hit undefined.
+    // Why: hydrate an empty default so the renderer's optional-chained reads
+    // (`settings?.githubProjects?.activeProject`) land on a stable shape
+    // instead of `undefined`. Upgraded profiles inherit this via the
+    // `{ ...defaults, ...parsed }` merge in persistence.ts.
     githubProjects: {
       pinned: [],
       recent: [],
       lastViewByProject: {},
       activeProject: null
     },
-    // Why: keep agent/model maps empty so first use follows the default agent's model, not a frozen stale choice.
+    // Why: default-on uses the user's default agent when it supports
+    // non-interactive commit-message generation. Keep agent/model maps empty
+    // so first use follows the default agent's configured default model instead
+    // of freezing a stale choice into new profiles.
     commitMessageAi: {
       enabled: true,
       agentId: null,
@@ -427,16 +436,13 @@ export function getDefaultPersistedState(homedir: string): PersistedState {
     workspaceSession: getDefaultWorkspaceSession(),
     workspaceSessionsByHostId: {},
     sshTargets: [],
-    deletedSshConfigAliases: [],
     sshRemotePtyLeases: [],
-    claudeLivePtySessionIds: [],
     migrationUnsupportedPtyEntries: [],
     legacyPaneKeyAliasEntries: [],
     automations: [],
     automationRuns: [],
     onboarding: getDefaultOnboardingState(),
-    featureInteractionTelemetryBuckets: {},
-    codexResetCreditAttemptLedger: structuredClone(EMPTY_CODEX_RESET_CREDIT_ATTEMPT_LEDGER)
+    featureInteractionTelemetryBuckets: {}
   }
 }
 
@@ -444,7 +450,6 @@ export function getDefaultUIState(): PersistedUIState {
   return {
     lastActiveRepoId: null,
     lastActiveWorktreeId: null,
-    activeView: 'terminal',
     sidebarWidth: 280,
     rightSidebarOpen: true,
     rightSidebarTab: 'explorer',
@@ -459,12 +464,9 @@ export function getDefaultUIState(): PersistedUIState {
     workspaceHostScope: 'all',
     visibleWorkspaceHostIds: null,
     workspaceHostOrder: [],
-    manualRepoOrder: [],
     showSleepingWorkspaces: DEFAULT_SHOW_SLEEPING_WORKSPACES,
     hideDefaultBranchWorkspace: false,
     hideAutomationGeneratedWorkspaces: false,
-    hideCliCreatedWorkspaces: false,
-    hideDetachedHeadWorkspaces: false,
     showDotfilesByWorktree: {},
     filterRepoIds: [],
     collapsedGroups: [],
@@ -483,8 +485,6 @@ export function getDefaultUIState(): PersistedUIState {
     _workspaceStatusesDefaultVisualsMigrated: true,
     statusBarItems: [...DEFAULT_STATUS_BAR_ITEMS],
     statusBarVisible: true,
-    usagePercentageDisplay: DEFAULT_USAGE_PERCENTAGE_DISPLAY,
-    statusBarUsageMode: DEFAULT_STATUS_BAR_USAGE_MODE,
     dismissedUpdateVersion: null,
     lastUpdateCheckAt: null,
     trustedOrcaHooks: {},
@@ -495,14 +495,11 @@ export function getDefaultUIState(): PersistedUIState {
     setupGuideBrowserMilestoneLegacyComplete: false,
     browserImportHintHidden: false,
     trayMinimizeNoticeShown: false,
-    // Why: fresh profiles start on the new default, so nothing was overridden to report.
-    osc52ClipboardDefaultOnNoticePending: false,
     mobileEmulatorTabIntroDismissed: false,
     mobileEmulatorAgentSetupDismissed: false,
-    // Why: only upgraded profiles saw the old ordering, so only they get the one-time notice.
+    // Why: brand-new profiles never saw recent project ordering; only upgraded
+    // profiles get the one-time sidebar notice on first launch.
     projectOrderManualDefaultNoticeDismissed: true,
-    // Why: only upgraded profiles saw the old default, so only they get the one-time change notice.
-    usagePercentageDisplayChangeNoticeDismissed: true,
     workspaceCleanup: { dismissals: {} },
     featureTipsSeenIds: [],
     featureInteractions: {},

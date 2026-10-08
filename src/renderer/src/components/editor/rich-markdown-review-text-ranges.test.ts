@@ -40,13 +40,13 @@ function buildSelectedText(wordCount: number): string {
 }
 
 describe('findRichMarkdownSelectedTextRanges', () => {
-  it('matches selected text across adjacent text nodes without inventing whitespace', () => {
+  it('matches selected text across normalized whitespace and text nodes', () => {
     const editor = editorWithTextNodes([
       { isText: true, text: 'alpha' },
       { isText: true, text: 'beta' }
     ])
 
-    expect(findRichMarkdownSelectedTextRanges({ editor, selectedText: 'alphabeta' })).toEqual([
+    expect(findRichMarkdownSelectedTextRanges({ editor, selectedText: 'alpha\n beta' })).toEqual([
       { from: 0, to: 9 }
     ])
   })

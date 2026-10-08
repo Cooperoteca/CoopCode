@@ -15,11 +15,4 @@ describe('native-chat stream unsubscribe key builder', () => {
       params: { subscriptionId: 'codex:abc' }
     })
   })
-
-  it('echoes a pane-specific token when the subscriber supplied one', () => {
-    expect(buildNativeChatUnsubscribe('claude', 'same-session', 'pane-2')).toEqual({
-      method: 'nativeChat.unsubscribe',
-      params: { subscriptionId: 'pane-2' }
-    })
-  })
 })

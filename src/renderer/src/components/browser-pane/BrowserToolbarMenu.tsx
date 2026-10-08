@@ -1,6 +1,5 @@
 import { useLayoutEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { emitBrowserCookieImportToast } from '@/lib/browser-cookie-import-toast'
 import { useAppStore } from '@/store'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import { shouldShowBrowserImportHint } from './browser-import-hint-visibility'
@@ -172,8 +171,7 @@ export function BrowserToolbarMenu({
     const result = await importCookiesFromBrowser(effectiveProfileId, browserFamily, browserProfile)
     if (result.ok) {
       const browser = detectedBrowsers.find((b) => b.family === browserFamily)
-      emitBrowserCookieImportToast(
-        result.summary,
+      toast.success(
         browserProfile
           ? translate(
               'auto.components.browser.pane.BrowserToolbarMenu.c5f0e4d3b2a1',
@@ -201,8 +199,7 @@ export function BrowserToolbarMenu({
   const handleImportFromFile = async (): Promise<void> => {
     const result = await importCookiesToProfile(effectiveProfileId)
     if (result.ok) {
-      emitBrowserCookieImportToast(
-        result.summary,
+      toast.success(
         translate(
           'auto.components.browser.pane.BrowserToolbarMenu.53bbe3dab4',
           'Imported {{value0}} cookies from file.',

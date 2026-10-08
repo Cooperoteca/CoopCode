@@ -13,10 +13,7 @@ vi.mock('./client', () => ({
   getClients: (...args: unknown[]) => getClients(...args),
   getStatus: (...args: unknown[]) => getStatus(...args),
   isAuthError: (...args: unknown[]) => isAuthError(...args),
-  clearToken: (...args: unknown[]) => clearToken(...args),
-  // The signed public-file-url client reuses the same underlying raw client, so
-  // body reads route through the entry's rawRequest spy in these tests.
-  getPublicFileUrlClient: (entry: LinearClientForWorkspace) => entry.client
+  clearToken: (...args: unknown[]) => clearToken(...args)
 }))
 
 function workspace(id: string, organizationUrlKey: string): LinearWorkspace {
@@ -70,13 +67,7 @@ describe('Linear issue context', () => {
       readLinearIssueContext(
         {
           current: true,
-          include: {
-            attachments: false,
-            children: false,
-            comments: false,
-            relations: false,
-            activity: false
-          },
+          include: { attachments: false, children: false, comments: false, relations: false },
           depth: 0
         },
         async () => ({

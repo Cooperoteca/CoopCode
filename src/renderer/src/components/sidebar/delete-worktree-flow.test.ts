@@ -31,16 +31,9 @@ const mocks = vi.hoisted(() => {
     }),
     openModal: vi.fn(),
     removeWorktree: vi.fn().mockResolvedValue({ ok: true }),
-    gitStatusByWorktree: {} as Record<string, unknown[]>,
     deleteStateByWorktreeId: {} as Record<
       string,
-      {
-        isDeleting?: boolean
-        error?: string | null
-        canForceDelete?: boolean
-        forceDeleteReason?: 'dirty' | null
-        lockReason?: string | null
-      }
+      { isDeleting?: boolean; error?: string | null; canForceDelete?: boolean }
     >
   }
   return { state }
@@ -108,7 +101,6 @@ describe('runWorktreeBatchDelete', () => {
     mocks.state.openModal.mockClear()
     mocks.state.removeWorktree.mockClear().mockResolvedValue({ ok: true })
     mocks.state.deleteStateByWorktreeId = {}
-    mocks.state.gitStatusByWorktree = {}
     mocks.state.worktreeLineageById = {}
     mocks.state.repos = []
     vi.mocked(toast.error).mockClear()
@@ -182,8 +174,7 @@ describe('runWorktreeBatchDelete', () => {
         mocks.state.deleteStateByWorktreeId[worktreeId] = {
           isDeleting: false,
           error: 'changed files',
-          canForceDelete: true,
-          forceDeleteReason: 'dirty'
+          canForceDelete: true
         }
         return { ok: false, error: 'changed files' }
       })
@@ -201,34 +192,6 @@ describe('runWorktreeBatchDelete', () => {
       expect(mocks.state.removeWorktree).toHaveBeenNthCalledWith(2, 'wt-1', true)
       expect(onDeleted).toHaveBeenCalledWith(['wt-1'])
     })
-  })
-
-  it('does not offer force delete for a locked worktree', async () => {
-    mocks.state.settings = { skipDeleteWorktreeConfirm: true }
-    mocks.state.removeWorktree
-      .mockImplementationOnce(async (worktreeId: string) => {
-        mocks.state.deleteStateByWorktreeId[worktreeId] = {
-          isDeleting: false,
-          error: 'Worktree is locked by Git.',
-          canForceDelete: false,
-          forceDeleteReason: null,
-          lockReason: 'active agent session'
-        }
-        return { ok: false, error: 'Worktree is locked by Git.' }
-      })
-      .mockResolvedValueOnce({ ok: true })
-    setWorktrees([{ id: 'wt-1', displayName: 'one' }])
-
-    expect(runWorktreeBatchDelete(['wt-1'])).toBe(true)
-
-    await vi.waitFor(() => expect(showDeleteWorktreeFailureToast).toHaveBeenCalled())
-    const toastOptions = vi.mocked(showDeleteWorktreeFailureToast).mock.calls[0]?.[0]
-    expect(toastOptions).toMatchObject({
-      canForceDelete: false,
-      forceDeleteReason: null,
-      lockReason: 'active agent session'
-    })
-    expect(mocks.state.removeWorktree).toHaveBeenCalledTimes(1)
   })
 
   it('keeps parent worktree deletes behind confirmation even when confirmation is skipped', () => {

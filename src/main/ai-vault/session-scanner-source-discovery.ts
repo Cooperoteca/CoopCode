@@ -2,14 +2,11 @@ import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { AiVaultScanIssue } from '../../shared/ai-vault-types'
 import { uniqueCodexSessionsDirs } from './session-scanner-codex-paths'
-import { SUBAGENT_DIR_NAME } from './session-scanner-subagent-transcripts'
 import { discoverFiles, discoverOpenClawFiles } from './session-scanner-discovery'
 import { droidDiscoveries, kimiDiscoveries } from './session-scanner-droid-kimi-sources'
 import { opencodeDiscoveries } from './session-scanner-opencode-sources'
 import type { AiVaultScanOptions, SessionFileDiscovery } from './session-scanner-types'
-import { normalizeAgentSessionsDir } from './session-scanner-values'
-import { resolveGrokSessionsDir } from '../../shared/grok-session-paths'
-import { antigravityDiscoveries } from './session-scanner-antigravity-sources'
+import { normalizePiSessionsDir } from './session-scanner-values'
 
 const CLAUDE_PROJECTS_DIR = join(homedir(), '.claude', 'projects')
 export const DEFAULT_CODEX_HOME_DIR = join(homedir(), '.codex')
@@ -21,34 +18,21 @@ const COPILOT_SESSIONS_DIR = join(
   'session-state'
 )
 const CURSOR_PROJECTS_DIR = join(homedir(), '.cursor', 'projects')
+const GROK_SESSIONS_DIR = join(
+  process.env.GROK_HOME?.trim() || join(homedir(), '.grok'),
+  'sessions'
+)
 const HERMES_SESSIONS_DIR = join(homedir(), '.hermes', 'sessions')
 const ROVO_SESSIONS_DIR = join(homedir(), '.rovodev', 'sessions')
 const OPENCLAW_STATE_DIR = process.env.OPENCLAW_STATE_DIR?.trim() || join(homedir(), '.openclaw')
-const PI_SESSIONS_DIR = normalizeAgentSessionsDir(
-  process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), '.pi', 'agent', 'sessions'),
-  '.pi'
-)
-const OMP_SESSIONS_DIR = normalizeAgentSessionsDir(
-  process.env.OMP_CODING_AGENT_DIR?.trim() || join(homedir(), '.omp', 'agent', 'sessions'),
-  '.omp'
+const PI_SESSIONS_DIR = normalizePiSessionsDir(
+  process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), '.pi', 'agent', 'sessions')
 )
 // Why: Devin ATIF transcripts are stored under <DEVIN_HOME>/transcripts.
 const DEVIN_TRANSCRIPTS_DIR = join(
   process.env.DEVIN_HOME?.trim() || join(homedir(), '.local', 'share', 'devin', 'cli'),
   'transcripts'
 )
-
-// The local host and each WSL distro's `~/.claude/projects`. Callers reading
-// Claude session files by path use these roots to reject arbitrary paths.
-export function claudeProjectsRootDirs(args: {
-  claudeProjectsDir?: string
-  wslHomeDirs?: readonly string[]
-}): string[] {
-  return [
-    args.claudeProjectsDir ?? CLAUDE_PROJECTS_DIR,
-    ...(args.wslHomeDirs ?? []).map((homeDir) => join(homeDir, '.claude', 'projects'))
-  ]
-}
 
 export async function discoverAiVaultSessionSources(args: {
   options: AiVaultScanOptions
@@ -88,22 +72,11 @@ function claudeDiscoveries(
   limit: number,
   issues: AiVaultScanIssue[]
 ): Promise<SessionFileDiscovery>[] {
-  return claudeProjectsRootDirs({
-    claudeProjectsDir: options.claudeProjectsDir,
-    wslHomeDirs
-  }).map((rootDir) =>
-    discoverFiles({
-      rootDir,
-      limit,
-      agent: 'claude',
-      issues,
-      extensions: ['.jsonl'],
-      // Why: Task subagent transcripts under `<session>/subagents/` share the parent
-      // sessionId and aren't independently resumable, so they'd just duplicate the
-      // parent as untitled rows; prune the subtree and read them on demand under
-      // their parent instead.
-      directoryPredicate: (name) => name !== SUBAGENT_DIR_NAME
-    })
+  return [
+    options.claudeProjectsDir ?? CLAUDE_PROJECTS_DIR,
+    ...wslHomeDirs.map((homeDir) => join(homeDir, '.claude', 'projects'))
+  ].map((rootDir) =>
+    discoverFiles({ rootDir, limit, agent: 'claude', issues, extensions: ['.jsonl'] })
   )
 }
 
@@ -124,7 +97,6 @@ function standardDiscoveries(
   issues: AiVaultScanIssue[]
 ): Promise<SessionFileDiscovery>[] {
   return [
-    ...antigravityDiscoveries(options, wslHomeDirs, limit, issues),
     ...sessionRootDirs(options.geminiSessionsDir ?? GEMINI_SESSIONS_DIR, wslHomeDirs, [
       '.gemini',
       'tmp'
@@ -142,8 +114,7 @@ function standardDiscoveries(
     ...devinDiscoveries(options, wslHomeDirs, limit, issues),
     ...hermesDiscoveries(options, wslHomeDirs, limit, issues),
     ...rovoDiscoveries(options, wslHomeDirs, limit, issues),
-    ...piDiscoveries(options, wslHomeDirs, limit, issues),
-    ...ompDiscoveries(options, wslHomeDirs, limit, issues)
+    ...piDiscoveries(options, wslHomeDirs, limit, issues)
   ]
 }
 
@@ -174,9 +145,7 @@ function grokDiscoveries(
   limit: number,
   issues: AiVaultScanIssue[]
 ): Promise<SessionFileDiscovery>[] {
-  // Resolved lazily: a module-scope call binds across chunks at init time, which
-  // breaks whenever bundle ordering puts this module before its import.
-  return sessionRootDirs(options.grokSessionsDir ?? resolveGrokSessionsDir(), wslHomeDirs, [
+  return sessionRootDirs(options.grokSessionsDir ?? GROK_SESSIONS_DIR, wslHomeDirs, [
     '.grok',
     'sessions'
   ]).map((rootDir) =>
@@ -262,21 +231,6 @@ function piDiscoveries(
     'sessions'
   ]).map((rootDir) =>
     discoverFiles({ rootDir, limit, agent: 'pi', issues, extensions: ['.jsonl'] })
-  )
-}
-
-function ompDiscoveries(
-  options: AiVaultScanOptions,
-  wslHomeDirs: readonly string[],
-  limit: number,
-  issues: AiVaultScanIssue[]
-): Promise<SessionFileDiscovery>[] {
-  return sessionRootDirs(options.ompSessionsDir ?? OMP_SESSIONS_DIR, wslHomeDirs, [
-    '.omp',
-    'agent',
-    'sessions'
-  ]).map((rootDir) =>
-    discoverFiles({ rootDir, limit, agent: 'omp', issues, extensions: ['.jsonl'] })
   )
 }
 

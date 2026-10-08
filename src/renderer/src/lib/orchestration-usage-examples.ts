@@ -1,8 +1,13 @@
 import { translate } from '@/i18n/i18n'
 import { createLocalizedCatalog } from '@/i18n/localized-catalog'
-import type { SkillUsageExample } from './skill-usage-example'
+export type OrchestrationUsageExample = {
+  id: string
+  title: string
+  summary: string
+  prompt: string
+}
 
-export const getOrchestrationUsageExamples = createLocalizedCatalog((): SkillUsageExample[] => [
+export const getOrchestrationUsageExamples = createLocalizedCatalog(() => [
   {
     id: 'handoff',
     title: translate('auto.lib.orchestration.usage.examples.5e0d489fe1', 'Hand off an active task'),

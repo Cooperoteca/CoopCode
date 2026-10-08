@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DirCache, TreeNode } from './file-explorer-types'
 import {
   createVisibleFileExplorerRowProjection,
+  getEffectiveFileExplorerIgnoredPaths,
   getFileExplorerIgnoredQueryRelativePaths
 } from './useFileExplorerVisibleRowProjection'
-import { getEffectiveFileExplorerIgnoredPaths } from './use-file-explorer-ignored-paths'
 import {
   FILE_EXPLORER_NAME_FILTER_QUERY_MAX_BYTES,
   getFileExplorerNameFilterExpandedPaths,
@@ -336,6 +336,8 @@ describe('file explorer visible row projection', () => {
   })
 
   it('keeps same-worktree ignored paths while an expanded-folder query is loading', () => {
+    const previousRelativePaths = ['out', 'src']
+
     expect(
       getEffectiveFileExplorerIgnoredPaths({
         activeWorktreeId: 'worktree-1',
@@ -343,6 +345,7 @@ describe('file explorer visible row projection', () => {
         ignoredPathResult: {
           activeWorktreeId: 'worktree-1',
           paths: ['out'],
+          relativePaths: previousRelativePaths,
           worktreePath: '/repo'
         },
         worktreePath: '/repo'
@@ -369,6 +372,7 @@ describe('file explorer visible row projection', () => {
         ignoredPathResult: {
           activeWorktreeId: 'worktree-1',
           paths: ['out'],
+          relativePaths: ['out'],
           worktreePath: '/repo'
         },
         worktreePath: '/repo'
@@ -382,6 +386,7 @@ describe('file explorer visible row projection', () => {
         ignoredPathResult: {
           activeWorktreeId: 'worktree-1',
           paths: ['out'],
+          relativePaths: ['out'],
           worktreePath: '/repo'
         },
         worktreePath: '/other-repo'

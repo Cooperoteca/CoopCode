@@ -1,5 +1,4 @@
 import type { PersistedTrustedOrcaHooks } from '../../../src/shared/types'
-import type { RpcClient } from '../transport/rpc-client'
 
 export type SetupHookTrust = {
   contentHash: string
@@ -35,21 +34,6 @@ export function trustedOrcaHooksWithSetupApproval(args: {
     ? { ...existing, all: { approvedAt } }
     : { ...existing, setup: { contentHash: args.contentHash, approvedAt } }
   return { ...args.trust, [args.repoId]: nextRepo }
-}
-
-export async function persistSetupHookTrustApproval(args: {
-  client: RpcClient
-  trust: PersistedTrustedOrcaHooks
-  repoId: string
-  contentHash: string
-  alwaysTrust: boolean
-}): Promise<PersistedTrustedOrcaHooks> {
-  const next = trustedOrcaHooksWithSetupApproval(args)
-  const response = await args.client.sendRequest('ui.set', { trustedOrcaHooks: next })
-  if (!response.ok) {
-    throw new Error(response.error.message)
-  }
-  return next
 }
 
 export function normalizeSetupHookTrust(

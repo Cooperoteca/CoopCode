@@ -7,14 +7,8 @@ function electronBuilderNativeRebuild(context) {
   return runElectronBuilderNativeRebuild(context)
 }
 
-function runElectronBuilderNativeRebuild(context, runner = execFileSync, runtime = {}) {
-  const args = buildNativeRebuildArgs(context, runtime)
-  if (readPlatformName(context?.platform) === 'win32') {
-    runner(process.execPath, ['config/scripts/build-windows-cli-launcher.mjs'], {
-      cwd: projectDir,
-      stdio: 'inherit'
-    })
-  }
+function runElectronBuilderNativeRebuild(context, runner = execFileSync) {
+  const args = buildNativeRebuildArgs(context)
   runner(process.execPath, args, {
     cwd: projectDir,
     stdio: 'inherit'
@@ -25,22 +19,15 @@ function runElectronBuilderNativeRebuild(context, runner = execFileSync, runtime
   return false
 }
 
-function buildNativeRebuildArgs(
-  context,
-  { environment = process.env, hostPlatform = process.platform, hostArch = process.arch } = {}
-) {
+function buildNativeRebuildArgs(context) {
   const platform = readPlatformName(context?.platform)
   const arch = readArchName(context?.arch)
-  const canReusePreparedRuntime =
-    environment.ORCA_REUSE_PREPARED_NATIVE_RUNTIME === '1' &&
-    platform === hostPlatform &&
-    arch === hostArch
 
   return [
     'config/scripts/rebuild-native-deps.mjs',
     `--platform=${platform}`,
     `--arch=${arch}`,
-    ...(canReusePreparedRuntime ? [] : ['--force'])
+    '--force'
   ]
 }
 

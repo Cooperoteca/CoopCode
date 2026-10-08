@@ -1,32 +1,30 @@
 import type { GitRuntimeOptions } from './git-runtime-options'
 import { gitOptionsForWorktree } from './git-runtime-options'
 import { gitExecFileAsync } from './runner'
-import {
-  encodeGitCheckIgnorePaths,
-  GIT_CHECK_IGNORE_STDIN_ARGS,
-  GIT_CHECK_IGNORE_TIMEOUT_MS,
-  parseGitCheckIgnorePaths,
-  splitGitCheckIgnorePathsByStdinBytes
-} from '../../shared/git-check-ignore-stdio'
+
+const CHECK_IGNORE_CHUNK_SIZE = 100
 
 type GitExecError = Error & { stdout?: string; code?: number | string }
 
-async function runCheckIgnoredPaths(
+function parseCheckIgnoreOutput(stdout: string): string[] {
+  return stdout.split(/\r?\n/).filter(Boolean)
+}
+
+async function runCheckIgnoreChunk(
   worktreePath: string,
   relativePaths: string[],
-  options: GitRuntimeOptions
+  options: GitRuntimeOptions = {}
 ): Promise<string[]> {
   try {
-    const { stdout } = await gitExecFileAsync([...GIT_CHECK_IGNORE_STDIN_ARGS], {
-      ...gitOptionsForWorktree(worktreePath, options),
-      stdin: encodeGitCheckIgnorePaths(relativePaths),
-      timeout: GIT_CHECK_IGNORE_TIMEOUT_MS
-    })
-    return parseGitCheckIgnorePaths(stdout)
+    const { stdout } = await gitExecFileAsync(
+      ['-c', 'core.quotePath=false', 'check-ignore', '--', ...relativePaths],
+      gitOptionsForWorktree(worktreePath, options)
+    )
+    return parseCheckIgnoreOutput(stdout)
   } catch (error) {
     const gitError = error as GitExecError
     if (gitError.code === 1) {
-      return parseGitCheckIgnorePaths(gitError.stdout ?? '')
+      return parseCheckIgnoreOutput(gitError.stdout ?? '')
     }
     throw error
   }
@@ -37,12 +35,10 @@ export async function checkIgnoredPaths(
   relativePaths: string[],
   options: GitRuntimeOptions = {}
 ): Promise<string[]> {
-  if (relativePaths.length === 0) {
-    return []
-  }
   const ignored = new Set<string>()
-  for (const chunk of splitGitCheckIgnorePathsByStdinBytes(relativePaths)) {
-    for (const ignoredPath of await runCheckIgnoredPaths(worktreePath, chunk, options)) {
+  for (let i = 0; i < relativePaths.length; i += CHECK_IGNORE_CHUNK_SIZE) {
+    const chunk = relativePaths.slice(i, i + CHECK_IGNORE_CHUNK_SIZE)
+    for (const ignoredPath of await runCheckIgnoreChunk(worktreePath, chunk, options)) {
       ignored.add(ignoredPath)
     }
   }

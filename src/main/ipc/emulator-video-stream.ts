@@ -8,11 +8,7 @@ import { emulatorProbe } from '../emulator/emulator-probe'
 // units arrive on emulator:videoStreamMeta / emulator:videoStreamFrame. Mirrors
 // the MJPEG emulator-frame-stream handler but for the Android H.264 path.
 export function registerEmulatorVideoStreamHandlers(): void {
-  type Subscription = {
-    owner: WebContents
-    unsubscribe: () => void
-    onOwnerDestroyed: () => void
-  }
+  type Subscription = { owner: WebContents; unsubscribe: () => void }
   const subscriptions = new Map<string, Subscription>()
 
   const stopSubscription = (streamId: string, owner?: WebContents): void => {
@@ -21,9 +17,6 @@ export function registerEmulatorVideoStreamHandlers(): void {
       return
     }
     subscription.unsubscribe()
-    // Why: `.once('destroyed')` self-removes only when that event fires (window
-    // close), so an explicit stop must drop it or each show/hide cycle leaks one.
-    subscription.owner.removeListener('destroyed', subscription.onOwnerDestroyed)
     subscriptions.delete(streamId)
   }
 
@@ -44,12 +37,7 @@ export function registerEmulatorVideoStreamHandlers(): void {
         throw new Error('Video stream id is already in use by another renderer')
       }
       stopSubscription(streamId, owner)
-      const onOwnerDestroyed = (): void => stopSubscription(streamId, owner)
-      const pendingSubscription: Subscription = {
-        owner,
-        unsubscribe: () => {},
-        onOwnerDestroyed
-      }
+      const pendingSubscription = { owner, unsubscribe: () => {} }
       subscriptions.set(streamId, pendingSubscription)
       setTimeout(() => {
         if (owner.isDestroyed() || subscriptions.get(streamId) !== pendingSubscription) {
@@ -75,7 +63,9 @@ export function registerEmulatorVideoStreamHandlers(): void {
         })
         pendingSubscription.unsubscribe = unsubscribe
       }, 0)
-      owner.once('destroyed', onOwnerDestroyed)
+      owner.once('destroyed', () => {
+        stopSubscription(streamId, owner)
+      })
       return { streamId }
     }
   )

@@ -5,8 +5,7 @@ import { colors, radii, spacing, typography } from '../../theme/mobile-theme'
 // match the PR comment timeline; split out to keep PRCommentComposer focused.
 export const prCommentComposerStyles = StyleSheet.create({
   container: {
-    // Input → Cancel/Save needs clear separation (title edit was flush without this).
-    gap: spacing.md
+    gap: spacing.sm
   },
   input: {
     minHeight: 64,

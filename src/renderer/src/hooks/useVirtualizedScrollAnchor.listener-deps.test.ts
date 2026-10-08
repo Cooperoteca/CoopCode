@@ -69,8 +69,7 @@ describe('useVirtualizedScrollAnchor listener effect dependencies', () => {
 
     // Why: cleanup records the current anchor. If rows are dependencies, a
     // delete reruns cleanup after mutation and overwrites the pre-delete anchor.
-    // Only stable refs are allowed here.
-    expect(initialDeps).toEqual([anchorRef, scrollElementRef, scrollOffsetRef])
+    expect(initialDeps).toEqual([scrollElementRef, scrollOffsetRef])
     expect(nextDeps).toEqual(initialDeps)
   })
 
@@ -114,9 +113,7 @@ describe('useVirtualizedScrollAnchor listener effect dependencies', () => {
     harness.effects[1]?.effect()
 
     expect(scrollElementRef.current.scrollTop).toBe(4116)
-    // Why: the anchor identity is preserved through the transitional restore;
-    // only its source scrollTop is refreshed to the restored offset.
-    expect(anchorRef.current).toEqual({ key: 'row-1', offset: 3358, scrollTop: 4116 })
+    expect(anchorRef.current).toEqual({ key: 'row-1', offset: 3358 })
   })
 
   it('can ignore generic scroll anchor recording while preserving the saved anchor', async () => {

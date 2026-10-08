@@ -3,50 +3,37 @@
 // other just to validate the shared RPC frame shape.
 import { z } from 'zod'
 
-// Why: clients and runtimes update independently; strip additive envelope
-// fields while continuing to validate every known discriminator and field.
-const MetaSuccess = z
-  .object({
-    runtimeId: z.string()
-  })
-  .strip()
+const MetaSuccess = z.object({
+  runtimeId: z.string()
+})
 
 const MetaFailure = z
   .object({
     runtimeId: z.union([z.string(), z.null()])
   })
-  .strip()
   .optional()
 
-const Success = z
-  .object({
-    id: z.string(),
-    ok: z.literal(true),
-    result: z.unknown(),
-    _meta: MetaSuccess
-  })
-  .strip()
+const Success = z.object({
+  id: z.string(),
+  ok: z.literal(true),
+  result: z.unknown(),
+  _meta: MetaSuccess
+})
 
-const Failure = z
-  .object({
-    id: z.string(),
-    ok: z.literal(false),
-    error: z
-      .object({
-        code: z.string(),
-        message: z.string(),
-        data: z.unknown().optional()
-      })
-      .strip(),
-    _meta: MetaFailure
-  })
-  .strip()
+const Failure = z.object({
+  id: z.string(),
+  ok: z.literal(false),
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    data: z.unknown().optional()
+  }),
+  _meta: MetaFailure
+})
 
-const Keepalive = z
-  .object({
-    _keepalive: z.literal(true)
-  })
-  .strip()
+const Keepalive = z.object({
+  _keepalive: z.literal(true)
+})
 
 export const RuntimeRpcEnvelopeSchema = z.union([Success, Failure, Keepalive])
 
@@ -73,12 +60,6 @@ export type RuntimeRpcFailure = {
 }
 
 export type RuntimeRpcResponse<TResult> = RuntimeRpcSuccess<TResult> | RuntimeRpcFailure
-
-export type RuntimeOrchestrationEnvelope = {
-  orchestrationCapability?: string
-  orchestrationContractVersion?: number
-  orchestrationRequestId?: string
-}
 
 export type RuntimeRpcKeepaliveFrame = z.infer<typeof Keepalive>
 

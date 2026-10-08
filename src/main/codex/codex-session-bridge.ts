@@ -1,11 +1,13 @@
 import {
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   readlinkSync,
   renameSync,
-  rmSync
+  rmSync,
+  symlinkSync
 } from 'node:fs'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { getOrcaManagedCodexHomePath, getSystemCodexHomePath } from './codex-home-paths'
@@ -13,7 +15,6 @@ import {
   listCodexSessionJsonlFiles,
   listCodexSessionJsonlFilesIncrementally
 } from './codex-session-file-listing'
-import { linkCodexSessionFile, tryHardlinkCodexSessionFile } from './codex-session-link'
 import type { CodexSessionBridgeIncrementalOptions } from './codex-session-file-listing'
 
 export type { CodexSessionBridgeIncrementalOptions } from './codex-session-file-listing'
@@ -41,12 +42,9 @@ let backgroundSessionBridgeTask: Promise<void> | null = null
 
 /**
  * Synchronously mirrors system session files into the managed runtime home.
- *
- * `sourceCodexHomePath` overrides the default ~/.codex history source for users
- * who run Codex with a custom CODEX_HOME; it only affects history discovery.
  */
-export function syncSystemCodexSessionsIntoManagedHome(sourceCodexHomePath?: string): void {
-  const systemSessionsRoot = join(sourceCodexHomePath || getSystemCodexHomePath(), 'sessions')
+export function syncSystemCodexSessionsIntoManagedHome(): void {
+  const systemSessionsRoot = join(getSystemCodexHomePath(), 'sessions')
   if (!existsSync(systemSessionsRoot)) {
     return
   }
@@ -64,13 +62,12 @@ export function syncSystemCodexSessionsIntoManagedHome(sourceCodexHomePath?: str
  * background bridging without starting duplicate directory walks.
  */
 export function startSystemCodexSessionBridgeInBackground(
-  options: CodexSessionBridgeIncrementalOptions = {},
-  sourceCodexHomePath?: string
+  options: CodexSessionBridgeIncrementalOptions = {}
 ): Promise<void> {
   if (backgroundSessionBridgeTask) {
     return backgroundSessionBridgeTask
   }
-  const task = syncSystemCodexSessionsIntoManagedHomeIncrementally(options, sourceCodexHomePath)
+  const task = syncSystemCodexSessionsIntoManagedHomeIncrementally(options)
     .catch((error: unknown) => {
       console.warn('[codex-session-bridge] Background session bridge failed:', error)
     })
@@ -91,10 +88,9 @@ export function startSystemCodexSessionBridgeInBackground(
  * bridge operation equivalent to the synchronous path.
  */
 export async function syncSystemCodexSessionsIntoManagedHomeIncrementally(
-  options: CodexSessionBridgeIncrementalOptions = {},
-  sourceCodexHomePath?: string
+  options: CodexSessionBridgeIncrementalOptions = {}
 ): Promise<CodexSessionBridgeSummary> {
-  const systemSessionsRoot = join(sourceCodexHomePath || getSystemCodexHomePath(), 'sessions')
+  const systemSessionsRoot = join(getSystemCodexHomePath(), 'sessions')
   if (!existsSync(systemSessionsRoot)) {
     return { scannedFiles: 0, linkedFiles: 0 }
   }
@@ -153,11 +149,43 @@ function linkSystemCodexSessionFile(
   targetPath: string,
   relativePath: string
 ): boolean {
-  const linked = linkCodexSessionFile(sourcePath, targetPath)
+  const linked = tryLinkSystemCodexSessionFile(sourcePath, targetPath)
   if (linked) {
     clearLegacyCopiedSessionMarker(relativePath)
   }
   return linked
+}
+
+/**
+ * Attempts to link a session file with hardlink first and symlink fallback.
+ */
+function tryLinkSystemCodexSessionFile(sourcePath: string, targetPath: string): boolean {
+  if (tryHardlinkSystemCodexSessionFile(sourcePath, targetPath)) {
+    return true
+  }
+  try {
+    // Why fallback: hardlinks keep sessions visible to Codex resume, but can
+    // fail across volumes. A symlink is still better than a diverging copy.
+    symlinkSync(sourcePath, targetPath, process.platform === 'win32' ? 'file' : undefined)
+    return true
+  } catch (error) {
+    console.warn('[codex-session-bridge] Failed to link system Codex session:', sourcePath, error)
+  }
+  return false
+}
+
+/**
+ * Attempts a hardlink so resume sees one physical JSONL session log.
+ */
+function tryHardlinkSystemCodexSessionFile(sourcePath: string, targetPath: string): boolean {
+  try {
+    // Why: Codex resume ignores symlinked JSONL sessions, while a hardlink
+    // preserves one physical log without copy divergence.
+    linkSync(sourcePath, targetPath)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -184,7 +212,7 @@ function replaceSymlinkSessionBridgeWithHardlink(
     }
 
     replacementPath = `${targetPath}.orca-link-${process.pid}-${Date.now()}`
-    if (!tryHardlinkCodexSessionFile(sourcePath, replacementPath)) {
+    if (!tryHardlinkSystemCodexSessionFile(sourcePath, replacementPath)) {
       return false
     }
     rmSync(targetPath, { force: true })
@@ -228,7 +256,7 @@ function migrateLegacyCopiedSessionBridge(
       return
     }
     replacementPath = `${targetPath}.orca-link-${process.pid}-${Date.now()}`
-    if (!linkCodexSessionFile(sourcePath, replacementPath)) {
+    if (!tryLinkSystemCodexSessionFile(sourcePath, replacementPath)) {
       return
     }
     rmSync(targetPath, { force: true })

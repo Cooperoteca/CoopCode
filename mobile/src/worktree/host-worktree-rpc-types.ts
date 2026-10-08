@@ -5,9 +5,6 @@ import type { ExecutionHostId } from '../../../src/shared/execution-host'
 export type DesktopStatus = {
   protocolVersion?: number
   minCompatibleMobileVersion?: number
-  // Why: absent on hosts that predate the mobile Floating Workspace entry;
-  // treat absence as unsupported and hide the entry.
-  floatingWorkspaceEnabled?: boolean
 }
 
 export type RepoSummary = {

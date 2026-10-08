@@ -3,7 +3,6 @@ import { toast } from 'sonner'
 import {
   LINEAR_AGENT_SKILL_SETUP_TOAST_LIMIT,
   createLinearAgentSkillSetupActivationId,
-  getExistingLinearAgentSkillSetupReminderState,
   getLinearAgentSkillSetupReminderState,
   resetLinearAgentSkillSetupReminderState
 } from './linear-agent-skill-setup-reminders'
@@ -28,29 +27,21 @@ export function snoozeLinearAgentSkillSetupReminderToast(localDismissStorageKey:
 }
 
 export function dismissLinearAgentSkillSetupReminderToast(localDismissStorageKey: string): void {
-  const state = getExistingLinearAgentSkillSetupReminderState(localDismissStorageKey)
-  // Why: the state may already be evicted, but the deterministic id still lets
-  // cleanup dismiss a visible toast without recreating a cache entry.
-  toast.dismiss(getLinearAgentSkillSetupReminderToastId(localDismissStorageKey))
-  if (state) {
+  const state = getLinearAgentSkillSetupReminderState(localDismissStorageKey)
+  if (state.activeToastId !== undefined) {
+    toast.dismiss(state.activeToastId)
     state.activeToastId = undefined
   }
-}
-
-function getLinearAgentSkillSetupReminderToastId(localDismissStorageKey: string): string {
-  return `linear-agent-skill-setup-${localDismissStorageKey}`
 }
 
 export function resetLinearAgentSkillSetupReminderToastForRuntime(
   localDismissStorageKey: string
 ): void {
-  const state = getExistingLinearAgentSkillSetupReminderState(localDismissStorageKey)
-  if (state) {
-    state.modalShown = false
-    state.snoozed = false
-    state.toastCount = 0
-    state.lastToastActivationId = undefined
-  }
+  const state = getLinearAgentSkillSetupReminderState(localDismissStorageKey)
+  state.modalShown = false
+  state.snoozed = false
+  state.toastCount = 0
+  state.lastToastActivationId = undefined
   dismissLinearAgentSkillSetupReminderToast(localDismissStorageKey)
 }
 
@@ -98,24 +89,15 @@ export function useLinearAgentSkillSetupReminderToast({
     }
     state.toastCount += 1
     state.lastToastActivationId = activationId
-    const toastId = getLinearAgentSkillSetupReminderToastId(localDismissStorageKey)
-    const clearActiveToast = (): void => {
-      const currentState = getExistingLinearAgentSkillSetupReminderState(localDismissStorageKey)
-      if (currentState?.activeToastId === toastId) {
-        currentState.activeToastId = undefined
-      }
-    }
+    const toastId = `linear-agent-skill-setup-${localDismissStorageKey}`
     const openSetupFromToast = (): void => {
       toast.dismiss(toastId)
-      clearActiveToast()
+      state.activeToastId = undefined
       openSetupDialog()
     }
-    state.activeToastId = toastId
-    toast.warning(toastTitle, {
+    state.activeToastId = toast.warning(toastTitle, {
       id: toastId,
       description: toastDescription,
-      onDismiss: clearActiveToast,
-      onAutoClose: clearActiveToast,
       action: {
         label: translate('auto.components.sidebar.LinearAgentSkillSetupPrompt.setup', 'Set up'),
         onClick: openSetupFromToast
@@ -137,12 +119,10 @@ export function useLinearAgentSkillSetupReminderToast({
     }
   }, [localDismissStorageKey, missingSetup])
 
-  useEffect(() => {
-    if (surface !== 'modal') {
-      return
-    }
-    return () => {
+  useEffect(
+    () => () => {
       dismissLinearAgentSkillSetupReminderToast(localDismissStorageKey)
-    }
-  }, [localDismissStorageKey, surface])
+    },
+    [localDismissStorageKey]
+  )
 }

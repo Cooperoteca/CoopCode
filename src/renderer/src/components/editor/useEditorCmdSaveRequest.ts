@@ -8,7 +8,7 @@ type UseEditorCmdSaveRequestParams = {
   activeFile: OpenFile | null
   openFiles: OpenFile[]
   fileContents: Record<string, FileContent>
-  handleSave: (content: string) => Promise<boolean>
+  handleSave: (content: string) => Promise<void>
 }
 
 export function useEditorCmdSaveRequest({

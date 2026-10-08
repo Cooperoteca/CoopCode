@@ -1,13 +1,19 @@
-/* eslint-disable max-lines -- Why: owns both wrapper-file generation and the matching readiness scanner; splitting would fragment the wrapper/marker contract. */
+/* eslint-disable max-lines -- Why: this module owns both shell wrapper file
+   generation and the matching startup-command readiness scanner; splitting
+   them would make the wrapper/marker contract harder to audit. */
 /**
  * Shell-ready startup command support for local PTYs.
  *
- * Why: startup commands must wait until the shell has fully initialized. Provides shell wrapper
- * rcfiles that emit an OSC 777 marker after startup, plus a scanner that detects it.
+ * Why: when Orca needs to inject a startup command (e.g. issue command runner),
+ * it must wait until the shell has fully initialized before writing. This module
+ * provides shell wrapper rcfiles that emit an OSC 777 marker after startup,
+ * and a data scanner that detects that marker so the command can be written at
+ * the right time.
  */
 import { tmpdir } from 'node:os'
 import { basename, win32 as pathWin32 } from 'node:path'
 import { mkdirSync, writeFileSync, chmodSync, existsSync } from 'node:fs'
+import { app } from 'electron'
 import type * as pty from 'node-pty'
 import {
   encodePowerShellCommand,
@@ -15,7 +21,6 @@ import {
   isPowerShellExecutableName
 } from '../powershell-osc133-bootstrap'
 import { getPosixOmpShellWrapper } from '../pty/omp-shell-wrapper'
-import { buildStartupCommandSubmission } from '../../shared/startup-command-submission'
 import {
   getZshEnvTemplate,
   getZshFinalZdotdirRestoreBlock,
@@ -44,8 +49,7 @@ export type ShellReadySignal = {
 // ── Shell wrapper files ─────────────────────────────────────────────
 
 function getShellReadyWrapperRoot(): string {
-  // Why: bundled into the daemon fork (no electron), so read ORCA_USER_DATA_PATH rather than electron's userData; main and the fork both set it to the same path.
-  const userDataPath = process.env.ORCA_USER_DATA_PATH ?? tmpdir()
+  const userDataPath = app?.getPath?.('userData') ?? process.env.ORCA_USER_DATA_PATH ?? tmpdir()
   return `${userDataPath}/shell-ready`
 }
 
@@ -59,16 +63,31 @@ function getRequiredShellReadyWrapperPaths(root = getShellReadyWrapperRoot()): s
   ]
 }
 
-function shellReadyWrappersExist(root = getShellReadyWrapperRoot()): boolean {
-  return getRequiredShellReadyWrapperPaths(root).every((path) => existsSync(path))
+function shellReadyWrappersExist(): boolean {
+  return getRequiredShellReadyWrapperPaths().every((path) => existsSync(path))
 }
 
-// Why: an inherited ZDOTDIR pointing at an Orca wrapper dir (`.../shell-ready/zsh`) makes the wrapper source itself recursively (zsh recursion limit); treat it as unset so the caller falls back to HOME.
+// Why: if our own process inherited ZDOTDIR from a parent shell that was
+// itself an Orca PTY (e.g. the user launched `pn dev` from a terminal inside
+// a running Orca), that ZDOTDIR points at an Orca shell-ready wrapper dir.
+// Propagating it as the new PTY's ORCA_ORIG_ZDOTDIR makes the wrapper's
+// `source "$ORCA_ORIG_ZDOTDIR/.zshenv"` line source itself recursively —
+// zsh gives "job table full or recursion limit exceeded" and the shell
+// never reaches a usable prompt.
+//
+// Any path component ending in `/shell-ready/zsh` is an Orca wrapper dir
+// (regardless of whether it came from this app's userData, a packaged Orca,
+// or a different dev build). Treat it as if ZDOTDIR were unset so the caller
+// falls back to HOME for the user's real config root.
 function normalizeOriginalZdotdirCandidate(value: string | undefined): string | null {
   if (!value) {
     return null
   }
-  // Why: strip trailing slashes so `ZDOTDIR="$dir/"` still matches the self-loop suffix check; `/` collapses to empty → HOME fallback.
+  // Why: tolerate trailing slashes — some shell startup scripts export
+  // `ZDOTDIR="$dir/"`, and without normalization the suffix check would
+  // miss the self-loop path and restore the recursion bug. Also collapses
+  // a pathological `ZDOTDIR=/` to empty so we fall back to HOME rather than
+  // sourcing `/.zshenv` (which is never the user's real config).
   const normalized = value.replace(/\/+$/, '')
   if (!normalized || normalized.endsWith('/shell-ready/zsh')) {
     return null
@@ -99,11 +118,6 @@ elif [[ -f "$HOME/.bash_login" ]]; then
 elif [[ -f "$HOME/.profile" ]]; then
   source "$HOME/.profile"
 fi
-# Why: enable bracketed paste so Orca can deliver a multiline startup prompt as
-# a single literal paste (ESC[200~…ESC[201~). Without it, older readline builds
-# treat each embedded newline as Enter and mangle the prompt into PS2
-# continuation. Modern readline defaults this on; force it for the rest.
-[[ $- == *i* ]] && bind 'set enable-bracketed-paste on' 2>/dev/null
 # Why: preserve bash's normal login-shell contract. Many users already source
 # ~/.bashrc from ~/.bash_profile; forcing ~/.bashrc again here would duplicate
 # PATH edits, hooks, and prompt init in Orca startup-command shells.
@@ -268,12 +282,16 @@ fi
 `
 }
 
-export function ensureShellReadyWrappersAt(root = getShellReadyWrapperRoot()): void {
-  if (didEnsureShellReadyWrappers && shellReadyWrappersExist(root)) {
+function ensureShellReadyWrappers(): void {
+  if (process.platform === 'win32') {
+    return
+  }
+  if (didEnsureShellReadyWrappers && shellReadyWrappersExist()) {
     return
   }
   didEnsureShellReadyWrappers = true
 
+  const root = getShellReadyWrapperRoot()
   const zshDir = `${root}/zsh`
   const bashDir = `${root}/bash`
 
@@ -326,7 +344,10 @@ ${getZshFinalZdotdirRestoreBlock()}
       chmodSync(path, 0o644)
     }
   } catch (error) {
-    // Why: degrade gracefully — a failed wrapper (read-only FS, perms, disk) just means no ready marker, PTY stays usable.
+    // Why: wrapper file creation can fail due to read-only filesystems, permission
+    // issues, or disk space. Rather than crashing, log the error and continue.
+    // The shell will launch without the wrapper, which means no shell-ready marker
+    // but at least the PTY is usable.
     const errorMessage =
       error instanceof Error
         ? `${error.message} (${(error as NodeJS.ErrnoException).code || 'unknown'})`
@@ -336,13 +357,6 @@ ${getZshFinalZdotdirRestoreBlock()}
     // Reset the flag so next attempt will try again
     didEnsureShellReadyWrappers = false
   }
-}
-
-function ensureShellReadyWrappers(): void {
-  if (process.platform === 'win32') {
-    return
-  }
-  ensureShellReadyWrappersAt()
 }
 
 // ── Shell launch config ─────────────────────────────────────────────
@@ -418,9 +432,7 @@ export function writeStartupCommandWhenShellReady(
   readyPromise: Promise<void | ShellReadySignal>,
   proc: pty.IPty,
   startupCommand: string,
-  onExit: (cleanup: () => void) => void,
-  // Why: only Orca-wrapped bash/zsh have bracketed-paste active; other shells use the raw path to avoid echoing the ESC[200~ markers.
-  options: { bracketedPasteSafe?: boolean } = {}
+  onExit: (cleanup: () => void) => void
 ): void {
   let sent = false
   let postReadyTimer: ReturnType<typeof setTimeout> | null = null
@@ -447,16 +459,23 @@ export function writeStartupCommandWhenShellReady(
       clearTimeout(postReadyTimer)
       postReadyTimer = null
     }
-    // Why: run in the same interactive shell (not `shell -c`) so the session survives after the agent exits.
-    // Why CR on Windows: PSReadLine/cmd.exe submit on `\r`, not LF; POSIX treats either as Enter under ICRNL.
+    // Why: run startup commands inside the same interactive shell Orca keeps
+    // open for the pane. Spawning `shell -c <command>; exec shell -l` would
+    // avoid the race, but it would also replace the session after the agent
+    // exits and break "stay in this terminal" workflows.
+    // Why CR on Windows: PowerShell's PSReadLine and cmd.exe submit the line
+    // on CR (`\r`) — a bare LF leaves the command typed at the prompt but
+    // unsubmitted, forcing the user to press Enter after Orca launches the
+    // agent or setup script. POSIX shells (bash/zsh) treat either CR or LF as
+    // Enter under ICRNL, so CR works there too, but this code path is reached
+    // on Windows as well as POSIX via writeStartupCommandWhenShellReady.
     const submit = process.platform === 'win32' ? '\r' : '\n'
-    // Why: single write after the ready barrier avoids incremental-paste char drops; multiline is bracketed-paste wrapped so newlines don't submit early.
-    proc.write(
-      buildStartupCommandSubmission(startupCommand, {
-        submit,
-        bracketedPasteSafe: options.bracketedPasteSafe === true
-      })
-    )
+    const endsWithSubmit = startupCommand.endsWith('\r') || startupCommand.endsWith('\n')
+    const payload = endsWithSubmit ? startupCommand : `${startupCommand}${submit}`
+    // Why: startup commands are usually long, quoted agent launches. Writing
+    // them in one PTY call after the shell-ready barrier avoids the incremental
+    // paste behavior that still dropped characters in practice.
+    proc.write(payload)
   }
 
   const schedulePostReadyFlush = (): void => {
@@ -467,7 +486,16 @@ export function writeStartupCommandWhenShellReady(
     if (sent) {
       return
     }
-    // Why: marker fires from precmd before the line editor takes the PTY out of ECHO; writing now double-echoes the command, so settle first.
+    // Why: the shell-ready marker fires from precmd/PROMPT_COMMAND,
+    // before the prompt is drawn and before zle/readline switches the PTY into
+    // raw mode. Writing the command while the kernel still has ECHO enabled
+    // causes the characters to be echoed once by the kernel and then redisplayed
+    // by the line editor after the prompt — producing a visible duplicate.
+    //
+    // Strategy: if the marker-completing scan already observed post-marker
+    // bytes, use the short settle delay directly. Otherwise, wait for the next
+    // PTY data event after the ready marker, with a conservative fallback for
+    // ambiguous marker-only or markerless cases.
     if (signal?.postMarkerBytesObserved === true) {
       schedulePostReadyFlush()
       return

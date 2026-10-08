@@ -1,23 +1,21 @@
-/* eslint-disable max-lines -- Why: centralizes Monaco setup, markdown annotations, content sync, reveal handling, and editor-local UI overlays. */
+/* eslint-disable max-lines -- Why: MonacoEditor centralizes Monaco setup,
+source-mode markdown annotations, persistence-safe content sync, reveal
+handling, and editor-local UI overlays so split-pane state remains coherent. */
 /* oxlint-disable react-doctor/no-adjust-state-on-prop-change -- Why: selection annotations are synchronized from Monaco editor selection and layout APIs, not derived React props. */
 import React, { useRef, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { toast } from 'sonner'
-import type { MarkdownDocument, DiffComment } from '../../../../shared/types'
+import type { MarkdownDocument } from '../../../../shared/types'
 import { useAppStore } from '@/store'
 import { scrollTopCache, cursorPositionCache, setWithLRU } from '@/lib/scroll-cache'
 import '@/lib/monaco-setup'
-import { computeEditorFontSize, resolveEditorFontFamily } from '@/lib/editor-font-zoom'
+import { computeEditorFontSize } from '@/lib/editor-font-zoom'
 import { registerFileSearchSelectedTextProvider } from '@/lib/file-search-selection'
 
 import { useContextualCopySetup } from './useContextualCopySetup'
 import { MAX_REVEAL_CONTENT_WAIT_FRAMES, performReveal } from './monaco-reveal'
-import {
-  syncContentOnMount,
-  syncContentUpdate,
-  type MonacoContentSyncMode
-} from './monaco-content-sync'
+import { syncContentOnMount, syncContentUpdate } from './monaco-content-sync'
 import { getMonacoCodebaseSearchQuery } from './monaco-codebase-search'
 import {
   beginProgrammaticContentSync,
@@ -35,7 +33,8 @@ import {
   type MarkdownDocLinkDecorationController
 } from './monaco-markdown-doc-link-decorations'
 import { buildGitConflictDecorations, hasGitConflictMarkers } from './monaco-conflict-decorations'
-import { selectWorktreeDiffComments } from '@/store/worktree-diff-comments-selector'
+import { findWorktreeById } from '@/store/slices/worktree-helpers'
+import type { DiffComment } from '../../../../shared/types'
 import { isMarkdownComment } from '@/lib/diff-comment-compat'
 import { formatMarkdownReviewNotes, type MarkdownReviewNote } from '@/lib/markdown-review-notes'
 import { useDiffCommentDecorator } from '../diff-comments/useDiffCommentDecorator'
@@ -45,11 +44,7 @@ import {
   getDiffCommentPopoverTop
 } from '../diff-comments/diff-comment-popover-position'
 import { isLinuxUserAgent } from '../terminal-pane/pane-helpers'
-import {
-  installEditorAddReviewNoteShortcut,
-  installEditorSaveShortcut,
-  installMonacoEditorFindShortcut
-} from './editor-shortcuts'
+import { installEditorSaveShortcut } from './editor-shortcuts'
 import { Plus } from 'lucide-react'
 import {
   getMonacoMarkdownSelectionAnnotationTarget,
@@ -57,22 +52,16 @@ import {
 } from './monaco-markdown-selection-annotation'
 import { translate } from '@/i18n/i18n'
 import { handleMonacoLargeTextPaste } from './monaco-large-text-paste'
-import { buildFileEditorWordWrapOptions } from './file-editor-word-wrap-options'
 import {
   clampMonacoAutoHeight,
   getMonacoAutoHeightForContent,
   isMonacoAutoHeightCapped
 } from './monaco-auto-height'
-import { installMonacoE2EProbe } from './monaco-e2e-probe'
-import { monacoFindOptions } from './monaco-find-options'
-import { matchesPendingEditorFocusRequest } from './pending-editor-focus-request'
 
 type MonacoEditorProps = {
   fileId: string
   filePath: string
   viewStateKey: string
-  // Why: identifies the pane for explicit open focus handoffs; omit on surfaces that never receive one.
-  viewStateId?: string
   relativePath: string
   content: string
   language: string
@@ -86,7 +75,6 @@ type MonacoEditorProps = {
   markdownAnnotationsEnabled?: boolean
   conflictDecorationsEnabled?: boolean
   readOnly?: boolean
-  liveTail?: boolean
   autoHeight?: boolean
 }
 
@@ -98,7 +86,6 @@ export default function MonacoEditor({
   fileId,
   filePath,
   viewStateKey,
-  viewStateId,
   relativePath,
   content,
   language,
@@ -112,7 +99,6 @@ export default function MonacoEditor({
   markdownAnnotationsEnabled = false,
   conflictDecorationsEnabled = false,
   readOnly = false,
-  liveTail = false,
   autoHeight = false
 }: MonacoEditorProps): React.JSX.Element {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
@@ -130,15 +116,19 @@ export default function MonacoEditor({
   const revealInnerRafRef = useRef<number | null>(null)
   const unregisterFileSearchSelectionRef = useRef<(() => void) | null>(null)
   const { setupCopy, toastNode } = useContextualCopySetup()
-  // Why: hold the throttle timer in a ref so unmount cleanup can cancel a pending write before snapshotting the final scroll position.
+  // Why: The scroll throttle timer must be accessible from useLayoutEffect cleanup
+  // so we can cancel any pending write before synchronously snapshotting the final
+  // scroll position on unmount. Without this, a pending timer could fire after
+  // cleanup and overwrite the correct value with a stale one.
   const scrollThrottleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const propsRef = useRef({ relativePath, language, onSave, onContentChange })
-  // Why: assign during render so the ref is current before any handler reads it (a useEffect would leave a one-render stale window).
+  // Why: assigning during render keeps the ref current before any event handler
+  // or effect reads it, avoiding the one-render stale window that a useEffect
+  // would introduce. Refs are mutable and don't trigger re-renders, so this is
+  // safe to do unconditionally every render.
   propsRef.current = { relativePath, language, onSave, onContentChange }
   const readOnlyRef = useRef(readOnly)
   readOnlyRef.current = readOnly
-  const contentSyncModeRef = useRef<MonacoContentSyncMode>('undoable')
-  contentSyncModeRef.current = readOnly && liveTail ? 'read-only-live-tail' : 'undoable'
 
   const settings = useAppStore((s) => s.settings)
   const editorFontZoomLevel = useAppStore((s) => s.editorFontZoomLevel)
@@ -150,14 +140,12 @@ export default function MonacoEditor({
   const scrollToDiffCommentId = useAppStore((s) => s.scrollToDiffCommentId)
   const setScrollToDiffCommentId = useAppStore((s) => s.setScrollToDiffCommentId)
   const allDiffComments = useAppStore((s): DiffComment[] | undefined =>
-    selectWorktreeDiffComments(s, worktreeId)
+    worktreeId ? findWorktreeById(s.worktreesByRepo, worktreeId)?.diffComments : undefined
   )
   const editorFontSize = computeEditorFontSize(
     settings?.terminalFontSize ?? 13,
     editorFontZoomLevel
   )
-  const editorFontFamily = resolveEditorFontFamily(settings)
-  const editorWordWrap = settings?.editorWordWrap
   const estimatedAutoHeight = useMemo(() => {
     if (!autoHeight) {
       return null
@@ -170,8 +158,18 @@ export default function MonacoEditor({
   const autoHeightLineHeight = Math.ceil(editorFontSize * 1.45)
   const autoHeightUsesInternalScroll =
     autoHeight && isMonacoAutoHeightCapped(renderedEditorHeight, autoHeightLineHeight)
-  // Why: @monaco-editor/react skips its value→model sync on the first post-remount render, so retained models need an explicit sync or they show stale text.
-  // Invariant: the mount path must read `contentRef.current` (guaranteed latest), never `lastSyncedContentRef.current` (may be stale pre-mount).
+  // Why: `keepCurrentModel` retains Monaco models across unmounts, and
+  // @monaco-editor/react skips its value→model sync on the first render after
+  // a remount. Without explicit sync, external file changes that arrived
+  // while the tab was unmounted leave the retained model showing stale text.
+  // contentRef lets handleMount read the current content without re-binding;
+  // lastSyncedContentRef lets the update effect distinguish our own onChange
+  // emissions from real prop drift.
+  // Invariant: the mount path (handleMount's syncContentOnMount call) MUST
+  // read `contentRef.current`, never `lastSyncedContentRef.current`. The
+  // useLayoutEffect below can run before mount with `editorRef.current === null`
+  // and bails without updating lastSyncedContentRef, so that ref may be stale
+  // pre-mount; only contentRef is guaranteed to reflect the latest prop.
   const contentRef = useRef(content)
   contentRef.current = content
   const lastSyncedContentRef = useRef<string>(content)
@@ -188,11 +186,6 @@ export default function MonacoEditor({
   const [commentPopover, setCommentPopover] = useState<MarkdownCommentPopoverState | null>(null)
   const [selectionAnnotationTarget, setSelectionAnnotationTarget] =
     useState<MonacoMarkdownSelectionAnnotationTarget | null>(null)
-  // Why: claim drafts synchronously so a same-tick second chord can't remount the composer before React commits state.
-  const commentPopoverRef = useRef<MarkdownCommentPopoverState | null>(null)
-  useEffect(() => {
-    commentPopoverRef.current = commentPopover
-  }, [commentPopover])
   const isDark =
     settings?.theme === 'dark' ||
     (settings?.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
@@ -215,11 +208,6 @@ export default function MonacoEditor({
 
   const shouldShowMarkdownAnnotations =
     markdownAnnotationsEnabled && language === 'markdown' && Boolean(worktreeId)
-  // Why: the mount closure installs keydown listeners once, so the shortcut reads current enablement through a ref.
-  const shouldShowMarkdownAnnotationsRef = useRef(shouldShowMarkdownAnnotations)
-  useEffect(() => {
-    shouldShowMarkdownAnnotationsRef.current = shouldShowMarkdownAnnotations
-  }, [shouldShowMarkdownAnnotations])
 
   const pendingScrollForThisEditor = useMemo(() => {
     if (!shouldShowMarkdownAnnotations || !scrollToDiffCommentId) {
@@ -293,14 +281,19 @@ export default function MonacoEditor({
       let waitFrames = 0
 
       const schedule = (): void => {
-        // Why: Monaco can mount before its viewport math settles, so defer the reveal two editor-owned frames for deterministic scroll/highlight.
+        // Why: the search click path already waits two frames before publishing
+        // the reveal intent, but Monaco can still mount before its viewport math
+        // settles. Deferring the actual reveal by two editor-owned frames keeps
+        // scroll-to-match and inline highlight deterministic on fresh opens.
         revealRafRef.current = requestAnimationFrame(() => {
           revealInnerRafRef.current = requestAnimationFrame(() => {
             revealRafRef.current = null
             revealInnerRafRef.current = null
             const modelLineCount = editorInstance.getModel()?.getLineCount() ?? 0
             if (line > 1 && modelLineCount < line && waitFrames < MAX_REVEAL_CONTENT_WAIT_FRAMES) {
-              // Why: fresh opens can mount an empty 1-line model before the async read; waiting stops the target line clamping to 1.
+              // Why: fresh file opens can mount Monaco against an empty one-line
+              // model before the async file read arrives. Waiting prevents the
+              // requested line from being clamped to 1 and then cleared.
               waitFrames += 2
               schedule()
               return
@@ -325,7 +318,10 @@ export default function MonacoEditor({
     [cancelScheduledReveal, clearTransientRevealHighlight]
   )
 
-  // Why: reconciliation uses real edit ops (to keep undo sane), so these programmatic edits must suppress onChange or they'd mark the file dirty.
+  // Why: Monaco model reconciliation reuses real edit operations so retained
+  // models keep sane undo behavior. Those edits are programmatic, not user
+  // typing, so split panes must suppress the resulting onChange callback or a
+  // freshly mounted markdown source view can mark the shared file dirty.
   const isApplyingProgrammaticContentRef = useRef(false)
   const isApplyingLargePasteRef = useRef(false)
 
@@ -333,7 +329,6 @@ export default function MonacoEditor({
     (editorInstance, monaco) => {
       editorRef.current = editorInstance
       setMountedEditor(editorInstance)
-      const uninstallE2EProbe = installMonacoE2EProbe(editorInstance, filePath)
       let autoHeightSub: { dispose: () => void } | null = null
       let autoHeightFrame: number | null = null
       const updateAutoHeight = (): void => {
@@ -364,15 +359,13 @@ export default function MonacoEditor({
       ensureMarkdownDocCompletionProvider(monaco)
       updateMarkdownCompletionDocuments()
 
-      // Why: see contentRef — reconcile the retained model to the current prop before user interaction (surfaces edits made while unmounted).
+      // Why: see comment on contentRef — reconcile the retained model against
+      // the current prop before any user interaction so external changes that
+      // arrived while the tab was unmounted become visible immediately.
       beginProgrammaticContentSync(filePath)
       isApplyingProgrammaticContentRef.current = true
       try {
-        const didSyncOnMount = syncContentOnMount(
-          editorInstance,
-          contentRef.current,
-          contentSyncModeRef.current
-        )
+        const didSyncOnMount = syncContentOnMount(editorInstance, contentRef.current)
         if (didSyncOnMount) {
           lastSyncedContentRef.current = contentRef.current
         }
@@ -392,39 +385,18 @@ export default function MonacoEditor({
         if (!model || !selection || selection.isEmpty()) {
           return null
         }
-        // Why: Monaco selections live in its text model, not the DOM selection API that app shortcuts read.
+        // Why: Monaco selections live in its text model, not the DOM selection
+        // API that app-level keyboard shortcuts can read.
         return model.getValueInRange(selection)
       })
 
-      const editorDomNode = editorInstance.getContainerDomNode()
-      const cleanupSaveShortcut = installEditorSaveShortcut(editorDomNode, () => {
-        const value = editorInstance.getValue()
-        propsRef.current.onSave(value)
-      })
-      const cleanupFindShortcut = installMonacoEditorFindShortcut(editorInstance)
-      // Opens the same composer as the selection "+" button.
-      const cleanupAddReviewNoteShortcut = installEditorAddReviewNoteShortcut(editorDomNode, () => {
-        // Why: keep an open draft instead of remounting, to avoid same-tick chord races before the composer guard runs.
-        if (commentPopoverRef.current) {
-          return true
+      const cleanupSaveShortcut = installEditorSaveShortcut(
+        editorInstance.getContainerDomNode(),
+        () => {
+          const value = editorInstance.getValue()
+          propsRef.current.onSave(value)
         }
-        if (!shouldShowMarkdownAnnotationsRef.current) {
-          return false
-        }
-        // Why: the rendered target ref lags selection by a render, so read Monaco's live selection to avoid opening on a stale one.
-        const target = getMonacoMarkdownSelectionAnnotationTarget(
-          editorInstance,
-          editorInstance.getSelection(),
-          getDiffCommentPopoverLeft(editorInstance, editorContainerRef.current) ?? undefined
-        )
-        if (!target) {
-          return false
-        }
-        commentPopoverRef.current = target
-        setCommentPopover(target)
-        setSelectionAnnotationTarget(null)
-        return true
-      })
+      )
       const searchInFilesAction = editorInstance.addAction({
         id: 'orca.searchInFiles',
         label: translate('auto.components.editor.MonacoEditor.fd68ae03b3', 'Search in Files'),
@@ -470,6 +442,7 @@ export default function MonacoEditor({
           }
         })
       }
+      const editorDomNode = editorInstance.getContainerDomNode()
       editorDomNode.addEventListener('paste', onLargeTextPaste, { capture: true })
 
       // Track cursor line for "copy path to line" feature
@@ -485,7 +458,10 @@ export default function MonacoEditor({
         })
       })
 
-      // Why: only the resting scroll position matters, so trailing-throttle writes (~150ms) instead of writing every 60fps frame.
+      // Why: Writing to the Map at 60fps (every scroll frame) is unnecessary since
+      // we only need the final position when the user stops scrolling or switches
+      // tabs. A trailing throttle of ~150ms captures the resting position while
+      // avoiding excessive writes.
       const scrollStateSub = editorInstance.onDidScrollChange((e) => {
         if (scrollThrottleTimerRef.current !== null) {
           clearTimeout(scrollThrottleTimerRef.current)
@@ -496,7 +472,8 @@ export default function MonacoEditor({
         }, 150)
       })
 
-      // Why: custom Radix gutter menu instead of Monaco's built-in right-click menu (VSCode approach).
+      // Intercept right-click on line number gutter to show Radix context menu
+      // (same approach as VSCode: custom menu instead of Monaco's built-in one)
       const gutterMouseDownSub = editorInstance.onMouseDown((e) => {
         if (
           e.event.rightButton &&
@@ -513,12 +490,12 @@ export default function MonacoEditor({
       })
 
       editorInstance.onDidDispose(() => {
+        // Why: keep editor-owned UI subscriptions symmetrical with the
+        // shortcut/decorator cleanup when Monaco tears this instance down.
         cursorPositionSub.dispose()
         scrollStateSub.dispose()
         gutterMouseDownSub.dispose()
         cleanupSaveShortcut()
-        cleanupFindShortcut()
-        cleanupAddReviewNoteShortcut()
         editorDomNode.removeEventListener('paste', onLargeTextPaste, { capture: true })
         searchInFilesAction.dispose()
         autoHeightSub?.dispose()
@@ -528,7 +505,6 @@ export default function MonacoEditor({
         }
         conflictDecorationsRef.current?.clear()
         conflictDecorationsRef.current = null
-        uninstallE2EProbe()
         editorRef.current = null
         setMountedEditor(null)
         setCommentPopover(null)
@@ -536,7 +512,9 @@ export default function MonacoEditor({
 
       // If there's a pending reveal at mount time, execute it now
       const reveal = useAppStore.getState().pendingEditorReveal
-      // Why: scope reveal consumption to the destination file, or the previously mounted editor clears it before openFile switches tabs.
+      // Why: search-result navigation sets the reveal before openFile switches
+      // the active tab. Without scoping consumption to the destination file,
+      // the previously mounted editor can clear the reveal on the first click.
       const revealMatchesEditor = reveal?.fileId
         ? reveal.fileId === fileId
         : reveal?.filePath === filePath
@@ -548,7 +526,11 @@ export default function MonacoEditor({
         const savedCursor = cursorPositionCache.get(viewStateKey)
         const savedScrollTop = scrollTopCache.get(viewStateKey)
         if (savedScrollTop !== undefined || savedCursor) {
-          // Why: Monaco renders synchronously so one RAF suffices; focus inside it to avoid a scroll-0 flash before restore.
+          // Why: Monaco renders synchronously, so a single RAF is sufficient to
+          // wait for the layout pass. Unlike react-markdown or Tiptap, there is
+          // no async content loading that would require a retry loop.
+          // Focus is deferred into the same RAF to avoid a one-frame flash where
+          // the editor is focused at scroll position 0 before restoration.
           requestAnimationFrame(() => {
             if (savedCursor) {
               editorInstance.setPosition(savedCursor)
@@ -562,16 +544,6 @@ export default function MonacoEditor({
           editorInstance.focus()
         }
       }
-
-      // Why: every mount path above focuses, so an explicit open handoff is already satisfied here.
-      // Retiring it stops a later rich-mode remount of this same pane from stealing focus back.
-      const focusRequest = useAppStore.getState().pendingEditorFocusRequest
-      if (
-        focusRequest &&
-        matchesPendingEditorFocusRequest(focusRequest, { fileId, worktreeId, viewStateId })
-      ) {
-        useAppStore.getState().consumeEditorFocusRequest(focusRequest.token)
-      }
     },
     [
       queueReveal,
@@ -581,7 +553,6 @@ export default function MonacoEditor({
       setEditorCursorLine,
       updateMarkdownCompletionDocuments,
       viewStateKey,
-      viewStateId,
       autoHeight,
       autoHeightLineHeight,
       worktreeId
@@ -660,7 +631,11 @@ export default function MonacoEditor({
   const handleChange = useCallback(
     (value: string | undefined) => {
       if (value !== undefined) {
-        // Why: split panes share one retained model, so a sibling must ignore the echoed programmatic-sync onChange or it marks the file dirty.
+        // Why: split panes that share a retained Monaco model all receive the
+        // same model change events. When one pane is reconciling prop content
+        // into the shared model, sibling panes must ignore the echoed onChange
+        // or they'll treat the programmatic sync as a user edit and mark the
+        // shared file dirty.
         if (isApplyingLargePasteRef.current) {
           lastSyncedContentRef.current = value
           return
@@ -680,7 +655,10 @@ export default function MonacoEditor({
     [filePath, onContentChange]
   )
 
-  // Why: sync the model on external `content` drift; useLayoutEffect lands the overwrite before paint so no stale text flashes. On-mount handled in handleMount.
+  // Why: reconcile the model whenever `content` drifts from what we last
+  // synced (covers external file changes while mounted). The on-mount case
+  // is handled directly in handleMount. useLayoutEffect lets the overwrite
+  // land before paint so the user never sees stale text.
   useLayoutEffect(() => {
     const ed = editorRef.current
     if (!ed || lastSyncedContentRef.current === content) {
@@ -689,7 +667,7 @@ export default function MonacoEditor({
     beginProgrammaticContentSync(filePath)
     isApplyingProgrammaticContentRef.current = true
     try {
-      syncContentUpdate(ed, content, contentSyncModeRef.current)
+      syncContentUpdate(ed, content)
       lastSyncedContentRef.current = content
     } finally {
       isApplyingProgrammaticContentRef.current = false
@@ -697,10 +675,15 @@ export default function MonacoEditor({
     }
   }, [content, filePath])
 
-  // Why useLayoutEffect: cleanup runs before @monaco-editor/react disposes the editor, so getScrollTop() still reads valid state on unmount.
+  // Snapshot scroll position synchronously on unmount so tab switches always
+  // capture the latest value, even if the trailing throttle hasn't fired yet.
+  // Why useLayoutEffect: cleanup runs before @monaco-editor/react's useEffect
+  // disposes the editor instance, guaranteeing getScrollTop() reads valid state.
   useLayoutEffect(() => {
     return () => {
-      // Why: cancel the pending throttled write so it can't fire after this snapshot and overwrite the final position with a stale value.
+      // Why: Cancel any pending throttled scroll write so it cannot fire after
+      // this synchronous snapshot, which would overwrite the correct final
+      // position with a stale intermediate value.
       if (scrollThrottleTimerRef.current !== null) {
         clearTimeout(scrollThrottleTimerRef.current)
         scrollThrottleTimerRef.current = null
@@ -725,15 +708,14 @@ export default function MonacoEditor({
 
   // Update editor options when settings change
   useEffect(() => {
-    if (!editorRef.current) {
+    if (!editorRef.current || !settings) {
       return
     }
     editorRef.current.updateOptions({
       fontSize: editorFontSize,
-      fontFamily: editorFontFamily,
-      ...buildFileEditorWordWrapOptions(editorWordWrap)
+      fontFamily: settings.terminalFontFamily || 'monospace'
     })
-  }, [editorFontFamily, editorFontSize, editorWordWrap])
+  }, [editorFontSize, settings])
 
   useEffect(() => {
     markdownDocLinkDecorationsRef.current?.refresh()
@@ -750,7 +732,8 @@ export default function MonacoEditor({
       return
     }
 
-    // Why: conflict markers are ordinary file text, so Monaco needs explicit decorations to keep unresolved blocks visible.
+    // Why: Git conflict marker lines are ordinary file text; Monaco needs
+    // explicit decorations so unresolved blocks remain visible while editing.
     const decorations = buildGitConflictDecorations(content)
     if (!conflictDecorationsRef.current) {
       conflictDecorationsRef.current = ed.createDecorationsCollection(decorations)
@@ -781,7 +764,10 @@ export default function MonacoEditor({
       return
     }
     queueReveal(editorRef.current, revealLine, revealColumn ?? 1, revealMatchLength ?? 0, () => {
-      // Why: clear the pending payload only after the queued reveal runs, so navigation isn't lost if the editor unmounts first.
+      // Why: the reveal is intentionally delayed until Monaco finishes its
+      // own post-mount layout frames. Clearing the pending payload only after
+      // the queued reveal runs prevents lost navigation if the editor
+      // unmounts before those frames execute.
       setPendingEditorReveal(null)
     })
   }, [queueReveal, revealLine, revealColumn, revealMatchLength, setPendingEditorReveal])
@@ -837,18 +823,20 @@ export default function MonacoEditor({
       <Editor
         height={renderedEditorHeight === null ? '100%' : `${renderedEditorHeight}px`}
         language={language}
-        // Why: defaultValue, not controlled value — Orca owns post-mount content sync; a controlled path would double setValue.
-        defaultValue={content}
+        value={content}
         theme={isDark ? 'vs-dark' : 'vs'}
         onChange={handleChange}
         onMount={handleMount}
         options={{
-          // Why: only the file editor honors this; Monaco 0.55 DiffEditor hard-overrides minimap.enabled=false on sub-editors (see diffEditorEditors._adjustOptionsForSubEditor).
+          // Why: only the file editor honors editorMinimapEnabled. Monaco 0.55's
+          // DiffEditor hard-overrides minimap.enabled = false on its inner editors
+          // (see diffEditorEditors._adjustOptionsForSubEditor), so threading the
+          // setting into DiffViewer/DiffSectionItem would have no effect.
           minimap: { enabled: settings?.editorMinimapEnabled ?? false },
           scrollBeyondLastLine: false,
-          ...buildFileEditorWordWrapOptions(editorWordWrap),
+          wordWrap: 'on',
           fontSize: editorFontSize,
-          fontFamily: editorFontFamily,
+          fontFamily: settings?.terminalFontFamily || 'monospace',
           lineNumbers: 'on',
           renderLineHighlight: 'line',
           automaticLayout: true,
@@ -863,12 +851,21 @@ export default function MonacoEditor({
           smoothScrolling: true,
           cursorSmoothCaretAnimation: 'off',
           padding: { top: 0 },
-          find: monacoFindOptions,
-          // Why: Monaco owns its rendered line surface, so align its selection-clipboard with the app opt-out (the global DOM hook can't).
+          find: {
+            addExtraSpaceOnTop: false,
+            autoFindInSelection: 'never',
+            seedSearchStringFromSelection: 'never'
+          },
+          // Why: Monaco has its own Linux primary-selection integration; keep
+          // it aligned with Orca's app-level opt-out instead of relying on the
+          // global DOM hook, which does not own Monaco's rendered line surface.
           selectionClipboard: settings?.primarySelectionMiddleClickPaste ?? isLinuxUserAgent()
         }}
         path={filePath}
-        // Why: Orca owns cursor/scroll restoration, so disable @monaco-editor/react's competing view-state Map.
+        // Why: keepCurrentModel preserves the Monaco text model so undo/redo
+        // survives tab switches, but @monaco-editor/react's own view-state Map
+        // would become a second state owner. Orca restores cursor/scroll from
+        // its explicit caches so close/reopen semantics stay under app control.
         saveViewState={false}
         keepCurrentModel
       />

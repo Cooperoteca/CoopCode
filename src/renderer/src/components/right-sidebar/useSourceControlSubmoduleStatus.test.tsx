@@ -231,10 +231,7 @@ describe('useSourceControlSubmoduleStatus', () => {
   })
 
   it('passes the row area when expanding a staged submodule row', async () => {
-    mocks.getRuntimeGitSubmoduleStatus.mockResolvedValue({
-      entries: [innerEntry('from-index.ts')],
-      didHitLimit: true
-    })
+    mocks.getRuntimeGitSubmoduleStatus.mockResolvedValue({ entries: [innerEntry('from-index.ts')] })
 
     const container = document.createElement('div')
     const root = createRoot(container)
@@ -256,8 +253,7 @@ describe('useSourceControlSubmoduleStatus', () => {
     )
     expect(latest?.submoduleStatusByKey['staged::sub']).toEqual({
       status: 'loaded',
-      entries: [innerEntry('from-index.ts')],
-      didHitLimit: true
+      entries: [innerEntry('from-index.ts')]
     })
   })
 })

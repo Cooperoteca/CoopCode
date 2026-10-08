@@ -13,9 +13,7 @@ export function isHostHeaderActionTarget(
   target: EventTarget | null,
   currentTarget: HTMLElement
 ): boolean {
-  // Why: an <svg> icon inside a host action is an SVGElement, so match Element
-  // to still treat it as an action target and not arm a host drag.
-  if (!(target instanceof Element) || target === currentTarget) {
+  if (!(target instanceof HTMLElement) || target === currentTarget) {
     return false
   }
   return currentTarget.contains(target) && target.closest(HOST_HEADER_ACTION_SELECTOR) !== null

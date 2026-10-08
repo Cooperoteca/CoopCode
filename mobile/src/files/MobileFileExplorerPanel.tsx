@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
@@ -9,33 +9,34 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { ChevronLeft, X } from 'lucide-react-native'
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  File,
+  FileText,
+  Folder,
+  Image as ImageIcon,
+  X
+} from 'lucide-react-native'
 import { useHostClient, useForceReconnect } from '../transport/client-context'
 import { getWorktreeLabel } from '../session/worktree-label'
 import {
-  flattenDirectoryCache,
-  getDirectoryCacheState,
-  type DirectoryCache,
-  type FileExplorerRow,
-  type MobileDirEntry
+  buildTree,
+  flattenTree,
+  isMarkdownPath,
+  type FilesListResult,
+  type MobileFileEntry,
+  type TreeNode
 } from './file-tree'
 import type { RpcSuccess } from '../transport/types'
-import { colors } from '../theme/mobile-theme'
-import {
-  beginDirectoryLoad,
-  createDirectoryLoadRevisions,
-  isCurrentDirectoryLoad,
-  resetDirectoryLoadRevisions,
-  type DirectoryLoadRevisions
-} from './directory-load-revisions'
-import {
-  directoryCacheFromFileList,
-  isMobileMethodUnavailableError,
-  type LegacyFilesListResult
-} from './file-list-fallback'
+import { triggerSelection } from '../platform/haptics'
+import { colors, spacing } from '../theme/mobile-theme'
 import { fileExplorerStyles as styles } from './mobile-file-explorer-styles'
-import { MobileFileExplorerRow } from './mobile-file-explorer-row'
-import { navigateToMobileFilePreview } from './mobile-file-preview-navigation'
+import {
+  canPreviewMobileFileRow,
+  navigateToMobileFilePreview
+} from './mobile-file-preview-navigation'
 
 export function MobileFileExplorerPanel(props: {
   hostId: string
@@ -48,217 +49,58 @@ export function MobileFileExplorerPanel(props: {
   const router = useRouter()
   const { client, state: connState } = useHostClient(hostId)
   const forceReconnect = useForceReconnect()
-  const scopeRef = useRef('')
-  const scope = `${hostId}:${worktreeId}`
-  scopeRef.current = scope
-  const directoryLoadRevisionsRef = useRef<DirectoryLoadRevisions>(createDirectoryLoadRevisions())
-  const pendingDirectoryRetriesRef = useRef<Set<string>>(new Set())
-  const directoryCacheRef = useRef<DirectoryCache>({})
-  const [directoryCache, setDirectoryCache] = useState<DirectoryCache>({})
+  const [files, setFiles] = useState<MobileFileEntry[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [legacyListTruncated, setLegacyListTruncated] = useState(false)
+  const [truncated, setTruncated] = useState(false)
   const worktreeLabel = getWorktreeLabel(name, worktreeId)
 
-  const loadDirectory = useCallback(
-    async (relativePath: string) => {
-      const scope = scopeRef.current
-      const loadToken = beginDirectoryLoad(directoryLoadRevisionsRef.current, scope, relativePath)
-      const rootLoad = relativePath === ''
-
-      if (!client || connState !== 'connected') {
-        const message =
-          connState === 'connected' ? 'Connecting to desktop...' : 'Waiting for desktop...'
-        if (rootLoad) {
-          const hasLoadedRoot =
-            (getDirectoryCacheState(directoryCacheRef.current, '')?.entries.length ?? 0) > 0
-          setLoading(false)
-          // Why: transient reconnects should not blank an already browsable tree.
-          setError(hasLoadedRoot ? null : message)
-        } else {
-          setDirectoryCache((prev) => ({
-            ...prev,
-            [relativePath]: {
-              entries: getDirectoryCacheState(prev, relativePath)?.entries ?? [],
-              error: message
-            }
-          }))
-        }
-        return
-      }
-
-      const hadLoadedRoot =
-        rootLoad && (getDirectoryCacheState(directoryCacheRef.current, '')?.entries.length ?? 0) > 0
-      if (rootLoad) {
-        // Why: a reconnect refresh must not blank an already browsable tree —
-        // the full-screen spinner unmounts the list and resets scroll.
-        if (!hadLoadedRoot) {
-          setLoading(true)
-        }
-        setError(null)
-      }
-      setDirectoryCache((prev) => ({
-        ...prev,
-        [relativePath]: {
-          entries: getDirectoryCacheState(prev, relativePath)?.entries ?? [],
-          loading: true
-        }
-      }))
-
-      try {
-        const response = await client.sendRequest('files.readDir', {
-          worktree: `id:${worktreeId}`,
-          relativePath
-        })
-        if (!response.ok) {
-          // Why: desktops that predate the files.readDir mobile allowlist
-          // entry still serve the capped files.list; fall back so the Files
-          // tab keeps working until the desktop updates.
-          if (
-            rootLoad &&
-            isMobileMethodUnavailableError(response.error?.code, response.error?.message)
-          ) {
-            const legacy = await client.sendRequest('files.list', {
-              worktree: `id:${worktreeId}`
-            })
-            if (legacy.ok) {
-              if (
-                !isCurrentDirectoryLoad(
-                  directoryLoadRevisionsRef.current,
-                  scopeRef.current,
-                  loadToken
-                )
-              ) {
-                return
-              }
-              const legacyResult = (legacy as RpcSuccess).result as LegacyFilesListResult
-              setDirectoryCache(directoryCacheFromFileList(legacyResult.files))
-              // Why: the capped list silently omits files past the cap — keep
-              // the legacy explorer's "Showing first 5000" note.
-              setLegacyListTruncated(legacyResult.truncated)
-              return
-            }
-            throw new Error(
-              legacy.error?.message || response.error?.message || 'Unable to load files'
-            )
-          }
-          throw new Error(response.error?.message || 'Unable to load files')
-        }
-        if (
-          !isCurrentDirectoryLoad(directoryLoadRevisionsRef.current, scopeRef.current, loadToken)
-        ) {
-          return
-        }
-        const entries = (response as RpcSuccess).result as MobileDirEntry[]
-        if (rootLoad) {
-          setLegacyListTruncated(false)
-        }
-        setDirectoryCache((prev) => ({
-          ...prev,
-          [relativePath]: { entries }
-        }))
-      } catch (err) {
-        if (
-          !isCurrentDirectoryLoad(directoryLoadRevisionsRef.current, scopeRef.current, loadToken)
-        ) {
-          return
-        }
-        const message = err instanceof Error ? err.message : 'Unable to load files'
-        if (rootLoad) {
-          // Why: a failed background refresh keeps the cached tree browsable;
-          // only a cold load surfaces the full-screen error.
-          setError(hadLoadedRoot ? null : message)
-        } else {
-          setDirectoryCache((prev) => ({
-            ...prev,
-            [relativePath]: {
-              entries: getDirectoryCacheState(prev, relativePath)?.entries ?? [],
-              error: message
-            }
-          }))
-        }
-      } finally {
-        if (
-          rootLoad &&
-          isCurrentDirectoryLoad(directoryLoadRevisionsRef.current, scopeRef.current, loadToken)
-        ) {
-          setLoading(false)
-        }
-      }
-    },
-    [client, connState, worktreeId]
-  )
-
-  useEffect(() => {
-    scopeRef.current = scope
-    resetDirectoryLoadRevisions(directoryLoadRevisionsRef.current)
-    pendingDirectoryRetriesRef.current.clear()
-    directoryCacheRef.current = {}
-    setDirectoryCache({})
-    setExpanded(new Set())
-    setLoading(true)
-    setError(null)
-    setLegacyListTruncated(false)
-  }, [scope])
-
-  useEffect(() => {
-    directoryCacheRef.current = directoryCache
-  }, [directoryCache])
-
-  useEffect(() => {
-    void loadDirectory('')
-  }, [hostId, loadDirectory])
-
-  useEffect(() => {
-    if (connState !== 'connected' || pendingDirectoryRetriesRef.current.size === 0) {
+  const loadFiles = useCallback(async () => {
+    if (!client || connState !== 'connected') {
+      setLoading(false)
+      setError(connState === 'connected' ? 'Connecting to desktop...' : 'Waiting for desktop...')
       return
     }
-    const pending = [...pendingDirectoryRetriesRef.current]
-    pendingDirectoryRetriesRef.current.clear()
-    for (const relativePath of pending) {
-      void loadDirectory(relativePath)
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await client.sendRequest('files.list', { worktree: `id:${worktreeId}` })
+      if (!response.ok) {
+        throw new Error(response.error?.message || 'Unable to load files')
+      }
+      const result = (response as RpcSuccess).result as FilesListResult
+      setFiles(result.files)
+      setTruncated(result.truncated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load files')
+    } finally {
+      setLoading(false)
     }
-  }, [connState, loadDirectory])
+  }, [client, connState, worktreeId])
 
-  const rows = useMemo(
-    () => flattenDirectoryCache(directoryCache, expanded),
-    [directoryCache, expanded]
-  )
+  useEffect(() => {
+    void loadFiles()
+  }, [loadFiles])
 
-  const toggleDirectory = useCallback(
-    (relativePath: string) => {
-      setExpanded((prev) => {
-        const next = new Set(prev)
-        if (next.has(relativePath)) {
-          next.delete(relativePath)
-        } else {
-          next.add(relativePath)
-        }
-        return next
-      })
-      const state = getDirectoryCacheState(directoryCache, relativePath)
-      if (!expanded.has(relativePath) && !state?.loading && (!state?.entries || state.error)) {
-        void loadDirectory(relativePath)
+  const rows = useMemo(() => flattenTree(buildTree(files), expanded), [expanded, files])
+
+  const toggleDirectory = useCallback((relativePath: string) => {
+    triggerSelection()
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(relativePath)) {
+        next.delete(relativePath)
+      } else {
+        next.add(relativePath)
       }
-    },
-    [directoryCache, expanded, loadDirectory]
-  )
-
-  const retryDirectory = useCallback(
-    (relativePath: string) => {
-      if (connState !== 'connected' && hostId) {
-        pendingDirectoryRetriesRef.current.add(relativePath)
-        void forceReconnect(hostId)
-        return
-      }
-      void loadDirectory(relativePath)
-    },
-    [connState, forceReconnect, hostId, loadDirectory]
-  )
+      return next
+    })
+  }, [])
 
   const previewFile = useCallback(
     (relativePath: string, displayName: string) => {
+      triggerSelection()
       navigateToMobileFilePreview(
         router,
         {
@@ -274,15 +116,66 @@ export function MobileFileExplorerPanel(props: {
     [embedded, hostId, name, onRequestClose, router, worktreeId]
   )
 
-  const renderItem: ListRenderItem<FileExplorerRow> = ({ item }) => {
+  const renderItem: ListRenderItem<TreeNode> = ({ item }) => {
+    const isDirectory = item.kind === 'directory'
+    const isExpanded = expanded.has(item.relativePath)
+    // Images render in the mobile viewer (via files.readPreview), so a binary
+    // image is openable; only non-previewable binaries are unavailable.
+    const previewable =
+      item.kind !== 'directory' &&
+      canPreviewMobileFileRow({ kind: item.kind, relativePath: item.relativePath })
+    const isImage = item.kind === 'binary' && previewable
+    const disabled = item.kind === 'binary' && !previewable
+    const markdown = item.kind === 'text' && isMarkdownPath(item.relativePath)
     return (
-      <MobileFileExplorerRow
-        item={item}
-        expanded={expanded}
-        onPreviewFile={previewFile}
-        onRetryDirectory={retryDirectory}
-        onToggleDirectory={toggleDirectory}
-      />
+      <Pressable
+        style={({ pressed }) => [
+          styles.row,
+          { paddingLeft: spacing.lg + item.depth * 18 },
+          pressed && !disabled && styles.rowPressed,
+          disabled && styles.rowDisabled
+        ]}
+        disabled={disabled}
+        onPress={() => {
+          if (isDirectory) {
+            toggleDirectory(item.relativePath)
+          } else if (!disabled) {
+            previewFile(item.relativePath, item.name)
+          }
+        }}
+        accessibilityLabel={
+          isDirectory
+            ? `Open folder ${item.name}`
+            : disabled
+              ? `${item.name} unavailable on mobile`
+              : `Preview file ${item.name}`
+        }
+      >
+        {isDirectory ? (
+          isExpanded ? (
+            <ChevronDown size={16} color={colors.textSecondary} />
+          ) : (
+            <ChevronRight size={16} color={colors.textSecondary} />
+          )
+        ) : (
+          <View style={styles.chevronSpacer} />
+        )}
+        {isDirectory ? (
+          <Folder size={17} color={colors.textSecondary} />
+        ) : markdown ? (
+          <FileText size={17} color={disabled ? colors.textMuted : colors.textSecondary} />
+        ) : isImage ? (
+          <ImageIcon size={17} color={colors.textSecondary} />
+        ) : (
+          <File size={17} color={disabled ? colors.textMuted : colors.textSecondary} />
+        )}
+        <View style={styles.rowTextBlock}>
+          <Text style={[styles.rowTitle, disabled && styles.rowTitleDisabled]} numberOfLines={1}>
+            {item.name}
+          </Text>
+          {disabled ? <Text style={styles.rowMeta}>Unavailable on mobile</Text> : null}
+        </View>
+      </Pressable>
     )
   }
 
@@ -313,7 +206,7 @@ export function MobileFileExplorerPanel(props: {
         </Text>
         <Text style={styles.meta} numberOfLines={1}>
           {worktreeLabel}
-          {legacyListTruncated ? ' - Showing first 5000' : ''}
+          {truncated ? ' - Showing first 5000' : ''}
         </Text>
       </View>
     </View>
@@ -327,12 +220,12 @@ export function MobileFileExplorerPanel(props: {
     <View style={styles.state}>
       <Text style={styles.errorText}>{error}</Text>
       {/* Why: while disconnected, re-sending the request is useless — revive
-          the parked transport instead (issue #5049); loadDirectory re-runs via
+          the parked transport instead (issue #5049); loadFiles re-runs via
           its effect once the new client connects. */}
       <Pressable
         style={styles.retryButton}
         onPress={() =>
-          connState !== 'connected' && hostId ? void forceReconnect(hostId) : void loadDirectory('')
+          connState !== 'connected' && hostId ? void forceReconnect(hostId) : void loadFiles()
         }
       >
         <Text style={styles.retryText}>Retry</Text>

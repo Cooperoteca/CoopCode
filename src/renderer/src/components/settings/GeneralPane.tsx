@@ -28,7 +28,7 @@ export {
   createAutoSaveDelayDraftState,
   updateAutoSaveDelayDraftState,
   type AutoSaveDelayDraftState
-} from './auto-save-delay-draft'
+} from './GeneralEditorSettingsSection'
 export { shouldCommitOpenInApplicationsDraft } from './OpenInMenuSetting'
 
 type GeneralSearchEntry = ReturnType<typeof getGeneralNavigationSearchEntries>[number]
@@ -79,8 +79,6 @@ const EMPTY_WSL_DISTROS: string[] = []
 type GeneralPaneProps = {
   settings: GlobalSettings
   updateSettings: (updates: Partial<GlobalSettings>) => void
-  fontSuggestions: string[]
-  onRequestFontSuggestions?: () => void
   wslSupportedPlatform?: boolean
   wslAvailable?: boolean
   wslDistros?: string[]
@@ -90,8 +88,6 @@ type GeneralPaneProps = {
 export function GeneralPane({
   settings,
   updateSettings,
-  fontSuggestions,
-  onRequestFontSuggestions,
   wslSupportedPlatform,
   wslAvailable,
   wslDistros = EMPTY_WSL_DISTROS,
@@ -181,8 +177,6 @@ export function GeneralPane({
         key="editor"
         settings={settings}
         updateSettings={updateSettings}
-        fontSuggestions={fontSuggestions}
-        onRequestFontSuggestions={onRequestFontSuggestions}
       />
     ) : null,
     matchesSettingsSearch(searchQuery, getGeneralCliSearchEntries()) ? (

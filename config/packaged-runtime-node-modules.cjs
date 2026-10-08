@@ -31,7 +31,6 @@ const PACKAGED_RUNTIME_PACKAGE_ROOTS = [
   'yaml',
   'zod'
 ]
-const WINDOWS_PACKAGED_RUNTIME_PACKAGE_ROOTS = ['windows-native-registry']
 
 const NODE_PTY_PREBUILD_PREFIX_BY_PLATFORM = {
   darwin: 'darwin-',
@@ -129,7 +128,7 @@ function isKnownOmittedServeSimDependency(packageName, fromDir) {
   }
 }
 
-function collectPackagedRuntimePackages(electronPlatformName = process.platform) {
+function collectPackagedRuntimePackages() {
   const packages = new Map()
   const visit = (packageName, fromDir = projectDir) => {
     if (packageName === 'electron' || packages.has(packageName)) {
@@ -157,12 +156,7 @@ function collectPackagedRuntimePackages(electronPlatformName = process.platform)
     }
   }
 
-  // Why: cross-builds must select native dependencies from the artifact target, not the build host.
-  const packageRoots = [
-    ...PACKAGED_RUNTIME_PACKAGE_ROOTS,
-    ...(electronPlatformName === 'win32' ? WINDOWS_PACKAGED_RUNTIME_PACKAGE_ROOTS : [])
-  ]
-  for (const packageName of packageRoots) {
+  for (const packageName of PACKAGED_RUNTIME_PACKAGE_ROOTS) {
     visit(packageName)
   }
 
@@ -189,8 +183,8 @@ function collectPackagedRuntimePackages(electronPlatformName = process.platform)
   return [...packages.entries()].sort(([left], [right]) => left.localeCompare(right))
 }
 
-function createPackagedRuntimeNodeModuleResources(electronPlatformName = process.platform) {
-  return collectPackagedRuntimePackages(electronPlatformName).map(([packageName, packageDir]) => ({
+function createPackagedRuntimeNodeModuleResources() {
+  return collectPackagedRuntimePackages().map(([packageName, packageDir]) => ({
     from: packageDir,
     to: join('node_modules', ...packageName.split('/'))
   }))

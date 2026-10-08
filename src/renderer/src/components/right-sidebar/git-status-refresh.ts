@@ -11,15 +11,6 @@ import type {
   GitUpstreamStatus,
   GlobalSettings
 } from '../../../../shared/types'
-import {
-  beginAutomaticUpstreamRefresh,
-  beginStrictUpstreamRefresh,
-  claimAutomaticUpstreamRefreshApply,
-  clearGitStatusRefreshOrderingStateForTests,
-  finishAutomaticUpstreamRefresh,
-  shouldApplyAutomaticUpstreamRefresh,
-  type AutomaticRefreshOrder
-} from './git-status-refresh-ordering'
 
 export type GitStatusRefreshDeps = {
   setGitStatus: (worktreeId: string, status: GitStatusResult) => void
@@ -40,6 +31,44 @@ export type GitStatusRefreshDeps = {
   ) => Promise<GitUpstreamStatus | null>
 }
 
+const MAX_REFRESH_ORDERING_WORKTREES = 1024
+const strictUpstreamRefreshGenerationByWorktree = new Map<string, number>()
+const automaticUpstreamRefreshInFlightByWorktree = new Map<string, number>()
+
+function trimRefreshOrderingState(): void {
+  for (const worktreeId of strictUpstreamRefreshGenerationByWorktree.keys()) {
+    if (strictUpstreamRefreshGenerationByWorktree.size <= MAX_REFRESH_ORDERING_WORKTREES) {
+      break
+    }
+    if (automaticUpstreamRefreshInFlightByWorktree.has(worktreeId)) {
+      continue
+    }
+    strictUpstreamRefreshGenerationByWorktree.delete(worktreeId)
+  }
+}
+
+function beginAutomaticUpstreamRefresh(worktreeId: string): number {
+  automaticUpstreamRefreshInFlightByWorktree.set(
+    worktreeId,
+    (automaticUpstreamRefreshInFlightByWorktree.get(worktreeId) ?? 0) + 1
+  )
+  return strictUpstreamRefreshGenerationByWorktree.get(worktreeId) ?? 0
+}
+
+function finishAutomaticUpstreamRefresh(worktreeId: string): void {
+  const count = automaticUpstreamRefreshInFlightByWorktree.get(worktreeId) ?? 0
+  if (count <= 1) {
+    automaticUpstreamRefreshInFlightByWorktree.delete(worktreeId)
+  } else {
+    automaticUpstreamRefreshInFlightByWorktree.set(worktreeId, count - 1)
+  }
+  trimRefreshOrderingState()
+}
+
+function shouldApplyAutomaticUpstreamRefresh(worktreeId: string, startGeneration: number): boolean {
+  return (strictUpstreamRefreshGenerationByWorktree.get(worktreeId) ?? 0) === startGeneration
+}
+
 async function fetchAndApplyAutomaticUpstreamStatus({
   settings,
   worktreeId,
@@ -47,8 +76,7 @@ async function fetchAndApplyAutomaticUpstreamStatus({
   connectionId,
   pushTarget,
   deps,
-  order,
-  shouldApply
+  startGeneration
 }: {
   settings?: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null
   worktreeId: string
@@ -56,12 +84,8 @@ async function fetchAndApplyAutomaticUpstreamStatus({
   connectionId?: string
   pushTarget?: GitPushTarget
   deps: GitStatusRefreshDeps
-  order: AutomaticRefreshOrder
-  shouldApply?: () => boolean
+  startGeneration: number
 }): Promise<GitUpstreamStatus | null> {
-  if (!shouldApplyAutomaticUpstreamRefresh(worktreeId, order, shouldApply)) {
-    return null
-  }
   const upstreamStatus = await deps.fetchUpstreamStatus(
     worktreeId,
     worktreePath,
@@ -86,15 +110,24 @@ async function fetchAndApplyAutomaticUpstreamStatus({
     }
     return null
   }
-  if (!claimAutomaticUpstreamRefreshApply(worktreeId, order, shouldApply)) {
+  if (!shouldApplyAutomaticUpstreamRefresh(worktreeId, startGeneration)) {
     return null
   }
   deps.setUpstreamStatus(worktreeId, upstreamStatus)
   return upstreamStatus
 }
 
+function beginStrictUpstreamRefresh(worktreeId: string): void {
+  strictUpstreamRefreshGenerationByWorktree.set(
+    worktreeId,
+    (strictUpstreamRefreshGenerationByWorktree.get(worktreeId) ?? 0) + 1
+  )
+  trimRefreshOrderingState()
+}
+
 export function clearGitStatusRefreshOrderingForTests(): void {
-  clearGitStatusRefreshOrderingStateForTests()
+  strictUpstreamRefreshGenerationByWorktree.clear()
+  automaticUpstreamRefreshInFlightByWorktree.clear()
   clearAutomaticPushTargetUpstreamStatusCache()
 }
 
@@ -104,8 +137,7 @@ export async function refreshGitStatusForWorktree({
   worktreePath,
   connectionId,
   pushTarget,
-  deps,
-  request
+  deps
 }: {
   settings?: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null
   worktreeId: string
@@ -113,30 +145,17 @@ export async function refreshGitStatusForWorktree({
   connectionId?: string
   pushTarget?: GitPushTarget
   deps: GitStatusRefreshDeps
-  request?: {
-    reuseLineStats?: boolean
-    signal?: AbortSignal
-    shouldApply?: () => boolean
-  }
 }): Promise<void> {
-  const refreshOrder = beginAutomaticUpstreamRefresh(worktreeId)
+  const upstreamStartGeneration = beginAutomaticUpstreamRefresh(worktreeId)
   try {
-    const status = (await getRuntimeGitStatus(
-      {
-        settings,
-        worktreeId,
-        worktreePath,
-        connectionId
-      },
-      request
-        ? {
-            ...(request.reuseLineStats === true ? { reuseLineStats: true } : {}),
-            ...(request.signal ? { signal: request.signal } : {})
-          }
-        : undefined
-    )) as GitStatusResult
+    const status = (await getRuntimeGitStatus({
+      settings,
+      worktreeId,
+      worktreePath,
+      connectionId
+    })) as GitStatusResult
 
-    if (!claimAutomaticUpstreamRefreshApply(worktreeId, refreshOrder, request?.shouldApply)) {
+    if (!shouldApplyAutomaticUpstreamRefresh(worktreeId, upstreamStartGeneration)) {
       return
     }
 
@@ -173,8 +192,7 @@ export async function refreshGitStatusForWorktree({
         connectionId,
         pushTarget,
         deps,
-        order: refreshOrder,
-        shouldApply: request?.shouldApply
+        startGeneration: upstreamStartGeneration
       })
       if (upstreamStatus) {
         // Why: explicit publish-target comparison can spawn several git
@@ -201,14 +219,11 @@ export async function refreshGitStatusForWorktree({
           worktreePath,
           connectionId,
           deps,
-          order: refreshOrder,
-          shouldApply: request?.shouldApply
+          startGeneration: upstreamStartGeneration
         })
         return
       }
-      if (claimAutomaticUpstreamRefreshApply(worktreeId, refreshOrder, request?.shouldApply)) {
-        deps.setUpstreamStatus(worktreeId, status.upstreamStatus)
-      }
+      deps.setUpstreamStatus(worktreeId, status.upstreamStatus)
       return
     }
     await fetchAndApplyAutomaticUpstreamStatus({
@@ -218,8 +233,7 @@ export async function refreshGitStatusForWorktree({
       connectionId,
       pushTarget,
       deps,
-      order: refreshOrder,
-      shouldApply: request?.shouldApply
+      startGeneration: upstreamStartGeneration
     })
   } finally {
     finishAutomaticUpstreamRefresh(worktreeId)

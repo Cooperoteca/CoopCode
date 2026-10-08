@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GitRemoteIdentity } from '../shared/git-remote-identity'
 import type { Repo } from '../shared/types'
-import { type GitRemoteIdentityProbe, probeGitRemoteIdentity } from './repo-git-remote-identity'
+import { detectGitRemoteIdentity } from './repo-git-remote-identity'
 import {
   enrichMissingRepoGitRemoteIdentities,
   flushRepoGitRemoteIdentityEnrichmentForTests,
@@ -9,7 +9,7 @@ import {
 } from './repo-git-remote-identity-enrichment'
 
 vi.mock('./repo-git-remote-identity', () => ({
-  probeGitRemoteIdentity: vi.fn()
+  detectGitRemoteIdentity: vi.fn()
 }))
 
 type RepoIdentityStore = {
@@ -23,8 +23,6 @@ const remoteIdentity: GitRemoteIdentity = {
   remoteName: 'origin',
   remoteUrl: 'git@git.company.test:team/sample-app.git'
 }
-
-const resolvedProbe: GitRemoteIdentityProbe = { status: 'resolved', identity: remoteIdentity }
 
 function makeRepo(overrides: Partial<Repo> = {}): Repo {
   return {
@@ -73,7 +71,7 @@ afterEach(() => {
 
 describe('enrichMissingRepoGitRemoteIdentities', () => {
   it('schedules remote identity enrichment without blocking the caller', async () => {
-    vi.mocked(probeGitRemoteIdentity).mockResolvedValue(resolvedProbe)
+    vi.mocked(detectGitRemoteIdentity).mockResolvedValue(remoteIdentity)
     const repo = makeRepo()
     const store = makeStore(repo)
     const onChanged = vi.fn()
@@ -81,7 +79,7 @@ describe('enrichMissingRepoGitRemoteIdentities', () => {
     enrichMissingRepoGitRemoteIdentities(store, { onChanged })
 
     expect(repo.gitRemoteIdentity).toBeUndefined()
-    expect(probeGitRemoteIdentity).toHaveBeenCalledWith('/workspace/sample-app', undefined)
+    expect(detectGitRemoteIdentity).toHaveBeenCalledWith('/workspace/sample-app', undefined)
 
     await flushRepoGitRemoteIdentityEnrichmentForTests()
 
@@ -90,17 +88,17 @@ describe('enrichMissingRepoGitRemoteIdentities', () => {
   })
 
   it('coalesces concurrent probes for the same repo location', async () => {
-    const probe = deferred<GitRemoteIdentityProbe>()
-    vi.mocked(probeGitRemoteIdentity).mockReturnValue(probe.promise)
+    const probe = deferred<GitRemoteIdentity | null>()
+    vi.mocked(detectGitRemoteIdentity).mockReturnValue(probe.promise)
     const repo = makeRepo()
     const store = makeStore(repo)
 
     enrichMissingRepoGitRemoteIdentities(store)
     enrichMissingRepoGitRemoteIdentities(store)
 
-    expect(probeGitRemoteIdentity).toHaveBeenCalledTimes(1)
+    expect(detectGitRemoteIdentity).toHaveBeenCalledTimes(1)
 
-    probe.resolve(resolvedProbe)
+    probe.resolve(remoteIdentity)
     await flushRepoGitRemoteIdentityEnrichmentForTests()
 
     expect(store.updateRepo).toHaveBeenCalledTimes(1)
@@ -110,7 +108,7 @@ describe('enrichMissingRepoGitRemoteIdentities', () => {
   it('caches no-identity probes briefly so list calls do not retry every time', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
-    vi.mocked(probeGitRemoteIdentity).mockResolvedValue({ status: 'no-remote' })
+    vi.mocked(detectGitRemoteIdentity).mockResolvedValue(null)
     const repo = makeRepo()
     const store = makeStore(repo)
 
@@ -119,64 +117,18 @@ describe('enrichMissingRepoGitRemoteIdentities', () => {
     enrichMissingRepoGitRemoteIdentities(store)
     await flushRepoGitRemoteIdentityEnrichmentForTests()
 
-    expect(probeGitRemoteIdentity).toHaveBeenCalledTimes(1)
-  })
-
-  it('settles a repo git answered for but that has no usable remote', async () => {
-    vi.mocked(probeGitRemoteIdentity).mockResolvedValue({ status: 'no-remote' })
-    const repo = makeRepo()
-    const store = makeStore(repo)
-
-    enrichMissingRepoGitRemoteIdentities(store)
-    await flushRepoGitRemoteIdentityEnrichmentForTests()
-
-    expect(store.updateRepo).toHaveBeenCalledWith('repo-1', { gitRemoteIdentity: null })
-    expect(repo.gitRemoteIdentity).toBeNull()
-  })
-
-  it('leaves identity unresolved when the probe could not reach the host', async () => {
-    vi.mocked(probeGitRemoteIdentity).mockResolvedValue({ status: 'unavailable' })
-    const repo = makeRepo({ connectionId: 'builder' })
-    const store = makeStore(repo)
-
-    enrichMissingRepoGitRemoteIdentities(store)
-    await flushRepoGitRemoteIdentityEnrichmentForTests()
-
-    expect(store.updateRepo).not.toHaveBeenCalled()
-    expect(repo.gitRemoteIdentity).toBeUndefined()
-  })
-
-  it('does not rewrite the no-remote marker on a later retry', async () => {
-    vi.mocked(probeGitRemoteIdentity).mockResolvedValue({ status: 'no-remote' })
-    const repo = makeRepo({ gitRemoteIdentity: null })
-    const store = makeStore(repo)
-
-    enrichMissingRepoGitRemoteIdentities(store)
-    await flushRepoGitRemoteIdentityEnrichmentForTests()
-
-    expect(store.updateRepo).not.toHaveBeenCalled()
-  })
-
-  it('resolves a settled no-remote repo once it gains a remote', async () => {
-    vi.mocked(probeGitRemoteIdentity).mockResolvedValue(resolvedProbe)
-    const repo = makeRepo({ gitRemoteIdentity: null })
-    const store = makeStore(repo)
-
-    enrichMissingRepoGitRemoteIdentities(store)
-    await flushRepoGitRemoteIdentityEnrichmentForTests()
-
-    expect(store.updateRepo).toHaveBeenCalledWith('repo-1', { gitRemoteIdentity: remoteIdentity })
+    expect(detectGitRemoteIdentity).toHaveBeenCalledTimes(1)
   })
 
   it('does not write stale identity data after the repo path changes', async () => {
-    const probe = deferred<GitRemoteIdentityProbe>()
-    vi.mocked(probeGitRemoteIdentity).mockReturnValue(probe.promise)
+    const probe = deferred<GitRemoteIdentity | null>()
+    vi.mocked(detectGitRemoteIdentity).mockReturnValue(probe.promise)
     const repo = makeRepo()
     const store = makeStore(repo)
 
     enrichMissingRepoGitRemoteIdentities(store)
     repo.path = '/workspace/renamed-sample-app'
-    probe.resolve(resolvedProbe)
+    probe.resolve(remoteIdentity)
     await flushRepoGitRemoteIdentityEnrichmentForTests()
 
     expect(store.updateRepo).not.toHaveBeenCalled()

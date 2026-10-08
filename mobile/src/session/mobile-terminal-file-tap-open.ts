@@ -169,5 +169,5 @@ function scheduleOpenedWorktreeTabActivation<T extends TerminalFileTapSessionTab
 }
 
 function displayNameFromPath(path: string): string | undefined {
-  return path.split(/[\\/]/).findLast(Boolean)
+  return path.split(/[\\/]/).filter(Boolean).at(-1)
 }

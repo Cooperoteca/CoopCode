@@ -1,7 +1,7 @@
 /* oxlint-disable max-lines -- Why: file RPC routing coverage stays together so the dispatcher contract for read, write, mutation, and watch methods is easy to audit. */
 import { z } from 'zod'
 import { defineMethod, defineStreamingMethod, type RpcAnyMethod } from '../core'
-import { runFileWatchStream } from './file-watch-stream-lifecycle'
+import { createFileWatchEventBatcher } from './file-watch-event-batcher'
 
 let filesWatchSubscriptionSeq = 0
 const RUNTIME_FILE_BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/
@@ -12,29 +12,6 @@ function isValidRuntimeFileBase64(value: unknown): value is string {
   )
 }
 
-type SshMutationParams = {
-  expectedExecutionHostId?: string
-  expectedSshTargetId?: string
-  expectedSshConnectionGeneration?: number
-}
-
-function sshMutationArguments(
-  params: SshMutationParams
-): [expectedGeneration?: number, expectedTargetId?: string, expectedExecutionHostId?: string] {
-  if (
-    params.expectedExecutionHostId === undefined &&
-    params.expectedSshTargetId === undefined &&
-    params.expectedSshConnectionGeneration === undefined
-  ) {
-    return []
-  }
-  return [
-    params.expectedSshConnectionGeneration,
-    params.expectedSshTargetId,
-    params.expectedExecutionHostId
-  ]
-}
-
 const WorktreeSelector = z.object({
   worktree: z
     .unknown()
@@ -42,22 +19,11 @@ const WorktreeSelector = z.object({
     .pipe(z.string().min(1, 'Missing worktree selector'))
 })
 
-const FilePathSearch = WorktreeSelector.extend({
-  query: z.string().max(256).default(''),
-  limit: z.number().int().positive().max(32).default(16)
-})
-
 const FileOpen = WorktreeSelector.extend({
   relativePath: z
     .unknown()
     .transform((v) => (typeof v === 'string' ? v : ''))
     .pipe(z.string().min(1, 'Missing relative path'))
-})
-
-const FileMutationOpen = FileOpen.extend({
-  expectedExecutionHostId: z.string().min(1).optional(),
-  expectedSshTargetId: z.string().min(1).optional(),
-  expectedSshConnectionGeneration: z.number().int().nonnegative().optional()
 })
 
 const ResolveTerminalPath = WorktreeSelector.extend({
@@ -115,13 +81,13 @@ const ServerDirectoryBrowse = z.object({
 // Why: write content must be a real string. Coercing a missing/non-string value
 // to '' silently truncated the target file to empty instead of erroring. An
 // explicit '' is still accepted (writing an empty file is legitimate).
-const FileWrite = FileMutationOpen.extend({
+const FileWrite = FileOpen.extend({
   content: z
     .unknown()
     .refine((v): v is string => typeof v === 'string', { message: 'Missing file content' })
 })
 
-const FileWriteBase64 = FileMutationOpen.extend({
+const FileWriteBase64 = FileOpen.extend({
   contentBase64: z
     .unknown()
     .refine((v): v is string => typeof v === 'string', { message: 'Missing file content' })
@@ -144,9 +110,6 @@ const FileReadChunk = FileOpen.extend({
 })
 
 const FileRename = WorktreeSelector.extend({
-  expectedExecutionHostId: z.string().min(1).optional(),
-  expectedSshTargetId: z.string().min(1).optional(),
-  expectedSshConnectionGeneration: z.number().int().nonnegative().optional(),
   oldRelativePath: z
     .unknown()
     .transform((v) => (typeof v === 'string' ? v : ''))
@@ -158,9 +121,6 @@ const FileRename = WorktreeSelector.extend({
 })
 
 const FileCopy = WorktreeSelector.extend({
-  expectedExecutionHostId: z.string().min(1).optional(),
-  expectedSshTargetId: z.string().min(1).optional(),
-  expectedSshConnectionGeneration: z.number().int().nonnegative().optional(),
   sourceRelativePath: z
     .unknown()
     .transform((v) => (typeof v === 'string' ? v : ''))
@@ -172,9 +132,6 @@ const FileCopy = WorktreeSelector.extend({
 })
 
 const FileCommitUpload = WorktreeSelector.extend({
-  expectedExecutionHostId: z.string().min(1).optional(),
-  expectedSshTargetId: z.string().min(1).optional(),
-  expectedSshConnectionGeneration: z.number().int().nonnegative().optional(),
   tempRelativePath: z
     .unknown()
     .transform((v) => (typeof v === 'string' ? v : ''))
@@ -185,7 +142,7 @@ const FileCommitUpload = WorktreeSelector.extend({
     .pipe(z.string().min(1, 'Missing final path'))
 })
 
-const FileDelete = FileMutationOpen.extend({
+const FileDelete = FileOpen.extend({
   recursive: z.boolean().optional()
 })
 
@@ -218,12 +175,6 @@ export const FILE_METHODS: RpcAnyMethod[] = [
     name: 'files.list',
     params: WorktreeSelector,
     handler: async (params, { runtime }) => runtime.listMobileFiles(params.worktree)
-  }),
-  defineMethod({
-    name: 'files.searchPaths',
-    params: FilePathSearch,
-    handler: async (params, { runtime }) =>
-      runtime.searchMobileFilePaths(params.worktree, params.query, params.limit)
   }),
   defineMethod({
     name: 'files.open',
@@ -321,12 +272,7 @@ export const FILE_METHODS: RpcAnyMethod[] = [
     name: 'files.write',
     params: FileWrite,
     handler: async (params, { runtime }) =>
-      runtime.writeFileExplorerFile(
-        params.worktree,
-        params.relativePath,
-        params.content,
-        ...sshMutationArguments(params)
-      )
+      runtime.writeFileExplorerFile(params.worktree, params.relativePath, params.content)
   }),
   defineMethod({
     name: 'files.writeBase64',
@@ -335,8 +281,7 @@ export const FILE_METHODS: RpcAnyMethod[] = [
       runtime.writeFileExplorerFileBase64(
         params.worktree,
         params.relativePath,
-        params.contentBase64,
-        ...sshMutationArguments(params)
+        params.contentBase64
       )
   }),
   defineMethod({
@@ -347,39 +292,26 @@ export const FILE_METHODS: RpcAnyMethod[] = [
         params.worktree,
         params.relativePath,
         params.contentBase64,
-        params.append === true,
-        ...sshMutationArguments(params)
+        params.append === true
       )
   }),
   defineMethod({
     name: 'files.createFile',
-    params: FileMutationOpen,
+    params: FileOpen,
     handler: async (params, { runtime }) =>
-      runtime.createFileExplorerFile(
-        params.worktree,
-        params.relativePath,
-        ...sshMutationArguments(params)
-      )
+      runtime.createFileExplorerFile(params.worktree, params.relativePath)
   }),
   defineMethod({
     name: 'files.createDir',
-    params: FileMutationOpen,
+    params: FileOpen,
     handler: async (params, { runtime }) =>
-      runtime.createFileExplorerDir(
-        params.worktree,
-        params.relativePath,
-        ...sshMutationArguments(params)
-      )
+      runtime.createFileExplorerDir(params.worktree, params.relativePath)
   }),
   defineMethod({
     name: 'files.createDirNoClobber',
-    params: FileMutationOpen,
+    params: FileOpen,
     handler: async (params, { runtime }) =>
-      runtime.createFileExplorerDirNoClobber(
-        params.worktree,
-        params.relativePath,
-        ...sshMutationArguments(params)
-      )
+      runtime.createFileExplorerDirNoClobber(params.worktree, params.relativePath)
   }),
   defineMethod({
     name: 'files.commitUpload',
@@ -388,8 +320,7 @@ export const FILE_METHODS: RpcAnyMethod[] = [
       runtime.commitFileExplorerUpload(
         params.worktree,
         params.tempRelativePath,
-        params.finalRelativePath,
-        ...sshMutationArguments(params)
+        params.finalRelativePath
       )
   }),
   defineMethod({
@@ -399,8 +330,7 @@ export const FILE_METHODS: RpcAnyMethod[] = [
       runtime.renameFileExplorerPath(
         params.worktree,
         params.oldRelativePath,
-        params.newRelativePath,
-        ...sshMutationArguments(params)
+        params.newRelativePath
       )
   }),
   defineMethod({
@@ -410,20 +340,14 @@ export const FILE_METHODS: RpcAnyMethod[] = [
       runtime.copyFileExplorerPath(
         params.worktree,
         params.sourceRelativePath,
-        params.destinationRelativePath,
-        ...sshMutationArguments(params)
+        params.destinationRelativePath
       )
   }),
   defineMethod({
     name: 'files.delete',
     params: FileDelete,
     handler: async (params, { runtime }) =>
-      runtime.deleteFileExplorerPath(
-        params.worktree,
-        params.relativePath,
-        params.recursive,
-        ...sshMutationArguments(params)
-      )
+      runtime.deleteFileExplorerPath(params.worktree, params.relativePath, params.recursive)
   }),
   defineMethod({
     name: 'files.search',
@@ -462,13 +386,62 @@ export const FILE_METHODS: RpcAnyMethod[] = [
     handler: async (params, { runtime, connectionId, signal }, emit) => {
       const seq = ++filesWatchSubscriptionSeq
       const subscriptionId = `files-watch-${connectionId ?? 'inproc'}-${seq}`
-      await runFileWatchStream({
-        runtime,
-        worktree: params.worktree,
-        connectionId,
-        signal,
-        subscriptionId,
-        emit
+      if (signal?.aborted) {
+        return
+      }
+      await new Promise<void>((resolve, reject) => {
+        let settled = false
+        let unwatch: (() => void) | null = null
+        const eventBatcher = createFileWatchEventBatcher(params.worktree, emit)
+        const finish = (): void => {
+          if (settled) {
+            return
+          }
+          settled = true
+          signal?.removeEventListener('abort', handleAbort)
+          resolve()
+        }
+        const cleanup = (): void => {
+          eventBatcher.flush()
+          eventBatcher.dispose()
+          unwatch?.()
+          emit({ type: 'end' })
+          finish()
+        }
+        const handleAbort = (): void => {
+          if (unwatch) {
+            cleanup()
+          } else {
+            // Why: watch setup may have queued events before resolving its
+            // unwatch callback. Dispose that transient batcher on early abort.
+            eventBatcher.dispose()
+            finish()
+          }
+        }
+        signal?.addEventListener('abort', handleAbort, { once: true })
+        void runtime
+          .watchFileExplorer(params.worktree, (events) => {
+            eventBatcher.push(events)
+          })
+          .then((nextUnwatch) => {
+            if (signal?.aborted || settled) {
+              // Why: the connection can close while watch setup is still
+              // resolving. Tear down the late watcher immediately instead of
+              // registering cleanup on a connection that was already reaped.
+              eventBatcher.dispose()
+              nextUnwatch()
+              return
+            }
+            unwatch = nextUnwatch
+            runtime.registerSubscriptionCleanup(subscriptionId, cleanup, connectionId)
+            emit({ type: 'ready', subscriptionId })
+          })
+          .catch((error) => {
+            if (!settled) {
+              signal?.removeEventListener('abort', handleAbort)
+              reject(error)
+            }
+          })
       })
     }
   }),
@@ -476,7 +449,7 @@ export const FILE_METHODS: RpcAnyMethod[] = [
     name: 'files.unwatch',
     params: FileUnwatch,
     handler: async (params, { runtime }) => {
-      await runtime.cleanupSubscriptionAndWait(params.subscriptionId)
+      runtime.cleanupSubscription(params.subscriptionId)
       return { unsubscribed: true }
     }
   })

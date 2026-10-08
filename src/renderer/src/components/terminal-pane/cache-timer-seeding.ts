@@ -1,5 +1,4 @@
-import { isClaudeAgent } from '@/lib/agent-status'
-import { classifyTitleActivity } from '@/lib/pane-agent-evidence'
+import { detectAgentStatusFromTitle, isClaudeAgent } from '@/lib/agent-status'
 
 export function shouldSeedCacheTimerOnInitialTitle(args: {
   rawTitle: string
@@ -13,7 +12,7 @@ export function shouldSeedCacheTimerOnInitialTitle(args: {
     return false
   }
 
-  const status = classifyTitleActivity(rawTitle)
+  const status = detectAgentStatusFromTitle(rawTitle)
   if (status === null || status === 'working') {
     return false
   }

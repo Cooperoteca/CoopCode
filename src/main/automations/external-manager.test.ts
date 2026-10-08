@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Why: external automation mapping and lifecycle IPC share fixtures. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createExternalAutomation,

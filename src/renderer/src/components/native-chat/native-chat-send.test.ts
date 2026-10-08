@@ -23,12 +23,12 @@ describe('buildNativeChatPasteBytes', () => {
   })
 
   it('multi-line text is bracketed-paste wrapped with NO trailing submit', () => {
-    const text = 'line one\r\nline two\nline three'
-    expect(buildNativeChatPasteBytes(text)).toBe(`${BEGIN}line one\rline two\rline three${END}`)
+    const text = 'line one\nline two'
+    expect(buildNativeChatPasteBytes(text)).toBe(`${BEGIN}${text}${END}`)
   })
 
   it('treats a trailing newline as multi-line', () => {
-    expect(buildNativeChatPasteBytes('a\n')).toBe(`${BEGIN}a\r${END}`)
+    expect(buildNativeChatPasteBytes('a\n')).toBe(`${BEGIN}a\n${END}`)
   })
 
   it('sanitizes an embedded bracketed-paste end and bare ESC before framing', () => {
@@ -67,11 +67,11 @@ describe('buildNativeChatSendBytes', () => {
 
   it('multi-line text is bracketed-paste wrapped then submitted', () => {
     const text = 'line one\nline two'
-    expect(buildNativeChatSendBytes(text)).toBe(`${BEGIN}line one\rline two${END}\r`)
+    expect(buildNativeChatSendBytes(text)).toBe(`${BEGIN}${text}${END}\r`)
   })
 
   it('treats a trailing newline as multi-line', () => {
-    expect(buildNativeChatSendBytes('a\n')).toBe(`${BEGIN}a\r${END}\r`)
+    expect(buildNativeChatSendBytes('a\n')).toBe(`${BEGIN}a\n${END}\r`)
   })
 
   it('handles CR-style line breaks as multi-line', () => {

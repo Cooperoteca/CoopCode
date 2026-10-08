@@ -1,5 +1,5 @@
 import type { ManagedPane, ManagedPaneInternal } from './pane-manager-types'
-import { cancelPendingSafeFitContinuations, safeFitAndThen } from './pane-tree-ops'
+import { safeFit } from './pane-tree-ops'
 
 type ProposedDimensions = {
   cols: number
@@ -74,11 +74,12 @@ function flushStableFitCallbacks(pane: StableFitPane): void {
   }
 }
 
-function finishStableFit(pane: StableFitPane): void {
+function finishStableFit(pane: StableFitPane, shouldFit: boolean): void {
   setPendingObservedFitRafId(pane, null)
-  // Why: an equal grid still proves a restored pane is measurable, so it must
-  // release reattach continuations that were parked while the tab was hidden.
-  safeFitAndThen(pane, 'stable-pane-fit', () => flushStableFitCallbacks(pane))
+  if (shouldFit) {
+    safeFit(pane)
+  }
+  flushStableFitCallbacks(pane)
 }
 
 export function requestStablePaneFit(pane: StableFitPane, onSettled?: () => void): void {
@@ -111,23 +112,23 @@ export function requestStablePaneFit(pane: StableFitPane, onSettled?: () => void
         frameCount += 1
 
         if (!next) {
-          finishStableFit(pane)
+          finishStableFit(pane, true)
           return
         }
 
         if (terminalDimensionsEqual(pane, next)) {
-          finishStableFit(pane)
+          finishStableFit(pane, false)
           return
         }
 
         if (dimensionsEqual(previous, next)) {
-          finishStableFit(pane)
+          finishStableFit(pane, true)
           return
         }
 
         previous = next
         if (frameCount >= MAX_STABILITY_FRAMES) {
-          finishStableFit(pane)
+          finishStableFit(pane, true)
           return
         }
 
@@ -163,5 +164,4 @@ export function detachPaneFitResizeObserver(pane: ManagedPaneInternal): void {
     setPendingObservedFitRafId(pane, null)
   }
   stableFitCallbacks.delete(pane)
-  cancelPendingSafeFitContinuations(pane)
 }

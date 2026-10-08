@@ -17,14 +17,18 @@ import type {
   SourceControlTextActionId
 } from '../../../../shared/source-control-ai-actions'
 import type { SourceControlAiWriteTarget } from '../../../../shared/source-control-ai-recipe-save'
-import { buildResolveConflictsPrompt } from './source-control-ai-prompts'
+import {
+  buildFixCommitFailurePrompt,
+  buildResolveConflictsPrompt
+} from './source-control-ai-prompts'
+import { summarizeCommitFailure } from './commit-failure-summary'
+import { launchCommitFailureAgentWithDefault } from './source-control-ai-commit-failure-launch'
 import {
   saveSourceControlAiActionRecipeForTarget,
   saveSourceControlTextGenerationDefaults
 } from './source-control-ai-recipe-persistence'
 import type { SourceControlAiControllerParams } from './source-control-ai-controller-types'
 import { openSourceControlAiSettingsTarget } from './source-control-ai-settings-navigation'
-import { useSourceControlRecoveryAi } from './use-source-control-recovery-ai'
 import { translate } from '@/i18n/i18n'
 
 export function getSourceControlAiControllerDiscoveryHostKey(
@@ -49,7 +53,6 @@ export function useSourceControlAi({
   worktreePath,
   commitMessage,
   commitError,
-  pushRecoveryPrompt,
   updateSettings,
   updateRepo,
   openSettingsTarget,
@@ -59,6 +62,7 @@ export function useSourceControlAi({
   const [resolveConflictsComposerOpen, setResolveConflictsComposerOpen] = useState(false)
   const [commitGenerationDialogOpen, setCommitGenerationDialogOpen] = useState(false)
   const [pullRequestGenerationDialogOpen, setPullRequestGenerationDialogOpen] = useState(false)
+  const [isLaunchingCommitFailureAgent, setIsLaunchingCommitFailureAgent] = useState(false)
 
   const sourceControlAiDiscoveryHostKey = useMemo(
     () => getSourceControlAiControllerDiscoveryHostKey(settings, activeConnectionId),
@@ -172,26 +176,54 @@ export function useSourceControlAi({
     setResolveConflictsComposerOpen(true)
   }, [activeWorktreeId, unresolvedConflicts.length])
 
-  const {
-    isLaunchingCommitFailureAgent,
-    isLaunchingPushFailureAgent,
-    commitFailureRecoveryPrompt,
-    pushFailureRecoveryPrompt,
-    handleFixCommitFailureWithAI,
-    handleFixPushFailureWithAI
-  } = useSourceControlRecoveryAi({
-    activeWorktreeId,
-    activeGroupId,
-    activeSourceControlLaunchPlatform,
-    sourceRepoConnectionId: activeRepo?.connectionId,
-    worktreePath,
-    commitMessage,
-    commitError,
-    pushRecoveryPrompt,
-    stagedEntries,
-    getLaunchActionRecipe,
-    getStoreState
-  })
+  const commitFailureRecoveryPrompt = useMemo(
+    () =>
+      commitError
+        ? buildFixCommitFailurePrompt({
+            summary: summarizeCommitFailure(commitError),
+            error: commitError,
+            entries: stagedEntries,
+            worktreePath,
+            commitMessage
+          })
+        : null,
+    [commitError, commitMessage, stagedEntries, worktreePath]
+  )
+  const handleFixCommitFailureWithAI = useCallback(
+    async (promptOverride?: string): Promise<boolean> => {
+      if (isLaunchingCommitFailureAgent || !activeWorktreeId || !commitError) {
+        return false
+      }
+
+      setIsLaunchingCommitFailureAgent(true)
+      try {
+        return await launchCommitFailureAgentWithDefault({
+          activeWorktreeId,
+          activeGroupId,
+          activeSourceControlLaunchPlatform,
+          sourceRepoConnectionId: activeConnectionId ?? activeRepo?.connectionId ?? null,
+          commitFailureRecoveryPrompt,
+          promptOverride,
+          getLaunchActionRecipe,
+          getStoreState
+        })
+      } finally {
+        setIsLaunchingCommitFailureAgent(false)
+      }
+    },
+    [
+      activeGroupId,
+      activeConnectionId,
+      activeRepo?.connectionId,
+      activeWorktreeId,
+      activeSourceControlLaunchPlatform,
+      commitError,
+      commitFailureRecoveryPrompt,
+      getLaunchActionRecipe,
+      getStoreState,
+      isLaunchingCommitFailureAgent
+    ]
+  )
 
   const handleSaveCommitMessageGenerationDefaults = useCallback(
     async (
@@ -244,15 +276,12 @@ export function useSourceControlAi({
     openCommitGenerationDialog,
     openPullRequestGenerationDialog,
     isLaunchingCommitFailureAgent,
-    isLaunchingPushFailureAgent,
     resolveConflictsPrompt,
     commitFailureRecoveryPrompt,
-    pushFailureRecoveryPrompt,
     getLaunchActionRecipe,
     saveLaunchActionDefault,
     handleResolveConflictsWithAI,
     handleFixCommitFailureWithAI,
-    handleFixPushFailureWithAI,
     handleSaveCommitMessageGenerationDefaults,
     handleSavePullRequestGenerationDefaults,
     openSourceControlAiSettings

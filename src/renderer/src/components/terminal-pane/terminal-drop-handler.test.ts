@@ -34,10 +34,7 @@ const mocks = vi.hoisted(() => ({
     worktreesByRepo: {
       repo1: [{ id: 'wt-1', repoId: 'repo1', path: '/remote/repo' }]
     },
-    sshConnectionStates: new Map<
-      string,
-      { remotePlatform?: NodeJS.Platform; connectionGeneration?: number }
-    >()
+    sshConnectionStates: new Map<string, { remotePlatform?: NodeJS.Platform }>()
   }
 }))
 
@@ -146,14 +143,10 @@ describe('handleTerminalFileDrop', () => {
       {
         settings: { activeRuntimeEnvironmentId: 'env-1' },
         worktreeId: 'wt-1',
-        worktreePath: '/remote/repo',
-        expectedExecutionHostId: 'local',
-        expectedSshTargetId: undefined,
-        expectedSshConnectionGeneration: undefined
+        worktreePath: '/remote/repo'
       },
       ['/Users/me/logo.png'],
-      '/remote/repo/.orca/drops',
-      { assertCurrent: expect.any(Function) }
+      '/remote/repo/.orca/drops'
     )
     expect(sendInput).toHaveBeenCalledWith(
       wrapTerminalBracketedPasteText('/remote/repo/.orca/drops/logo.png')
@@ -242,14 +235,10 @@ describe('handleTerminalFileDrop', () => {
       {
         settings: { activeRuntimeEnvironmentId: 'env-1' },
         worktreeId: 'wt-1',
-        worktreePath: '//server/share/repo',
-        expectedExecutionHostId: 'local',
-        expectedSshTargetId: undefined,
-        expectedSshConnectionGeneration: undefined
+        worktreePath: '//server/share/repo'
       },
       ['/Users/me/logo.png'],
-      '\\\\server\\share\\repo\\.orca\\drops',
-      { assertCurrent: expect.any(Function) }
+      '\\\\server\\share\\repo\\.orca\\drops'
     )
     expect(sendInput).toHaveBeenCalledWith(
       wrapTerminalBracketedPasteText('\\\\server\\share\\repo\\.orca\\drops\\logo.png')
@@ -299,14 +288,10 @@ describe('handleTerminalFileDrop', () => {
       {
         settings: { activeRuntimeEnvironmentId: 'owner-runtime' },
         worktreeId: 'wt-1',
-        worktreePath: '/remote/repo',
-        expectedExecutionHostId: 'local',
-        expectedSshTargetId: undefined,
-        expectedSshConnectionGeneration: undefined
+        worktreePath: '/remote/repo'
       },
       ['/Users/me/spec.pdf'],
-      '/remote/repo/.orca/drops',
-      { assertCurrent: expect.any(Function) }
+      '/remote/repo/.orca/drops'
     )
     expect(sendInput).toHaveBeenCalledWith('/remote/repo/.orca/drops/spec.pdf ')
   })
@@ -575,9 +560,7 @@ describe('handleTerminalFileDrop', () => {
     mocks.storeState.worktreesByRepo = {
       repo1: [{ id: 'wt-1', repoId: 'repo1', path: 'C:\\Remote Repo' }]
     }
-    mocks.storeState.sshConnectionStates = new Map([
-      ['ssh-win', { remotePlatform: 'win32', connectionGeneration: 4 }]
-    ])
+    mocks.storeState.sshConnectionStates = new Map([['ssh-win', { remotePlatform: 'win32' }]])
     mocks.resolveDroppedPathsForAgent.mockResolvedValue({
       failed: [],
       resolvedPaths: ['C:\\Remote Repo\\A&B.txt'],
@@ -603,47 +586,11 @@ describe('handleTerminalFileDrop', () => {
     expect(mocks.resolveDroppedPathsForAgent).toHaveBeenCalledWith({
       paths: ['C:\\Users\\Name\\A&B.txt'],
       worktreePath: 'C:\\Remote Repo',
-      connectionId: 'ssh-win',
-      expectedExecutionHostId: 'ssh:ssh-win',
-      expectedSshTargetId: 'ssh-win',
-      expectedSshConnectionGeneration: 4
+      connectionId: 'ssh-win'
     })
     expect(sendInput).toHaveBeenCalledWith('"C:\\Remote Repo\\A&B.txt" ')
     expect(focus).toHaveBeenCalled()
     expect(mocks.recordTerminalUserInputForLeaf).toHaveBeenCalledWith('tab-1', 'leaf-1')
-  })
-
-  it('surfaces stale SSH owner capture failures without rejecting the native drop', async () => {
-    mocks.storeState.settings = { activeRuntimeEnvironmentId: null }
-    mocks.storeState.repos = [
-      {
-        id: 'repo1',
-        connectionId: 'ssh-stale',
-        path: '/remote/repo',
-        executionHostId: 'ssh:ssh-stale'
-      }
-    ]
-    mocks.storeState.worktreesByRepo = {
-      repo1: [{ id: 'wt-1', repoId: 'repo1', path: '/remote/repo' }]
-    }
-    mocks.storeState.sshConnectionStates = new Map([['ssh-stale', { remotePlatform: 'linux' }]])
-    const pane = { id: 1, leafId: 'leaf-1', terminal: { focus: vi.fn() } }
-
-    await expect(
-      handleTerminalFileDrop({
-        manager: { getActivePane: () => pane, getPanes: () => [pane] } as never,
-        paneTransports: new Map([[1, createTerminalTransport(vi.fn(() => true))]]) as never,
-        worktreeId: 'wt-1',
-        tabId: 'tab-1',
-        cwd: undefined,
-        data: { paths: ['/local/a.txt'], target: 'terminal' }
-      })
-    ).resolves.toBeUndefined()
-
-    expect(mocks.toastError).toHaveBeenCalledWith(
-      "Couldn't verify the SSH connection. Reconnect the host and try again."
-    )
-    expect(mocks.resolveDroppedPathsForAgent).not.toHaveBeenCalled()
   })
 
   it('keeps SSH Linux path drops on POSIX shell escaping', async () => {
@@ -659,9 +606,7 @@ describe('handleTerminalFileDrop', () => {
     mocks.storeState.worktreesByRepo = {
       repo1: [{ id: 'wt-1', repoId: 'repo1', path: '/remote/repo' }]
     }
-    mocks.storeState.sshConnectionStates = new Map([
-      ['ssh-linux', { remotePlatform: 'linux', connectionGeneration: 5 }]
-    ])
+    mocks.storeState.sshConnectionStates = new Map([['ssh-linux', { remotePlatform: 'linux' }]])
     mocks.resolveDroppedPathsForAgent.mockResolvedValue({
       failed: [],
       resolvedPaths: ["/remote/repo/it's here.txt"],

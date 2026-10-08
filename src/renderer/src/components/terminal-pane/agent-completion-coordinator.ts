@@ -25,47 +25,41 @@ import {
 type CompletionSource = 'hook' | 'title' | 'process-exit'
 type CompletionIdentitySource = 'hook' | 'title' | 'process-exit'
 
-type PollCadenceTier = 'active' | 'idle' | 'hidden' | 'no-evidence'
-
 type LastCompletionIdentity = {
   source: CompletionIdentitySource
   identity: string
   agentIdentity: string | null
 }
 
-// Why: worktree switches remount a pane while the PTY/hook stream stays live, so stale completion replays must outlive one coordinator.
+// Why: worktree switches can remount a pane while the underlying PTY and hook
+// stream stay live, so stale completion replays must outlive one coordinator.
 const lastCompletionIdentityByPaneKey = new Map<string, LastCompletionIdentity>()
 
 const IDLE_POLL_INTERVAL_MS = 2_000
 const ACTIVE_POLL_INTERVAL_MS = 750
-// Why: a hidden pane only needs the process-exit backstop (hook/title are push-driven), so poll the process table far less to cut idle CPU on SSH relays (#6288/#6667).
+// Why: a hidden pane only keeps the process-exit backstop alive — hook and title
+// completion signals are push-driven and fire regardless of poll cadence or
+// visibility — so it polls the OS process table far less often to cut idle CPU on
+// shared SSH relays. Follow-up to #6288 / PR #6667, which deduped scans within a
+// tick; this throttles the number of ticks. Visible panes keep full cadence.
 const HIDDEN_POLL_INTERVAL_MS = 3_000
-// Why: where one inspection is a whole-process-table scan (Windows powershell CIM, ~10-40x heavier than `ps`), a no-evidence idle shell relaxes here; activity re-arms.
-const NO_EVIDENCE_POLL_INTERVAL_MS = 15_000
-// Why: pane activity means an agent may be starting; keep full idle cadence this long after it so agent-start detection stays prompt.
-const NO_EVIDENCE_ACTIVITY_HOT_WINDOW_MS = 10_000
 const INSPECTION_TIMEOUT_MS = 15_000
 const PENDING_TITLE_TTL_MS = Math.max(2_000, INSPECTION_TIMEOUT_MS + 500)
 const PENDING_TITLE_MAX_TTL_MS = Math.max(30_000, PENDING_TITLE_TTL_MS)
 const COMPLETION_REPLAY_GUARD_MS = 1_000
 const HOOK_DONE_QUIET_MS = 1_500
-// Why: under "Approve for me" Codex resumes almost immediately, so debounce the OS attention notification so a self-resolving pause raises no false banner (#8387).
-const CODEX_ATTENTION_QUIET_MS = 1_500
-
-const POLL_TIER_INTERVAL_MS: Record<PollCadenceTier, number> = {
-  active: ACTIVE_POLL_INTERVAL_MS,
-  idle: IDLE_POLL_INTERVAL_MS,
-  hidden: HIDDEN_POLL_INTERVAL_MS,
-  'no-evidence': NO_EVIDENCE_POLL_INTERVAL_MS
-}
 
 function isCompletionHookState(state: ParsedAgentStatusPayload['state']): boolean {
-  // Why: only a genuine 'done' ends a turn; 'waiting'/'blocked' go through isAttentionHookState.
+  // Why: only a genuine 'done' ends a turn. 'waiting'/'blocked' are handled by
+  // isAttentionHookState below.
   return state === 'done'
 }
 
 function isAttentionHookState(state: ParsedAgentStatusPayload['state']): boolean {
-  // Why: 'waiting'/'blocked' pause mid-turn — the agent is still alive, so they must not fire agent-task-complete (attention is raised separately).
+  // Why: 'waiting' (e.g. a Claude PermissionRequest) and 'blocked' (e.g. a
+  // Copilot elicitation dialog) pause mid-turn — the agent is still alive and
+  // has not completed, so they must not fire agent-task-complete. The "needs
+  // you" notification for these states is raised separately (smart-attention).
   return state === 'waiting' || state === 'blocked'
 }
 
@@ -92,7 +86,6 @@ export function createAgentCompletionCoordinator(
   let pendingHookDoneTimer: ReturnType<typeof setTimeout> | null = null
   let pendingHookDoneTitle: string | null = null
   let pendingHookDonePayload: AgentCompletionStatusSnapshot | null = null
-  let pendingCodexAttentionTimer: ReturnType<typeof setTimeout> | null = null
   let pendingProcessExitAgent: RecognizedAgentProcess | null = null
   let pendingTitleSequence = 0
   let pendingTitle: {
@@ -106,11 +99,10 @@ export function createAgentCompletionCoordinator(
   let inspectionInFlight = false
   let inspectionGeneration = 0
   let consecutiveInspectionErrors = 0
-  // Why: output/title activity can arrive before async PTY bind; only re-arm cadence after bind starts process tracking.
-  let pollTrackingStarted = false
-  // Why: cadence tier the armed poll timer was scheduled at, so a shift to a faster tier can re-arm promptly instead of waiting out the long delay.
-  let pollTimerTier: PollCadenceTier | null = null
-  let lastPaneActivityAt = 0
+  // Why: tracks whether the armed poll timer is the slow hidden-backstop cadence,
+  // so a hidden→visible flip can re-arm it promptly instead of waiting out the
+  // long delay (scheduleNextPoll otherwise no-ops while a timer is pending).
+  let pollTimerIsHiddenBackstop = false
 
   function clearPollTimer(): void {
     if (pollTimer === null) {
@@ -118,7 +110,7 @@ export function createAgentCompletionCoordinator(
     }
     clearTimeout(pollTimer)
     pollTimer = null
-    pollTimerTier = null
+    pollTimerIsHiddenBackstop = false
   }
 
   function clearPendingTitleTimer(): void {
@@ -136,13 +128,6 @@ export function createAgentCompletionCoordinator(
     }
     pendingHookDoneTitle = null
     pendingHookDonePayload = null
-  }
-
-  function clearPendingCodexAttention(): void {
-    if (pendingCodexAttentionTimer !== null) {
-      clearTimeout(pendingCodexAttentionTimer)
-      pendingCodexAttentionTimer = null
-    }
   }
 
   function establishAgentEvidence(): void {
@@ -185,7 +170,8 @@ export function createAgentCompletionCoordinator(
   }
 
   function doneShouldUseQuietWindow(payload: AgentCompletionStatusSnapshot): boolean {
-    // Why: Pi/OMP emit milestone 'done' while still working, so route it through the quiet window so later work can cancel it.
+    // Why: Pi/OMP emit milestone 'done' while still working, so route their done
+    // through the quiet window (like a resumed turn) so later work can cancel it.
     return workingStatusObserved || isPiCompatibleAgentType(hookCompletionAgentIdentity(payload))
   }
 
@@ -266,7 +252,6 @@ export function createAgentCompletionCoordinator(
     title: string,
     optionsOverride: {
       quietedHookDone?: boolean
-      terminalIdleConfirmed?: boolean
       agentStatus?: AgentCompletionStatusSnapshot
       completionIdentity?: LastCompletionIdentity | null
     } = {}
@@ -293,32 +278,18 @@ export function createAgentCompletionCoordinator(
     lastCompletedTurn = currentTurn
     lastCompletionSource = source
     workingStatusObserved = false
-    // Why: any committed completion ends the turn, so a debounced Codex attention from an earlier pause must not fire after it.
-    clearPendingCodexAttention()
     if (optionsOverride.completionIdentity) {
       lastCompletionIdentityByPaneKey.set(options.paneKey, optionsOverride.completionIdentity)
     }
-    if (source === 'hook' && optionsOverride.agentStatus) {
-      options.dispatchHookLifecycle?.(optionsOverride.agentStatus)
-    }
-    if (optionsOverride.quietedHookDone === true || source === 'process-exit') {
-      // Why: confirmed process death is independent completion evidence; keep its provenance so stale hook rows can't veto it later.
+    if (optionsOverride.quietedHookDone === true) {
       options.dispatchCompletion(title, {
         source,
-        quietedHookDone: optionsOverride.quietedHookDone === true,
-        ...(optionsOverride.terminalIdleConfirmed === true ? { terminalIdleConfirmed: true } : {}),
+        quietedHookDone: true,
         ...(optionsOverride.agentStatus ? { agentStatus: optionsOverride.agentStatus } : {})
       })
     } else {
       options.dispatchCompletion(title)
     }
-  }
-
-  function dispatchAttentionNotification(payload: AgentCompletionStatusSnapshot): void {
-    options.dispatchAttention?.(payload.agentType ?? options.paneKey, {
-      source: 'hook',
-      agentStatus: payload
-    })
   }
 
   function dispatchAttention(payload: AgentCompletionStatusSnapshot): void {
@@ -330,21 +301,10 @@ export function createAgentCompletionCoordinator(
       return
     }
     lastAttentionToken = token
-    // Why: the visual "needs input" status updates immediately; only the OS attention notification is debounced (Codex, below).
-    options.dispatchHookLifecycle?.(payload)
-    if (payload.agentType === 'codex') {
-      // Why: an auto-resolved Codex "Approve for me" cancels this pending notification via a later hook; scoped to Codex so other agents notify at once.
-      clearPendingCodexAttention()
-      pendingCodexAttentionTimer = setTimeout(() => {
-        pendingCodexAttentionTimer = null
-        if (!options.isLive() || !hasAgentRunEvidence) {
-          return
-        }
-        dispatchAttentionNotification(payload)
-      }, CODEX_ATTENTION_QUIET_MS)
-      return
-    }
-    dispatchAttentionNotification(payload)
+    options.dispatchAttention(payload.agentType ?? options.paneKey, {
+      source: 'hook',
+      agentStatus: payload
+    })
   }
 
   function scheduleHookDoneCompletion(title: string, payload: AgentCompletionStatusSnapshot): void {
@@ -353,7 +313,8 @@ export function createAgentCompletionCoordinator(
     if (pendingHookDoneTimer !== null) {
       return
     }
-    // Why: goal/mission agents can report a temporary done between milestones; wait a short quiet window so resumed work can cancel it.
+    // Why: goal/mission agents can report a temporary done state between
+    // milestones. Wait for a short quiet window so resumed work can cancel it.
     pendingHookDoneTimer = setTimeout(() => {
       pendingHookDoneTimer = null
       const pendingTitle = pendingHookDoneTitle
@@ -434,7 +395,8 @@ export function createAgentCompletionCoordinator(
 
   function holdTitleCompletionPending(title: string): void {
     const now = Date.now()
-    // Why: generic spinner titles can be just "⠋ cwd"; hold completion only until one probe proves an agent owns the pane.
+    // Why: generic spinner titles can be just "⠋ cwd"; hold the completion
+    // only long enough for one foreground-process probe to prove an agent owns it.
     pendingTitle = {
       id: ++pendingTitleSequence,
       title,
@@ -451,18 +413,13 @@ export function createAgentCompletionCoordinator(
     pendingProcessExitAgent = null
     if (lastForegroundAgent?.agent !== process.agent) {
       if (lastForegroundAgent && hasAgentRunEvidence) {
-        if (
-          options.shouldSuppressProcessReplacementCompletion?.(lastForegroundAgent, process) !==
-          true
-        ) {
-          dispatchCompletion('process-exit', lastForegroundAgent.processName, {
-            completionIdentity: {
-              source: 'process-exit',
-              identity: `${lastForegroundAgent.agent}:${lastForegroundAgent.processName}`,
-              agentIdentity: lastForegroundAgent.agent
-            }
-          })
-        }
+        dispatchCompletion('process-exit', lastForegroundAgent.processName, {
+          completionIdentity: {
+            source: 'process-exit',
+            identity: `${lastForegroundAgent.agent}:${lastForegroundAgent.processName}`,
+            agentIdentity: lastForegroundAgent.agent
+          }
+        })
       }
       processSession += 1
     }
@@ -471,27 +428,22 @@ export function createAgentCompletionCoordinator(
   }
 
   function handleProcessInspectionResult(result: RuntimeTerminalProcessInspection): boolean {
-    if (result.unavailable === true) {
-      // Why: unknown liveness breaks the consecutive-idle proof without erasing known agent ownership.
-      pendingProcessExitAgent = null
-      consecutiveInspectionErrors += 1
-      scheduleNextPoll()
-      return false
-    }
     consecutiveInspectionErrors = 0
     const recognized = recognizeAgentProcess(result.foregroundProcess)
     if (recognized) {
       handleRecognizedProcess(recognized)
       return true
     }
-    if (pendingHookDoneTimer !== null || pendingCodexAttentionTimer !== null) {
-      // Why: a pending quiet-window 'done'/debounced attention is authoritative; don't drop agent evidence on a transient blip or the timer guard loses it (#8387).
+    if (pendingHookDoneTimer !== null) {
+      // Why: a pending quiet-window 'done' is the authoritative completion;
+      // tearing down agent evidence here would make the timer drop it.
       scheduleNextPoll()
       return false
     }
     if (lastForegroundAgent && hasAgentRunEvidence) {
       if (result.hasChildProcesses) {
-        // Why: Codex can briefly report a shell/null foreground while still alive; don't announce completion from that blip.
+        // Why: Codex can briefly report a shell/null foreground while its TUI or
+        // child work is still alive; do not announce completion from that blip.
         pendingProcessExitAgent = null
         scheduleNextPoll()
         return false
@@ -501,23 +453,21 @@ export function createAgentCompletionCoordinator(
         pendingProcessExitAgent.agent !== lastForegroundAgent.agent ||
         pendingProcessExitAgent.processName !== lastForegroundAgent.processName
       ) {
-        // Why: macOS inspection can transiently report no foreground child during prompt handoff; require the idle sample to repeat.
+        // Why: macOS process inspection can transiently report no foreground
+        // child during prompt handoff; require the idle sample to repeat.
         pendingProcessExitAgent = lastForegroundAgent
         scheduleNextPoll()
         return false
       }
       const exited = lastForegroundAgent
       pendingProcessExitAgent = null
-      if (options.shouldSuppressConfirmedProcessExitCompletion?.(exited) !== true) {
-        dispatchCompletion('process-exit', exited.processName, {
-          terminalIdleConfirmed: true,
-          completionIdentity: {
-            source: 'process-exit',
-            identity: `${exited.agent}:${exited.processName}`,
-            agentIdentity: exited.agent
-          }
-        })
-      }
+      dispatchCompletion('process-exit', exited.processName, {
+        completionIdentity: {
+          source: 'process-exit',
+          identity: `${exited.agent}:${exited.processName}`,
+          agentIdentity: exited.agent
+        }
+      })
       lastForegroundAgent = null
       clearAgentRunEvidence()
     } else {
@@ -558,8 +508,6 @@ export function createAgentCompletionCoordinator(
             inspectionSucceeded = true
           }
         } catch {
-          // Why: a failed inspection breaks the consecutive-idle proof just like an unavailable result.
-          pendingProcessExitAgent = null
           consecutiveInspectionErrors += 1
         } finally {
           inspectionInFlight = false
@@ -581,7 +529,9 @@ export function createAgentCompletionCoordinator(
                 }
                 schedulePendingTitleExpiry()
               } else {
-                // Why: only the probe for this exact pending title can prove agent ownership; older in-flight probes are stale.
+                // Why: only the probe requested for this exact pending title
+                // can prove it belongs to an agent; older in-flight probes are
+                // stale even when they were also pending-title inspections.
                 requestInspection('pending-title')
               }
             }
@@ -593,7 +543,9 @@ export function createAgentCompletionCoordinator(
   }
 
   function shouldRunCadenceInspection(): boolean {
-    // Why: hidden idle terminals skip the global cadence, but once a pane has agent evidence keep the backstop for unannounced process exits.
+    // Why: hidden idle terminals should not join the global process-inspection
+    // cadence. Once a pane has agent evidence, keep the backstop alive so an
+    // unannounced process exit can still produce/clear completion state.
     return (
       hasAgentRunEvidence ||
       lastForegroundAgent !== null ||
@@ -602,56 +554,37 @@ export function createAgentCompletionCoordinator(
   }
 
   function isHiddenBackstop(): boolean {
-    // Why: only run as hidden backstop when visibility is known false; undefined (no visibility source) keeps full pre-throttle cadence.
+    // Why: cadence runs as a hidden-pane backstop only when visibility is known
+    // to be false. An undefined option (coordinators with no visibility source)
+    // keeps full cadence, matching pre-throttle behavior.
     return options.shouldPollProcessCadence?.() === false
   }
 
-  function paneActivityWithinHotWindow(): boolean {
-    return (
-      lastPaneActivityAt > 0 && Date.now() - lastPaneActivityAt < NO_EVIDENCE_ACTIVITY_HOT_WINDOW_MS
-    )
-  }
-
-  function currentPollTier(): PollCadenceTier {
-    if (isHiddenBackstop()) {
-      return 'hidden'
-    }
-    if (lastForegroundAgent) {
-      return 'active'
-    }
-    if (hasAgentRunEvidence) {
-      return 'idle'
-    }
-    // Why: only costly hosts relax the no-evidence cadence; recent activity keeps it hot so an agent start is inspected promptly.
-    if (options.isProcessInspectionCostly?.() === true && !paneActivityWithinHotWindow()) {
-      return 'no-evidence'
-    }
-    return 'idle'
-  }
-
-  function nextPollInterval(tier: PollCadenceTier): number {
-    // Why: hidden panes poll slowly (backstop only); visible panes keep full cadence.
-    const base = POLL_TIER_INTERVAL_MS[tier]
+  function nextPollInterval(): number {
+    // Why: a hidden pane polls slowly (backstop only); a visible pane keeps full
+    // cadence so the foreground experience is unchanged.
+    const base = isHiddenBackstop()
+      ? HIDDEN_POLL_INTERVAL_MS
+      : lastForegroundAgent
+        ? ACTIVE_POLL_INTERVAL_MS
+        : IDLE_POLL_INTERVAL_MS
     const backoff =
       consecutiveInspectionErrors > 0
-        ? // Why: max(base, ...) keeps error backoff from accelerating tiers already slower than the 10s ceiling (no-evidence is 15s).
-          Math.min(Math.max(10_000, base), base * 2 ** consecutiveInspectionErrors)
+        ? Math.min(10_000, base * 2 ** consecutiveInspectionErrors)
         : base
     const jitter = 1 + (Math.random() * 0.2 - 0.1)
     return Math.round(backoff * jitter)
   }
 
   function scheduleNextPoll(): void {
-    if (disposed || !pollTrackingStarted || !options.isLive() || pendingTitle) {
+    if (disposed || !options.isLive() || pendingTitle) {
       return
     }
-    const tier = currentPollTier()
     if (pollTimer !== null) {
-      // Why: a pane whose tier moved to a faster cadence has a slow timer armed; re-arm now instead of waiting it out.
-      if (
-        pollTimerTier !== null &&
-        POLL_TIER_INTERVAL_MS[tier] < POLL_TIER_INTERVAL_MS[pollTimerTier]
-      ) {
+      // Why: a hidden pane that became visible has a slow backstop timer armed;
+      // re-arm it at full cadence now instead of waiting out the long delay.
+      // scheduleNextPoll runs on every visibility flip via startProcessTracking.
+      if (pollTimerIsHiddenBackstop && !isHiddenBackstop()) {
         clearPollTimer()
       } else {
         return
@@ -664,28 +597,17 @@ export function createAgentCompletionCoordinator(
     if (!ptyId) {
       return
     }
-    pollTimerTier = tier
+    pollTimerIsHiddenBackstop = isHiddenBackstop()
     pollTimer = setTimeout(() => {
       pollTimer = null
-      pollTimerTier = null
+      pollTimerIsHiddenBackstop = false
       requestInspection('cadence')
-    }, nextPollInterval(tier))
-  }
-
-  function recordPaneActivity(): void {
-    lastPaneActivityAt = Date.now()
-    // Why: activity ends the relaxed no-evidence cadence; re-arm only when the armed timer is slow (or none) so per-chunk calls stay near-free.
-    if (pollTimer === null || pollTimerTier === 'no-evidence') {
-      scheduleNextPoll()
-    }
-  }
-
-  function observeOutputActivity(): void {
-    recordPaneActivity()
+    }, nextPollInterval())
   }
 
   function recordTitleWorking(): boolean {
-    // Why: hooks can report `done` before title tracking notices the next milestone, so the working title must cancel that provisional done.
+    // Why: hooks can report `done` before title tracking notices the next
+    // milestone. The title working signal must cancel that provisional done.
     clearPendingHookDone()
     if (
       lastCompletionSource === 'hook' &&
@@ -693,8 +615,6 @@ export function createAgentCompletionCoordinator(
     ) {
       return false
     }
-    // Why: cancel debounced attention when a Codex resume surfaces as a working title (else false banner #8387); placed after the replay guard so a stale post-completion replay can't drop it.
-    clearPendingCodexAttention()
     workingStatusObserved = true
     requiresFreshWorking = false
     lastCompletionIdentityByPaneKey.delete(options.paneKey)
@@ -708,7 +628,6 @@ export function createAgentCompletionCoordinator(
   }
 
   function observeTitle(title: string): void {
-    recordPaneActivity()
     const status = detectAgentStatusFromTitle(title)
     const isInconclusiveNativeDroidTitle = titleIsInconclusiveNativeDroidTitle(title)
     const hasExplicitAgentIdentity =
@@ -728,7 +647,9 @@ export function createAgentCompletionCoordinator(
         return
       }
       if (status === null && !titleHasExplicitAgentIdentity(title)) {
-        // Why: shells restore cwd titles after short commands; hold generic completion as provisional until inspection proves agent ownership.
+        // Why: shells commonly restore cwd titles right after a short printf
+        // command. Treat generic completion titles as provisional until process
+        // inspection proves an agent still owns the pane.
         holdTitleCompletionPending(title)
         lastTitleStatus = status
         return
@@ -746,7 +667,8 @@ export function createAgentCompletionCoordinator(
         holdTitleCompletionPending(title)
       }
     } else if (hadPendingTitle && status !== null && hasExplicitAgentIdentity) {
-      // Why: a shell can briefly restore cwd between working and done; the later explicit agent completion is authoritative.
+      // Why: a shell can briefly restore cwd between "Codex working" and
+      // "Codex done"; the later explicit agent completion is authoritative.
       dropPendingTitle()
       markTitleCompletionNotified(title)
       dispatchCompletion('title', title, {
@@ -779,12 +701,11 @@ export function createAgentCompletionCoordinator(
   }
 
   function observeHookStatus(payload: AgentCompletionStatusSnapshot): void {
-    recordPaneActivity()
     if (options.shouldSuppressHookCompletion?.(payload)) {
-      // Why: a suppressed permission pause must still cancel a provisional 'done' so the quiet-window timer can't fire a false completion.
+      // Why: a suppressed permission pause must still cancel a provisional 'done'
+      // so the quiet-window timer never fires a false completion notification.
       if (isAttentionHookState(payload.state)) {
         clearPendingHookDone()
-        clearPendingCodexAttention()
       }
       return
     }
@@ -793,26 +714,22 @@ export function createAgentCompletionCoordinator(
     }
     if (payload.state === 'working') {
       clearPendingHookDone()
-      // Why: resumed work cancels the debounced attention so a self-resolving pause never notifies.
-      clearPendingCodexAttention()
       workingStatusObserved = true
       requiresFreshWorking = false
       lastCompletionIdentity = null
       lastAttentionToken = null
       currentTurn += 1
       dropPendingTitle()
-      options.dispatchHookLifecycle?.(payload)
       return
     }
     if (isAttentionHookState(payload.state)) {
-      // Why: a pause arriving before the quiet window must cancel a provisional 'done' so it never becomes a false completion.
+      // Why: a permission/elicitation pause arriving before the quiet window
+      // must cancel a provisional 'done' so it never becomes a false completion.
       clearPendingHookDone()
       dispatchAttention(payload)
       return
     }
     if (isCompletionHookState(payload.state)) {
-      // Why: the turn is ending, so a debounced attention from an earlier pause must not fire after completion.
-      clearPendingCodexAttention()
       if (isRecognizedAgentType(payload.agentType)) {
         establishAgentEvidence()
       }
@@ -822,7 +739,8 @@ export function createAgentCompletionCoordinator(
         lastCompletionIdentity?.source === 'hook' &&
         hookIdentity === lastCompletionIdentity.identity
       ) {
-        // Why: activation/switching can replay the same hook snapshot after the 1s guard; only pending quiet-window detail should refresh.
+        // Why: activation/switching can replay the same main-process hook snapshot
+        // after the 1s guard; only pending quiet-window detail should refresh.
         if (payload.state === 'done' && pendingHookDoneTimer !== null) {
           scheduleHookDoneCompletion(payload.agentType ?? options.paneKey, payload)
         }
@@ -834,7 +752,9 @@ export function createAgentCompletionCoordinator(
         lastCompletedTurn === currentTurn &&
         Date.now() - lastCompletionAt >= COMPLETION_REPLAY_GUARD_MS
       ) {
-        // Why: some hook producers only emit terminal states; treat later done-only completions as new turns without backstop dupes.
+        // Why: some hook producers only emit terminal states. Treat later
+        // done-only hook completions as new turns without letting title/process
+        // backstops duplicate the same completion.
         currentTurn += 1
       }
       if (payload.state === 'done' && doneShouldUseQuietWindow(payload)) {
@@ -855,10 +775,11 @@ export function createAgentCompletionCoordinator(
             agentIdentity: hookCompletionAgentIdentity(payload)
           }
         : null
-      dispatchCompletion('hook', payload.agentType ?? options.paneKey, {
-        agentStatus: payload,
-        ...(lastCompletionIdentity ? { completionIdentity: lastCompletionIdentity } : {})
-      })
+      dispatchCompletion(
+        'hook',
+        payload.agentType ?? options.paneKey,
+        lastCompletionIdentity ? { completionIdentity: lastCompletionIdentity } : {}
+      )
     }
   }
 
@@ -871,7 +792,6 @@ export function createAgentCompletionCoordinator(
   }
 
   function startProcessTracking(): void {
-    pollTrackingStarted = true
     scheduleNextPoll()
   }
 
@@ -881,7 +801,6 @@ export function createAgentCompletionCoordinator(
 
   function resetCompletionState(options: { requireFreshWorking?: boolean } = {}): void {
     clearPendingHookDone()
-    clearPendingCodexAttention()
     dropPendingTitle()
     agentIdentityEstablished = false
     hasAgentRunEvidence = false
@@ -902,9 +821,11 @@ export function createAgentCompletionCoordinator(
     disposed = true
     clearPollTimer()
     clearPendingHookDone()
-    clearPendingCodexAttention()
     dropPendingTitle()
-    // Why: module-scoped identity survives a live-stream remount; evict only on genuine teardown (isLive() false) so it can't leak per closed pane.
+    // Why: the dedup identity is module-scoped so it survives a live-stream remount
+    // (dispose-then-recreate with the same paneKey while isLive() stays true). Only
+    // evict it on genuine teardown — when the PTY is gone (isLive() false) — so the
+    // never-reused ${tabId}:${leafUUID} key can't leak one identity per closed pane.
     if (!options.isLive()) {
       lastCompletionIdentityByPaneKey.delete(options.paneKey)
     }
@@ -914,7 +835,6 @@ export function createAgentCompletionCoordinator(
     observeTitle,
     observeClassifiedTitleCompletion,
     observeTitleWorking,
-    observeOutputActivity,
     observeHookStatus,
     startProcessTracking,
     hasPendingHookDoneCompletion,

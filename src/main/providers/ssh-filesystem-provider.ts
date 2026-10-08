@@ -1,30 +1,24 @@
 import type { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
 import { isMethodNotFoundError, readFileViaStream } from '../ssh/ssh-filesystem-stream-reader'
 import { uploadBuffer } from '../ssh/sftp-upload'
-import { lstatViaSftp } from './ssh-filesystem-provider-sftp'
+import { fastGetViaSftp, lstatViaSftp } from './ssh-filesystem-provider-sftp'
 import {
-  downloadFileViaSftp,
-  downloadFolderViaSftp,
-  type SftpFactory
-} from './ssh-filesystem-download'
-import { openSshFileUploadSession, type SshRawTransferOptions } from './ssh-filesystem-file-upload'
-import {
-  closeSshFilesystemWatch,
+  notifySshFilesystemUnwatch,
   registerSshFilesystemWatch,
-  stopSshFilesystemWatchRegistration,
   type WatchRegistration
 } from './ssh-filesystem-provider-watch'
 import type {
   IFilesystemProvider,
   FileStat,
   FileReadResult,
-  FileUploadSession,
   TerminalArtifactAccessOptions
 } from './types'
 import type { DirEntry, FsChangeEvent, SearchOptions, SearchResult } from '../../shared/types'
-import { routeSshFilesystemWatchNotification } from './ssh-filesystem-watch-notifications'
+import { isPathInsideOrEqual } from '../../shared/cross-platform-path'
 import type { WorkspaceSpaceDirectoryScanResult } from '../../shared/workspace-space-types'
-import { isWindowsRemoteHost, type RemoteHostPlatform } from '../ssh/ssh-remote-platform'
+import type { SFTPWrapper } from 'ssh2'
+
+type SftpFactory = () => Promise<SFTPWrapper>
 const WORKSPACE_SPACE_SCAN_TIMEOUT_MS = 130_000
 
 export class SshFilesystemProvider implements IFilesystemProvider {
@@ -35,33 +29,28 @@ export class SshFilesystemProvider implements IFilesystemProvider {
   private tempDirPromise: Promise<string> | null = null
   private disposed = false
   private loggedStreamFallback = false
-  readonly downloadFolder?: IFilesystemProvider['downloadFolder']
 
   constructor(
     connectionId: string,
     mux: SshChannelMultiplexer,
-    private readonly createSftp?: SftpFactory,
-    private readonly rawTransfer?: SshRawTransferOptions,
-    hostPlatform?: RemoteHostPlatform
+    private readonly createSftp?: SftpFactory
   ) {
     this.connectionId = connectionId
     this.mux = mux
 
-    if (createSftp) {
-      // Why: system SSH has raw single-file transfer but no ssh2 SFTP channel;
-      // omitting this method makes folder capability truthful at the provider boundary.
-      // windowsRemotePaths is provider-owned (from host platform), not a caller option.
-      const windowsRemotePaths = hostPlatform ? isWindowsRemoteHost(hostPlatform) : undefined
-      this.downloadFolder = (sourcePath, destinationPath, options) =>
-        downloadFolderViaSftp(createSftp, sourcePath, destinationPath, {
-          ...options,
-          windowsRemotePaths
-        })
-    }
-
-    this.unsubscribeNotifications = mux.onNotification((method, params) =>
-      routeSshFilesystemWatchNotification(this.watchListeners, method, params)
-    )
+    this.unsubscribeNotifications = mux.onNotification((method, params) => {
+      if (method === 'fs.changed') {
+        const events = params.events as FsChangeEvent[]
+        for (const [rootPath, registration] of this.watchListeners) {
+          const matching = events.filter((e) => isPathInsideOrEqual(rootPath, e.absolutePath))
+          if (matching.length > 0) {
+            for (const cb of registration.callbacks) {
+              cb(matching)
+            }
+          }
+        }
+      }
+    })
   }
 
   dispose(): void {
@@ -73,8 +62,8 @@ export class SshFilesystemProvider implements IFilesystemProvider {
       this.unsubscribeNotifications()
       this.unsubscribeNotifications = null
     }
-    for (const registration of this.watchListeners.values()) {
-      stopSshFilesystemWatchRegistration(this.mux, registration)
+    for (const rootPath of this.watchListeners.keys()) {
+      notifySshFilesystemUnwatch(this.mux, rootPath)
     }
     this.watchListeners.clear()
   }
@@ -131,16 +120,15 @@ export class SshFilesystemProvider implements IFilesystemProvider {
   }
 
   async downloadFile(sourcePath: string, destinationPath: string): Promise<void> {
-    // Why: system SSH targets cannot open an ssh2-owned SFTP channel.
-    if (this.rawTransfer?.downloadFile) {
-      await this.rawTransfer.downloadFile(sourcePath, destinationPath)
-      return
+    if (!this.createSftp) {
+      throw new Error('Remote file download is unavailable. Reconnect the SSH target and retry.')
     }
-    await downloadFileViaSftp(this.createSftp, sourcePath, destinationPath)
-  }
-
-  async openFileUploadSession(): Promise<FileUploadSession> {
-    return openSshFileUploadSession(this.createSftp, this.rawTransfer)
+    const sftp = await this.createSftp()
+    try {
+      await fastGetViaSftp(sftp, sourcePath, destinationPath)
+    } finally {
+      sftp.end()
+    }
   }
 
   async getTempDir(): Promise<string> {
@@ -198,11 +186,6 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     contentBase64: string,
     append: boolean
   ): Promise<void> {
-    const contents = Buffer.from(contentBase64, 'base64')
-    if (this.rawTransfer?.writeBuffer) {
-      await this.rawTransfer.writeBuffer(filePath, contents, { append, exclusive: !append })
-      return
-    }
     if (!this.createSftp) {
       throw new Error('remote_binary_upload_unavailable')
     }
@@ -210,7 +193,7 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     try {
       // Why: relay fs.writeFile is text-only. SFTP writes the decoded bytes
       // directly so runtime uploads do not corrupt images, PDFs, or archives.
-      await uploadBuffer(sftp, contents, filePath, {
+      await uploadBuffer(sftp, Buffer.from(contentBase64, 'base64'), filePath, {
         append,
         exclusive: !append
       })
@@ -300,42 +283,21 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     return (await this.mux.request('fs.search', opts)) as SearchResult
   }
 
-  async listFiles(
-    rootPath: string,
-    options?: { excludePaths?: string[]; signal?: AbortSignal; maxResults?: number }
-  ): Promise<string[]> {
+  async listFiles(rootPath: string, options?: { excludePaths?: string[] }): Promise<string[]> {
     const params: Record<string, unknown> = { rootPath }
     if (options?.excludePaths && options.excludePaths.length > 0) {
       params.excludePaths = options.excludePaths
     }
-    if (options?.maxResults !== undefined) {
-      params.maxResults = options.maxResults
-    }
-    // Why #7721: the signal lets a workspace switch send rpc.cancel so the
-    // relay aborts the full-tree scan instead of stacking abandoned scans
-    // that starve interactive fs.readDir/fs.stat on the shared SSH channel.
-    return (await this.mux.request('fs.listFiles', params, {
-      signal: options?.signal
-    })) as string[]
+    return (await this.mux.request('fs.listFiles', params)) as string[]
   }
 
-  async watch(
-    rootPath: string,
-    callback: (events: FsChangeEvent[]) => void,
-    options?: { signal?: AbortSignal; onTerminalError?: (error: Error) => void }
-  ): Promise<() => void> {
+  async watch(rootPath: string, callback: (events: FsChangeEvent[]) => void): Promise<() => void> {
     return registerSshFilesystemWatch({
       mux: this.mux,
       disposed: () => this.disposed,
       registrations: this.watchListeners,
       rootPath,
-      callback,
-      onTerminalError: options?.onTerminalError,
-      signal: options?.signal
+      callback
     })
-  }
-
-  async closeWatch(rootPath: string): Promise<void> {
-    await closeSshFilesystemWatch(this.mux, this.watchListeners, rootPath)
   }
 }

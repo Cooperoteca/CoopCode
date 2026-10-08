@@ -1,5 +1,4 @@
 import type { TaskSourceContext } from '../../shared/task-source-context'
-import type { IssueSourcePreference } from '../../shared/types'
 
 export type WorkItemArgs = {
   repoPath: string
@@ -12,7 +11,6 @@ export type WorkItemArgs = {
 type RegisteredRepoContext = {
   path: string
   connectionId?: string | null
-  issueSourcePreference?: IssueSourcePreference
 }
 
 type LocalGitExecOptions = {
@@ -31,8 +29,7 @@ export function dispatchWorkItem<T>(
     n: number,
     t?: 'issue' | 'pr',
     connectionId?: string | null,
-    localGitOptions?: LocalGitExecOptions,
-    preference?: IssueSourcePreference
+    localGitOptions?: LocalGitExecOptions
   ) => Promise<T | null>,
   localGitOptions?: LocalGitExecOptions
 ): Promise<T | null> | null {
@@ -41,14 +38,5 @@ export function dispatchWorkItem<T>(
     return null
   }
   const safeType = type === 'issue' || type === 'pr' ? type : undefined
-  // Why: open-by-number must pin the same source the list and start-point use,
-  // else a fork and its upstream sharing a PR number resolve to different PRs.
-  return fn(
-    repo.path,
-    number,
-    safeType,
-    repo.connectionId ?? null,
-    localGitOptions,
-    repo.issueSourcePreference
-  )
+  return fn(repo.path, number, safeType, repo.connectionId ?? null, localGitOptions)
 }

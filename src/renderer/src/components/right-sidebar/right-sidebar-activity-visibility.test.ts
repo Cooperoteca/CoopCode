@@ -26,14 +26,7 @@ const items: ActivityBarItem[] = [
     shortcut: '',
     gitOnly: true
   },
-  { id: 'ports', icon: Files, title: 'Ports', shortcut: '', sshOnly: true },
-  // Plugin panels carry no visibility flags, so they show in every context.
-  {
-    id: 'plugin:orca-samples.my-plugin/dashboard',
-    icon: Files,
-    title: 'Dashboard',
-    shortcut: ''
-  }
+  { id: 'ports', icon: Files, title: 'Ports', shortcut: '', sshOnly: true }
 ]
 
 describe('getVisibleRightSidebarActivityItems', () => {
@@ -44,7 +37,7 @@ describe('getVisibleRightSidebarActivityItems', () => {
         isFolderWorkspace: false,
         isSshRepo: false
       }).map((item) => item.id)
-    ).toEqual(['explorer', 'source-control', 'plugin:orca-samples.my-plugin/dashboard'])
+    ).toEqual(['explorer', 'source-control'])
 
     expect(
       getVisibleRightSidebarActivityItems(items, {
@@ -52,7 +45,7 @@ describe('getVisibleRightSidebarActivityItems', () => {
         isFolderWorkspace: false,
         isSshRepo: true
       }).map((item) => item.id)
-    ).toEqual(['explorer', 'source-control', 'ports', 'plugin:orca-samples.my-plugin/dashboard'])
+    ).toEqual(['explorer', 'source-control', 'ports'])
   })
 
   it('shows Workspaces only for folder workspaces and hides git tabs for all folder scopes', () => {
@@ -62,13 +55,7 @@ describe('getVisibleRightSidebarActivityItems', () => {
         isFolderWorkspace: true,
         isSshRepo: true
       }).map((item) => item.id)
-    ).toEqual([
-      'explorer',
-      'workspaces',
-      'pr-checks',
-      'ports',
-      'plugin:orca-samples.my-plugin/dashboard'
-    ])
+    ).toEqual(['explorer', 'workspaces', 'pr-checks', 'ports'])
 
     expect(
       getVisibleRightSidebarActivityItems(items, {
@@ -76,6 +63,6 @@ describe('getVisibleRightSidebarActivityItems', () => {
         isFolderWorkspace: false,
         isSshRepo: true
       }).map((item) => item.id)
-    ).toEqual(['explorer', 'ports', 'plugin:orca-samples.my-plugin/dashboard'])
+    ).toEqual(['explorer', 'ports'])
   })
 })

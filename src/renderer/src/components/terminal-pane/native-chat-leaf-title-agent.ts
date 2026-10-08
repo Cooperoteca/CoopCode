@@ -1,5 +1,5 @@
 import type { TuiAgent } from '../../../../shared/types'
-import { resolveCommittedTitleAgentType } from '@/lib/pane-agent-evidence'
+import { resolveTabAgentFromTitle } from '@/lib/use-tab-agent'
 
 export type NativeChatLeafTitlePane = {
   id: number
@@ -26,7 +26,7 @@ export function resolveNativeChatLeafTitleAgent({
   }
   const targetPane = panes.find((pane) => pane.leafId === leafId)
   const paneAgent = targetPane
-    ? resolveCommittedTitleAgentType(runtimePaneTitlesByPaneId[targetPane.id] ?? '')
+    ? resolveTabAgentFromTitle(runtimePaneTitlesByPaneId[targetPane.id] ?? '')
     : null
   if (paneAgent) {
     return paneAgent
@@ -36,8 +36,5 @@ export function resolveNativeChatLeafTitleAgent({
   if (panes.length > 1) {
     return null
   }
-  return (
-    resolveCommittedTitleAgentType(tabLabel ?? '') ??
-    resolveCommittedTitleAgentType(terminalTitle ?? '')
-  )
+  return resolveTabAgentFromTitle(tabLabel ?? '') ?? resolveTabAgentFromTitle(terminalTitle ?? '')
 }

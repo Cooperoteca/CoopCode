@@ -5,14 +5,7 @@ const { lstatMock, readFileMock } = vi.hoisted(() => ({
   readFileMock: vi.fn()
 }))
 
-vi.mock('fs/promises', () => ({ lstat: lstatMock }))
-
-vi.mock('./node-bounded-file-reader', () => ({
-  readNodeFileWithinLimit: async (path: string) => ({
-    buffer: await readFileMock(path),
-    stats: mockFileStat(0)
-  })
-}))
+vi.mock('fs/promises', () => ({ lstat: lstatMock, readFile: readFileMock }))
 
 import {
   applyLineStats,
@@ -20,7 +13,6 @@ import {
   MAX_UNTRACKED_LINE_COUNT_BYTES,
   parseNumstat
 } from './git-uncommitted-line-stats'
-import { DEFAULT_GIT_STATUS_LIMIT } from './git-status-limit'
 
 function mockFileStat(size: number, mtimeMs = 1) {
   return {
@@ -142,34 +134,6 @@ describe('collectUntrackedAdditions', () => {
 
     expect(stats.get('cached.ts')).toEqual({ added: 3 })
     expect(readFileMock).toHaveBeenCalledTimes(1)
-  })
-
-  it('rejects when the status request is aborted instead of returning partial counts', async () => {
-    const controller = new AbortController()
-    controller.abort()
-    await expect(
-      collectUntrackedAdditions('/repo', ['a.ts'], controller.signal)
-    ).rejects.toMatchObject({ name: 'AbortError' })
-    expect(lstatMock).not.toHaveBeenCalled()
-  })
-
-  it('keeps the cache effective across polls for a status-limit-sized change set', async () => {
-    // Why: a cache smaller than the status cap FIFO-evicts every entry, so the
-    // next poll re-reads every file (#8013). Scan the full limit twice; the
-    // second pass must be stat-only.
-    lstatMock.mockResolvedValue(mockFileStat(5, 7))
-    readFileMock.mockResolvedValue(Buffer.from('a\nb\nc'))
-    const paths = Array.from(
-      { length: DEFAULT_GIT_STATUS_LIMIT },
-      (_, i) => `poll-scale/file-${i}.ts`
-    )
-
-    await collectUntrackedAdditions('/repo', paths)
-    const firstPassReads = readFileMock.mock.calls.length
-    await collectUntrackedAdditions('/repo', paths)
-
-    expect(firstPassReads).toBe(paths.length)
-    expect(readFileMock).toHaveBeenCalledTimes(paths.length)
   })
 })
 

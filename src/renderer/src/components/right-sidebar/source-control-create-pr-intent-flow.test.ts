@@ -143,18 +143,14 @@ describe('source-control Create PR intent flow helpers', () => {
     ).toEqual(['safe.ts', 'new.ts'])
   })
 
-  it('prefers the remote-validated eligibility default so it cannot diverge from the composer', () => {
-    // Why: the intent flow's eligibility is recomputed from the same compare
-    // base right before creation, so its default already corrects a local-only
-    // stacked parent to the repo default. The one-click path must target that
-    // same base as the composer, not the raw (possibly unpushable) compare base.
+  it('prefers the current compare base over stale eligibility defaults', () => {
     expect(
       resolveCreatePrIntentReviewBase({
-        currentBaseRef: 'stacked-parent',
+        currentBaseRef: 'refs/remotes/origin/release',
         eligibilityDefaultBaseRef: 'refs/remotes/origin/main',
         composerBaseRef: 'main'
       })
-    ).toBe('main')
+    ).toBe('release')
 
     expect(
       resolveCreatePrIntentReviewBase({
@@ -163,19 +159,6 @@ describe('source-control Create PR intent flow helpers', () => {
         composerBaseRef: 'main'
       })
     ).toBe('develop')
-  })
-
-  it('falls back to the compare base when eligibility supplies no default', () => {
-    // Why: never blank the base. If the main process could not resolve a default
-    // (no candidate on remote and repo default unavailable), keep the user's
-    // compare base rather than dropping to an empty target.
-    expect(
-      resolveCreatePrIntentReviewBase({
-        currentBaseRef: 'refs/remotes/origin/release',
-        eligibilityDefaultBaseRef: null,
-        composerBaseRef: 'main'
-      })
-    ).toBe('release')
   })
 
   it('resolves safe remote steps for publish, push, and patch-equivalent force-push', () => {
@@ -189,8 +172,7 @@ describe('source-control Create PR intent flow helpers', () => {
           review: null,
           canCreate: false,
           blockedReason: 'no_upstream',
-          nextAction: 'publish',
-          reviewLookupOutcome: 'not_found'
+          nextAction: 'publish'
         }
       })
     ).toBe('publish')
@@ -204,8 +186,7 @@ describe('source-control Create PR intent flow helpers', () => {
           review: null,
           canCreate: false,
           blockedReason: 'needs_push',
-          nextAction: 'push',
-          reviewLookupOutcome: 'not_found'
+          nextAction: 'push'
         }
       })
     ).toBe('push')
@@ -225,16 +206,13 @@ describe('source-control Create PR intent flow helpers', () => {
           review: null,
           canCreate: false,
           blockedReason: 'needs_sync',
-          nextAction: 'sync',
-          reviewLookupOutcome: 'not_found'
+          nextAction: 'sync'
         }
       })
     ).toBe('force_push')
   })
 
-  it('fast-forwards behind-only branches, blocks diverged and unpublished-without-commits branches', () => {
-    // Genuinely diverged (local + non-equivalent remote commits): auto-merging
-    // would reconcile without consent, so the intent flow keeps the explicit stop.
+  it('blocks ordinary diverged branches and unpublished branches without commits', () => {
     expect(
       resolveCreatePrIntentRemoteStep({
         upstreamStatus: { hasUpstream: true, ahead: 1, behind: 1 },
@@ -244,27 +222,10 @@ describe('source-control Create PR intent flow helpers', () => {
           review: null,
           canCreate: false,
           blockedReason: 'needs_sync',
-          nextAction: 'sync',
-          reviewLookupOutcome: 'not_found'
+          nextAction: 'sync'
         }
       })
     ).toBe('blocked')
-
-    // Behind with no local commits: pure --ff-only (never plain merge sync).
-    expect(
-      resolveCreatePrIntentRemoteStep({
-        upstreamStatus: { hasUpstream: true, ahead: 0, behind: 3 },
-        hasCurrentBranch: true,
-        hostedReviewCreation: {
-          provider: 'github',
-          review: null,
-          canCreate: false,
-          blockedReason: 'needs_sync',
-          nextAction: 'sync',
-          reviewLookupOutcome: 'not_found'
-        }
-      })
-    ).toBe('fast_forward')
 
     expect(
       resolveCreatePrIntentRemoteStep({
@@ -276,8 +237,7 @@ describe('source-control Create PR intent flow helpers', () => {
           review: null,
           canCreate: false,
           blockedReason: 'no_upstream',
-          nextAction: 'publish',
-          reviewLookupOutcome: 'not_found'
+          nextAction: 'publish'
         }
       })
     ).toBe('blocked')

@@ -1,17 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const netFetchMock = vi.hoisted(() => vi.fn())
-const cookiesSetMock = vi.hoisted(() => vi.fn())
-const clearStorageDataMock = vi.hoisted(() => vi.fn())
-const resolveProxyMock = vi.hoisted(() => vi.fn())
-const setProxyMock = vi.hoisted(() => vi.fn())
-const fromPartitionMock = vi.hoisted(() => vi.fn())
 
 vi.mock('electron', () => ({
-  session: { fromPartition: fromPartitionMock }
+  net: { fetch: netFetchMock }
 }))
 
 import { fetchOpenCodeGoRateLimits, normalizeCookieInput } from './opencode-go-usage-fetcher'
+
 const WORKSPACES_SERVER_ID = 'def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f'
 
 function makeResponse(body: string, status = 200): Response {
@@ -46,18 +42,6 @@ describe('fetchOpenCodeGoRateLimits', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-24T12:00:00.000Z'))
     netFetchMock.mockReset()
-    cookiesSetMock.mockReset().mockResolvedValue(undefined)
-    clearStorageDataMock.mockReset().mockResolvedValue(undefined)
-    resolveProxyMock.mockReset().mockResolvedValue('PROXY system.example:8080')
-    setProxyMock.mockReset().mockResolvedValue(undefined)
-    fromPartitionMock.mockReset().mockReturnValue({
-      fetch: netFetchMock,
-      cookies: { set: cookiesSetMock },
-      clearStorageData: clearStorageDataMock,
-      resolveProxy: resolveProxyMock,
-      setProxy: setProxyMock,
-      closeAllConnections: vi.fn().mockResolvedValue(undefined)
-    })
   })
 
   it('returns unavailable when cookie is empty', async () => {
@@ -128,9 +112,8 @@ describe('fetchOpenCodeGoRateLimits', () => {
     const result = await fetchOpenCodeGoRateLimits('Fe26.2**baretoken')
 
     expect(result.status).toBe('ok')
-    expect(cookiesSetMock).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'auth', value: 'Fe26.2**baretoken' })
-    )
+    // Cookie sent to the server must be auth=<token>, not the bare value.
+    expect(netFetchMock.mock.calls[0][1].headers.Cookie).toBe('auth=Fe26.2**baretoken')
   })
 
   it('uses GET /_server?id=<hash> with correct headers for workspaces', async () => {
@@ -146,102 +129,11 @@ describe('fetchOpenCodeGoRateLimits', () => {
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({
+          Cookie: 'auth=mytoken',
           'X-Server-Id': WORKSPACES_SERVER_ID
         })
       })
     )
-    expect(netFetchMock.mock.calls[0][1].headers).not.toHaveProperty('Cookie')
-  })
-
-  it('uses an isolated session cookie jar and clears it after fetching', async () => {
-    netFetchMock
-      .mockResolvedValueOnce(makeResponse(WORKSPACES_RESPONSE))
-      .mockResolvedValueOnce(makeResponse(USAGE_PAGE_WITH_MONTHLY))
-
-    await fetchOpenCodeGoRateLimits('auth=mytoken')
-
-    expect(fromPartitionMock).toHaveBeenCalledWith('orca-opencode-go-rate-limit-fetch')
-    expect(clearStorageDataMock).toHaveBeenCalledTimes(2)
-    expect(clearStorageDataMock).toHaveBeenLastCalledWith({
-      origin: 'https://opencode.ai',
-      storages: ['cookies']
-    })
-  })
-
-  it('clears partially installed cookies when cookie setup fails', async () => {
-    cookiesSetMock.mockRejectedValueOnce(new Error('cookie rejected'))
-
-    const result = await fetchOpenCodeGoRateLimits('auth=mytoken')
-
-    expect(result.status).toBe('error')
-    expect(result.error).toBe('cookie rejected')
-    expect(clearStorageDataMock).toHaveBeenCalledTimes(2)
-    expect(netFetchMock).not.toHaveBeenCalled()
-  })
-
-  it('finishes each cookie write before starting the next one', async () => {
-    let resolveFirstCookie!: () => void
-    let markFirstCookieStarted!: () => void
-    const firstCookiePending = new Promise<void>((resolve) => {
-      resolveFirstCookie = resolve
-    })
-    const firstCookieStarted = new Promise<void>((resolve) => {
-      markFirstCookieStarted = resolve
-    })
-    cookiesSetMock
-      .mockImplementationOnce(() => {
-        markFirstCookieStarted()
-        return firstCookiePending
-      })
-      .mockRejectedValueOnce(new Error('second cookie rejected'))
-
-    const resultPending = fetchOpenCodeGoRateLimits('auth=first; __Host-auth=second')
-    await firstCookieStarted
-
-    expect(cookiesSetMock).toHaveBeenCalledTimes(1)
-    resolveFirstCookie()
-    const result = await resultPending
-
-    expect(result.error).toBe('second cookie rejected')
-    expect(cookiesSetMock).toHaveBeenCalledTimes(2)
-    expect(clearStorageDataMock).toHaveBeenCalledTimes(2)
-  })
-
-  it('applies configured proxy settings once to the isolated session', async () => {
-    netFetchMock
-      .mockResolvedValueOnce(makeResponse(WORKSPACES_RESPONSE))
-      .mockResolvedValueOnce(makeResponse(USAGE_PAGE_WITH_MONTHLY))
-      .mockResolvedValueOnce(makeResponse(WORKSPACES_RESPONSE))
-      .mockResolvedValueOnce(makeResponse(USAGE_PAGE_WITH_MONTHLY))
-
-    const proxySettings = {
-      httpProxyUrl: 'http://proxy.example:8080',
-      httpProxyBypassRules: 'localhost, *.internal'
-    }
-    const result = await fetchOpenCodeGoRateLimits('auth=mytoken', undefined, proxySettings)
-    const repeatedResult = await fetchOpenCodeGoRateLimits('auth=mytoken', undefined, proxySettings)
-
-    expect(result.status).toBe('ok')
-    expect(repeatedResult.status).toBe('ok')
-    expect(setProxyMock).toHaveBeenCalledWith({
-      mode: 'fixed_servers',
-      proxyRules: 'http://proxy.example:8080',
-      proxyBypassRules: 'localhost;*.internal'
-    })
-    expect(setProxyMock).toHaveBeenCalledTimes(1)
-    expect(resolveProxyMock).not.toHaveBeenCalled()
-  })
-
-  it('does not bypass an explicitly configured proxy when setup fails', async () => {
-    setProxyMock.mockRejectedValueOnce(new Error('proxy setup failed'))
-
-    const result = await fetchOpenCodeGoRateLimits('auth=mytoken', undefined, {
-      httpProxyUrl: 'http://proxy.example:8080'
-    })
-
-    expect(result.error).toBe('proxy setup failed')
-    expect(cookiesSetMock).not.toHaveBeenCalled()
-    expect(netFetchMock).not.toHaveBeenCalled()
   })
 
   it('fetches usage from /workspace/<id>/go after resolving workspace ID', async () => {
@@ -392,10 +284,8 @@ describe('fetchOpenCodeGoRateLimits', () => {
 
     await fetchOpenCodeGoRateLimits('session=secret; auth=realtoken; tracking=xyz')
 
-    expect(cookiesSetMock).toHaveBeenCalledTimes(1)
-    expect(cookiesSetMock).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'auth', value: 'realtoken' })
-    )
+    const firstCall = netFetchMock.mock.calls[0]
+    expect(firstCall[1].headers.Cookie).toBe('auth=realtoken')
   })
 
   it('returns error on 404 from workspaces fetch', async () => {

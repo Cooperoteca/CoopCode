@@ -1,9 +1,7 @@
 import type {
   LinearIssueContextResult,
   LinearIssueListResult,
-  LinearMcpIssueListResult,
   LinearIssueTaskUpdateResult,
-  LinearIssueRelationWriteResult,
   LinearProjectListResult,
   LinearSearchIssueSummary,
   LinearSearchResult,
@@ -14,8 +12,7 @@ import type {
   LinearStatusSetResult,
   LinearCommentAddResult,
   LinearAttachResult,
-  LinearCreateResult,
-  LinearSaveIssueResult
+  LinearCreateResult
 } from '../../shared/linear-agent-access'
 import {
   formatLinearProjectListRows,
@@ -25,15 +22,12 @@ import {
   isLinearAttachResult,
   isLinearCommentAddResult,
   isLinearCreateResult,
-  isLinearSaveIssueResult,
   isLinearIssueContextResult,
   isLinearIssueListResult,
-  isLinearMcpIssueListResult,
   isLinearProjectListResult,
   isLinearSearchResult,
   isLinearStatusSetResult,
   isLinearTaskUpdateResult,
-  isLinearRelationWriteResult,
   isLinearTeamLabelsResult,
   isLinearTeamListResult,
   isLinearTeamMembersResult,
@@ -48,12 +42,6 @@ export function formatRemoteLinearCli(result: unknown): { stdout: string; stderr
     return {
       stdout: `${formatLinearIssueRows(result.issues)}\n`,
       stderr: linearListWarnings(result, 'Linear search')
-    }
-  }
-  if (isLinearMcpIssueListResult(result)) {
-    return {
-      stdout: `${formatLinearIssueRows(result.issues)}\n`,
-      stderr: linearMcpListWarnings(result)
     }
   }
   if (isLinearIssueListResult(result)) {
@@ -86,17 +74,11 @@ export function formatRemoteLinearCli(result: unknown): { stdout: string; stderr
   if (isLinearTaskUpdateResult(result)) {
     return { stdout: `${formatLinearTaskUpdate(result)}\n`, stderr: '' }
   }
-  if (isLinearRelationWriteResult(result)) {
-    return { stdout: `${formatLinearRelationWrite(result)}\n`, stderr: '' }
-  }
   if (isLinearCommentAddResult(result)) {
     return { stdout: `${formatLinearCommentAdd(result)}\n`, stderr: '' }
   }
   if (isLinearAttachResult(result)) {
     return { stdout: `${formatLinearAttach(result)}\n`, stderr: '' }
-  }
-  if (isLinearSaveIssueResult(result)) {
-    return { stdout: `${formatLinearSaveIssue(result)}\n`, stderr: '' }
   }
   if (isLinearCreateResult(result)) {
     return { stdout: `${formatLinearCreate(result)}\n`, stderr: '' }
@@ -126,22 +108,13 @@ function formatLinearIssue(result: LinearIssueContextResult): string {
   if (issue.dueDate) {
     lines.push(`Due: ${issue.dueDate}`)
   }
-  for (const section of ['comments', 'children', 'attachments', 'relations', 'activity'] as const) {
+  for (const section of ['comments', 'children', 'attachments', 'relations'] as const) {
     const meta = result.meta.sections[section]
     if (meta) {
       lines.push(`${section[0].toUpperCase()}${section.slice(1)}: ${meta.returned}`)
     }
   }
-  if (result.inlineMedia?.length) {
-    lines.push(`Inline media: ${result.inlineMedia.length} (use --json for URLs)`)
-  }
   return lines.join('\n')
-}
-
-function formatLinearSaveIssue(result: LinearSaveIssueResult): string {
-  return result.meta.created
-    ? formatLinearCreate(result)
-    : `Saved ${result.issue.identifier}: ${result.issue.title}.`
 }
 
 function formatLinearIssueRows(issues: LinearSearchIssueSummary[]): string {
@@ -222,16 +195,6 @@ function formatLinearTaskUpdate(result: LinearIssueTaskUpdateResult): string {
   return `Updated ${result.issue.identifier} ${taskOperationLabel(result.operation)}${suffix}.`
 }
 
-function formatLinearRelationWrite(result: LinearIssueRelationWriteResult): string {
-  const verb = result.operation === 'add' ? 'Added' : 'Removed'
-  const suffix = result.meta.alreadySet
-    ? result.operation === 'add'
-      ? ' (already present)'
-      : ' (already absent)'
-    : ''
-  return `${verb} ${result.issue.identifier} ${result.relation.relationship} ${result.relatedIssue.identifier}${suffix}.`
-}
-
 function formatLinearCommentAdd(result: LinearCommentAddResult): string {
   const suffix = result.meta.deduplicated ? ' (already posted)' : ''
   return `Added comment ${result.comment.id} to ${result.issue.identifier}${suffix}.`
@@ -242,7 +205,7 @@ function formatLinearAttach(result: LinearAttachResult): string {
   return `Attached ${result.attachment.title} to ${result.issue.identifier}${suffix}.`
 }
 
-function formatLinearCreate(result: LinearCreateResult | LinearSaveIssueResult): string {
+function formatLinearCreate(result: LinearCreateResult): string {
   const parent = result.issue.parent ? ` under ${result.issue.parent.identifier}` : ''
   const project = result.issue.project?.name ? ` in ${result.issue.project.name}` : ''
   const suffix = result.meta.deduplicated ? ' (already created)' : ''
@@ -279,18 +242,6 @@ function linearListWarnings(
   }
   for (const error of meta.workspaceErrors ?? []) {
     warnings.push(`warning: ${error.workspace.name} unavailable for ${label}: ${error.message}`)
-  }
-  return warnings.length > 0 ? `${warnings.join('\n')}\n` : ''
-}
-
-function linearMcpListWarnings(result: LinearMcpIssueListResult): string {
-  const warnings = result.meta.workspaceErrors.map(
-    (error) => `warning: ${error.workspace.name} unavailable for Linear: ${error.message}`
-  )
-  if (result.meta.hasMore) {
-    warnings.unshift(
-      `warning: more results available; next cursor: ${result.meta.nextCursor ?? 'n/a'}`
-    )
   }
   return warnings.length > 0 ? `${warnings.join('\n')}\n` : ''
 }

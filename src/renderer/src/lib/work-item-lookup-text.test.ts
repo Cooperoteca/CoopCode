@@ -37,6 +37,5 @@ describe('isWorkItemLookupText', () => {
     expect(isWorkItemLookupText('fix-2')).toBe(false)
     expect(isWorkItemLookupText('terminal scrollbar polish')).toBe(false)
     expect(isWorkItemLookupText('https://example.com/some/page')).toBe(false)
-    expect(isWorkItemLookupText('https://linear.app/acme/project/mobile')).toBe(false)
   })
 })

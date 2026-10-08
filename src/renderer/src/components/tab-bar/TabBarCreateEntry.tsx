@@ -1,12 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { useRuntimeFileListForWorktree } from '../quick-open-file-list'
-import {
-  createTabEntryAllowAbsolutePathsSelector,
-  getTabEntryOptions,
-  isTabEntryAbsolutePathLike,
-  type TabCreateEntryArgs
-} from './tab-create-entry-action'
+import { getTabEntryOptions, type TabCreateEntryArgs } from './tab-create-entry-action'
 import {
   findMatchingTabAgentLaunchOptions,
   type TabAgentLaunchOption
@@ -28,8 +23,6 @@ import {
 } from './TabBarCreateEntryRow'
 import type { TuiAgent } from '../../../../shared/types'
 import { translate } from '@/i18n/i18n'
-import { getRendererAppPlatform } from '@/lib/renderer-app-platform'
-import { useAppStore } from '@/store'
 
 const EMPTY_AGENT_OPTIONS: readonly TabAgentLaunchOption[] = []
 const EMPTY_MENU_OPTIONS: readonly TabCreateMenuOption[] = []
@@ -69,16 +62,6 @@ export default function TabBarCreateEntry({
   const [lastMenuOpen, setLastMenuOpen] = useState(menuOpen)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileList = useRuntimeFileListForWorktree({ enabled: menuOpen, worktreeId })
-  const shouldResolveAbsolutePaths = menuOpen && isTabEntryAbsolutePathLike(query.trim())
-  const allowAbsolutePathsSelector = useMemo(
-    () =>
-      createTabEntryAllowAbsolutePathsSelector(worktreeId, {
-        skip: !shouldResolveAbsolutePaths
-      }),
-    [shouldResolveAbsolutePaths, worktreeId]
-  )
-  const allowAbsolutePaths = useAppStore(allowAbsolutePathsSelector)
-  const localPlatform = getRendererAppPlatform() === 'win32' ? 'windows' : 'posix'
 
   // Why: once ArrowDown moves focus into the static menu list, ArrowUp on the
   // first item should return to the search box so the keyboard trip isn't
@@ -122,20 +105,21 @@ export default function TabBarCreateEntry({
     [menuOptions, query]
   )
   const options = useMemo(() => {
-    const entryOptions = getTabEntryOptions(query, fileList, 4, {
-      allowAbsolutePaths,
-      localPlatform
-    })
+    const entryOptions = getTabEntryOptions(query, fileList)
     if (matchingMenuOptions.length === 0) {
       return entryOptions
     }
     // Why: a matched create-menu action should win over a generic new-file fallback.
     return entryOptions.filter((option) => option.classification.kind !== 'new-file')
-  }, [allowAbsolutePaths, fileList, localPlatform, matchingMenuOptions.length, query])
+  }, [fileList, matchingMenuOptions.length, query])
   const matchingAgentOptions = useMemo(
     () => findMatchingTabAgentLaunchOptions(query, agentOptions),
     [agentOptions, query]
   )
+
+  useEffect(() => {
+    onQueryChange?.(query)
+  }, [onQueryChange, query])
 
   if (selectedIndexQuery !== query) {
     setSelectedIndexQuery(query)
@@ -265,11 +249,7 @@ export default function TabBarCreateEntry({
           ref={inputRef}
           value={query}
           onChange={(event) => {
-            const nextQuery = event.target.value
-            // Why: the parent query only changes in response to typing, so publish
-            // it in this event rather than a later effect after the render commits.
-            setQuery(nextQuery)
-            onQueryChange?.(nextQuery)
+            setQuery(event.target.value)
             setError(null)
           }}
           disabled={disabled}

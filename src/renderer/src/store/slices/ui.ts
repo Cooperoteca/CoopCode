@@ -12,7 +12,6 @@ import type {
   GitHubWorkItem,
   JiraIssue,
   LinearIssue,
-  ManualRepoOrderEntry,
   PersistedTrustedOrcaHooks,
   PersistedUIState,
   StatusBarItem,
@@ -28,24 +27,8 @@ import type {
   WorktreeCardMode,
   WorkspaceHostOrder,
   WorkspaceHostScope,
-  VisibleWorkspaceHostIds,
-  TopLevelView
+  VisibleWorkspaceHostIds
 } from '../../../../shared/types'
-import {
-  applyManualRepoOrder,
-  normalizeManualRepoOrder
-} from '../../../../shared/manual-repo-order'
-import { isTopLevelView } from '../../../../shared/top-level-view'
-import type { UsagePercentageDisplay } from '../../../../shared/usage-percentage-display'
-import {
-  DEFAULT_USAGE_PERCENTAGE_DISPLAY,
-  normalizeUsagePercentageDisplay
-} from '../../../../shared/usage-percentage-display'
-import {
-  DEFAULT_STATUS_BAR_USAGE_MODE,
-  normalizeStatusBarUsageMode,
-  type StatusBarUsageMode
-} from '../../../../shared/status-bar-usage-mode'
 import type { GitLabWorkItem } from '../../../../shared/gitlab-types'
 import type { LaunchSource } from '../../../../shared/telemetry-events'
 import type { TaskSourceContext } from '../../../../shared/task-source-context'
@@ -106,8 +89,7 @@ import type { OrcaHookScriptKind } from '../../lib/orca-hook-trust'
 import type { SettingsNavTarget } from '@/lib/settings-navigation-types'
 import {
   filterSetupScriptPromptDismissalsToValidRepos,
-  getSetupScriptPromptDismissalKey,
-  sanitizeSetupScriptPromptDismissals
+  getSetupScriptPromptDismissalKey
 } from '../../lib/setup-script-prompt'
 import { DEFAULT_PET_ID, isBundledPetId } from '../../components/pet/pet-models'
 import { revokeCustomPetBlobUrl } from '../../components/pet/pet-blob-cache'
@@ -242,7 +224,9 @@ function clampPetSize(size: number): number {
   return Math.max(PET_SIZE_MIN, Math.min(PET_SIZE_MAX, Math.round(size)))
 }
 
-// Why: local copy of TaskPage's preset→query mapping avoids a store ↔ lib circular import while warming the exact cache key.
+// Why: mirrors the preset→query mapping used by TaskPage's preset buttons.
+// Keeping a local copy here avoids a store ↔ lib circular import while letting
+// openTaskPage warm exactly the cache key the page will read on mount.
 function presetToQuery(presetId: TaskViewPresetId | null): string {
   switch (presetId) {
     case 'all':
@@ -261,7 +245,10 @@ function presetToQuery(presetId: TaskViewPresetId | null): string {
   }
 }
 
-// Why: migrate legacy memory+sessions ids → resource-usage; keep unknown ids so downgrade→upgrade can't strip a newer build's ids.
+// Why: persisted UI state pre-dated the consolidation of `memory` + `sessions`
+// into a single `resource-usage` entry. Rewrite legacy ids in place and
+// de-duplicate. We leave unknown ids alone so a downgrade→upgrade cycle
+// doesn't strip a newer build's ids out of the user's settings.
 function migrateStatusBarItems(items: readonly string[] | undefined): StatusBarItem[] {
   const source = items ?? DEFAULT_STATUS_BAR_ITEMS
   const out: string[] = []
@@ -277,8 +264,6 @@ function migrateStatusBarItems(items: readonly string[] | undefined): StatusBarI
 const DEFAULT_ON_PORTS_STATUS_BAR_ITEM: StatusBarItem = 'ports'
 const DEFAULT_ON_KIMI_STATUS_BAR_ITEM: StatusBarItem = 'kimi'
 const DEFAULT_ON_MINIMAX_STATUS_BAR_ITEM: StatusBarItem = 'minimax'
-const DEFAULT_ON_ANTIGRAVITY_STATUS_BAR_ITEM: StatusBarItem = 'antigravity'
-const DEFAULT_ON_GROK_STATUS_BAR_ITEM: StatusBarItem = 'grok'
 
 function normalizeHydratedVisibleWorkspaceHostIds(ui: PersistedUIState): VisibleWorkspaceHostIds {
   const visibleHostIds = normalizeVisibleExecutionHostIds(ui.visibleWorkspaceHostIds)
@@ -291,10 +276,17 @@ function normalizeHydratedVisibleWorkspaceHostIds(ui: PersistedUIState): Visible
 
 const MIN_SIDEBAR_WIDTH = 220
 const MAX_LEFT_SIDEBAR_WIDTH = 500
-// Why: right-sidebar resize is window-relative, so widths can far exceed 500px on wide displays; this ceiling is only a corruption safety net.
+// Why: the right sidebar drag-resize is window-relative (see right-sidebar
+// component), so persisted widths can legitimately be well above the old 500px
+// cap on wide displays. Use a large hard ceiling purely as a safety net for
+// corrupted/manually-edited values rather than as a product limit.
 const MAX_RIGHT_SIDEBAR_WIDTH = 4000
 const LINEAR_TASK_PREFETCH_LIMIT = 36
-// Why: bound disk growth across hard quits (crash paths leave acks pinned); mirrors HYDRATE_MAX_AGE_MS in agent-hooks/server.ts.
+// Why: bound disk growth for acknowledgedAgentsByPaneKey across hard quits —
+// in-session cleanup (agent-status.ts) prunes on pane lifecycle, but crash/
+// forced-kill paths leave entries pinned. Mirrors HYDRATE_MAX_AGE_MS in
+// src/main/agent-hooks/server.ts for parallel reasoning with the sibling
+// hook-status entries these acks pair with.
 const HYDRATE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 const VALID_TASK_PRESETS = new Set<TaskViewPresetId>([
   'all',
@@ -357,54 +349,17 @@ function collectAcknowledgedAgentNotificationId({
   }
 }
 
-function isPlainPersistedRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function sanitizePersistedRepoIds(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-  return value.filter((repoId): repoId is string => typeof repoId === 'string')
-}
-
-function sanitizeTrustedOrcaHooks(trust: unknown): PersistedTrustedOrcaHooks {
-  if (!isPlainPersistedRecord(trust)) {
-    return {}
-  }
-  const next: PersistedTrustedOrcaHooks = {}
-  for (const [repoId, entry] of Object.entries(trust)) {
-    if (!isSafePersistedRecordKey(repoId) || !isPlainPersistedRecord(entry)) {
-      continue
-    }
-    next[repoId] = entry as PersistedTrustedOrcaHooks[string]
-  }
-  return next
-}
-
 function filterTrustedOrcaHooksToValidRepos(
-  trust: unknown,
+  trust: PersistedTrustedOrcaHooks,
   validRepoIds: Set<string>
 ): PersistedTrustedOrcaHooks {
-  const sanitized = sanitizeTrustedOrcaHooks(trust)
   const next: PersistedTrustedOrcaHooks = {}
-  for (const [repoId, entry] of Object.entries(sanitized)) {
+  for (const [repoId, entry] of Object.entries(trust)) {
     if (validRepoIds.has(repoId)) {
       next[repoId] = entry
     }
   }
   return next
-}
-
-function hydrateTrustedOrcaHooks(
-  trust: unknown,
-  validRepoIds: Set<string>
-): PersistedTrustedOrcaHooks {
-  const sanitized = sanitizeTrustedOrcaHooks(trust)
-  if (validRepoIds.size === 0) {
-    return sanitized
-  }
-  return filterTrustedOrcaHooksToValidRepos(sanitized, validRepoIds)
 }
 
 function isSafePersistedRecordKey(key: string): boolean {
@@ -432,7 +387,10 @@ function sanitizePersistedSidebarWidth(width: unknown, fallback: number, maxWidt
   return Math.min(maxWidth, Math.max(MIN_SIDEBAR_WIDTH, width))
 }
 
-// Why: persisted JSON may be tampered/corrupt — reject arrays, prototype-pollution keys, and non-finite values; drop past-TTL entries.
+// Why: persisted JSON can be tampered with or carry legacy/corrupt shapes.
+// Reject arrays (typeof [] === 'object'), prototype-pollution keys, and
+// non-positive-finite values; drop entries past the TTL so hard-quit leaks
+// don't accumulate forever.
 function sanitizeAcknowledgedAgentsByPaneKey(value: unknown): Record<string, number> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return {}
@@ -492,22 +450,6 @@ function hydratedUIPartialMatchesState(state: AppState, hydrated: Partial<UISlic
   return Object.entries(hydrated).every(([key, value]) =>
     persistedUIValuesEqual(state[key as keyof AppState], value)
   )
-}
-
-function sanitizeHydratedActiveView(
-  value: PersistedUIState['activeView'],
-  experimentalActivityEnabled: boolean
-): TopLevelView {
-  // Why: older data (pre-activeView) or a view a different build doesn't have
-  // falls back to terminal rather than rendering nothing.
-  if (!isTopLevelView(value)) {
-    return 'terminal'
-  }
-  // Why: activity is hidden when its setting is off, so gate only it (mobile/automations stay functional when hidden).
-  if (value === 'activity' && !experimentalActivityEnabled) {
-    return 'terminal'
-  }
-  return value
 }
 
 let agentSendTargetModeInstanceCounter = 0
@@ -593,16 +535,25 @@ export type UISlice = {
   openAgentSendPopoverTargetMode: (args: OpenAgentSendPopoverTargetModeArgs) => void
   closeAgentSendPopoverTargetMode: (id?: string, instanceId?: string) => void
   sendPromptToSidebarAgentTarget: (paneKey: string) => Promise<boolean>
-  /** Bumped to ask the active worktree's Source Control notes send menu to open (keyboard shortcut). `issuedAt` bounds staleness so a request the menu never consumed can't reopen it much later. */
-  diffNotesSendMenuOpenRequest: { worktreeId: string; nonce: number; issuedAt: number } | null
-  /** Reveal Source Control and request its notes send menu open; returns false (no-op) when the active worktree has no unsent notes. */
-  openDiffNotesSendMenuForActiveWorktree: () => boolean
-  consumeDiffNotesSendMenuOpenRequest: (worktreeId: string) => void
-  /** Per-agent "I've looked at this" timestamps (paneKey → ts). A row is unvisited when no ack exists or stateStartedAt is newer than the last ack. Persisted so visited rows don't return bold on relaunch. */
+  /** Per-agent "I've looked at this" timestamps, keyed by paneKey. Set when
+   *  the user clicks an agent row or its parent workspace card from the
+   *  dashboard. A row is considered unvisited when no ack exists OR the
+   *  agent's current stateStartedAt is newer than the last ack (i.e. the
+   *  agent has transitioned state since the user last saw it). Persisted
+   *  via PersistedUIState because agent rows themselves now survive restart —
+   *  without this, rows you'd already visited come back bold on relaunch. */
   acknowledgedAgentsByPaneKey: Record<string, number>
   acknowledgeAgents: (paneKeys: string[]) => void
   unacknowledgeAgents: (paneKeys: string[]) => void
-  activeView: TopLevelView
+  activeView:
+    | 'terminal'
+    | 'settings'
+    | 'tasks'
+    | 'activity'
+    | 'automations'
+    | 'space'
+    | 'skills'
+    | 'mobile'
   previousViewBeforeTasks:
     | 'terminal'
     | 'settings'
@@ -680,7 +631,8 @@ export type UISlice = {
   setGithubTaskDrawerWorkItem: (item: GitHubWorkItem | null) => void
   newWorkspaceDraft: {
     repoId: string | null
-    // Why: project-first creation uses these when present; old drafts keep using only repoId during the additive migration.
+    // Why: project-first workspace creation resolves through these when present,
+    // while old drafts can keep using only repoId during the additive migration.
     projectId?: string | null
     projectGroupId?: string | null
     hostId?: ExecutionHostId | null
@@ -695,19 +647,22 @@ export type UISlice = {
       title: string
       url: string
       linearIdentifier?: string
-      linearBranchName?: string
     } | null
-    /** Preserve where provider data came from, separately from the host chosen to run the workspace. */
+    /** Why: starting from a task must preserve where provider data came from
+     *  separately from the host selected to run the workspace. */
     taskSourceContext?: TaskSourceContext | null
     agent: TuiAgent
     linkedIssue: string
     linkedPR: number | null
-    /** GitLab parallels — number for an issue, iid for an MR. Optional so pre-GitLab drafts still load without migration. */
+    /** GitLab parallels — number for an issue, iid for an MR. Optional so
+     *  drafts saved before GitLab support keep loading without migration. */
     linkedGitLabIssue?: number | null
     linkedGitLabMR?: number | null
-    // Why: repo-scoped start ref from the "Start from" picker; absent means "use the repo's effective base ref".
+    // Why: repo-scoped start ref selected via the "Start from" picker.
+    // Absent means "use the repo's effective base ref".
     baseBranch?: string
-    // Why: review worktrees start from a head ref/SHA while Source Control compares against the provider target branch.
+    // Why: review-created worktrees can start from a head ref/SHA while Source
+    // Control must compare against the provider target branch.
     compareBaseRef?: string
   } | null
   openTaskPage: (
@@ -743,30 +698,15 @@ export type UISlice = {
     pane: SettingsNavTarget
     repoId: string | null
     sectionId?: string
-    intent?: 'add-quick-command' | 'add-remote-orca-server' | 'add-ssh-host'
+    intent?: 'add-quick-command'
   } | null
   openSettingsTarget: (target: NonNullable<UISlice['settingsNavigationTarget']>) => void
   clearSettingsTarget: () => void
-  /** Which host the Projects Settings pane shows per project (keyed by projectId). Ephemeral on purpose — never persisted, so reload reopens on the effective host. */
-  settingsProjectHostSelection: Record<string, ExecutionHostId>
-  settingsProjectSetupSelection: Record<string, string>
-  setSettingsProjectHostSelection: (
-    projectId: string,
-    hostId: ExecutionHostId,
-    setupId?: string
-  ) => void
-  /** One-shot Appearance accordion to expand for nested Settings deep links (e.g. Usage percentages under Window & Sidebar). Cleared when Appearance consumes it. */
-  appearanceAccordionDeepLink: 'interface' | 'terminal' | 'window' | null
-  setAppearanceAccordionDeepLink: (
-    section: NonNullable<UISlice['appearanceAccordionDeepLink']>
-  ) => void
-  clearAppearanceAccordionDeepLink: () => void
   activeModal:
     | 'none'
     | 'create-worktree'
     | 'edit-meta'
     | 'delete-worktree'
-    | 'forget-ssh-workspace'
     | 'confirm-add-project-from-folder'
     | 'confirm-non-git-folder'
     | 'confirm-remove-folder'
@@ -841,8 +781,6 @@ export type UISlice = {
   dismissMobileEmulatorAgentSetup: () => void
   projectOrderManualDefaultNoticeDismissed: boolean
   dismissProjectOrderManualDefaultNotice: () => void
-  usagePercentageDisplayChangeNoticeDismissed: boolean
-  dismissUsagePercentageDisplayChangeNotice: () => void
   usageEmptyStateDismissed: boolean
   dismissUsageEmptyState: () => void
   groupBy: 'none' | 'workspace-status' | 'repo' | 'pr-status'
@@ -861,15 +799,10 @@ export type UISlice = {
   setVisibleWorkspaceHostIds: (ids: VisibleWorkspaceHostIds) => void
   workspaceHostOrder: WorkspaceHostOrder
   setWorkspaceHostOrder: (ids: WorkspaceHostOrder) => void
-  manualRepoOrder: ManualRepoOrderEntry[]
   hideDefaultBranchWorkspace: boolean
   setHideDefaultBranchWorkspace: (v: boolean) => void
   hideAutomationGeneratedWorkspaces: boolean
   setHideAutomationGeneratedWorkspaces: (v: boolean) => void
-  hideCliCreatedWorkspaces: boolean
-  setHideCliCreatedWorkspaces: (v: boolean) => void
-  hideDetachedHeadWorkspaces: boolean
-  setHideDetachedHeadWorkspaces: (v: boolean) => void
   showDotfilesByWorktree: Record<string, boolean>
   setShowDotfilesForWorktree: (worktreeId: string, showDotfiles: boolean) => void
   toggleShowDotfilesForWorktree: (worktreeId: string) => void
@@ -891,41 +824,33 @@ export type UISlice = {
   setWorkspaceBoardColumnWidth: (width: number) => void
   syncTaskStatusFromWorkspaceBoard: boolean
   setSyncTaskStatusFromWorkspaceBoard: (enabled: boolean) => void
-  /** Transient: the in-window Agent Dashboard companion drawer is open. Not persisted. */
-  agentDashboardDrawerOpen: boolean
-  setAgentDashboardDrawerOpen: (open: boolean) => void
   statusBarItems: StatusBarItem[]
   toggleStatusBarItem: (item: StatusBarItem) => void
   statusBarVisible: boolean
   setStatusBarVisible: (v: boolean) => void
-  usagePercentageDisplay: UsagePercentageDisplay
-  setUsagePercentageDisplay: (display: UsagePercentageDisplay) => void
-  statusBarUsageMode: StatusBarUsageMode
-  setStatusBarUsageMode: (mode: StatusBarUsageMode) => void
   workspacePortScan: { key: string; result: WorkspacePortScanResult } | null
   workspacePortScansByKey: Record<string, WorkspacePortScanResult>
   workspacePortScanRefreshing: boolean
   setWorkspacePortScan: (scan: { key: string; result: WorkspacePortScanResult } | null) => void
-  setWorkspacePortScanProjection: (
-    scan: { key: string; result: WorkspacePortScanResult } | null
-  ) => void
-  replaceWorkspacePortScans: (
-    scansByKey: Record<string, WorkspacePortScanResult>,
-    projection: { key: string; result: WorkspacePortScanResult } | null
-  ) => void
   setWorkspacePortScanForKey: (key: string, result: WorkspacePortScanResult | null) => void
   setWorkspacePortScanRefreshing: (refreshing: boolean) => void
-  /** Whether the pet overlay is currently visible. Persisted so "Hide pet" survives reload. Independent of the experimentalPet flag (which gates whether it can render at all). */
+  /** Whether the experimental pet overlay is currently visible. Persisted
+   *  so "Hide pet" from the status-bar menu survives reload. Independent
+   *  of the experimentalPet settings flag — the feature flag gates
+   *  whether the overlay can ever render; this controls whether it does now. */
   petVisible: boolean
   setPetVisible: (v: boolean) => void
-  /** Which pet is active — a bundled id or a custom UUID. Persisted via PersistedUIState. */
+  /** Which pet is active — either a bundled id or a custom UUID.
+   *  Persisted alongside petVisible via the PersistedUIState pipeline. */
   petId: string
   setPetId: (id: string) => void
   /** User-uploaded pet images. Metadata only — bytes live in main's userData. */
   customPets: CustomPet[]
   addCustomPet: (model: CustomPet) => void
   removeCustomPet: (id: string) => void
-  /** Pet overlay size in CSS pixels (square). User-adjustable so an oversized imported sprite isn't stuck on screen. */
+  /** Pet overlay size in CSS pixels (square). User-adjustable from the
+   *  status-bar menu so a too-big imported sprite isn't a stuck-on-screen
+   *  problem. */
   petSize: number
   setPetSize: (size: number) => void
   pendingRevealWorktree: PendingSidebarWorktreeReveal | null
@@ -947,7 +872,10 @@ export type UISlice = {
   ) => void
   clearPendingRevealWorktreeId: () => void
   clearPendingRevealSidebarRow: () => void
-  // Why: cleared by the diff decorator after it reveals the line, so the same id can be requested again without a stale value.
+  // Why: lets the SourceControl sidebar request that the diff editor scroll
+  // to a specific note. Cleared by the diff decorator after it reveals the
+  // line, so the same id can be requested again later without the surface
+  // seeing a stale value.
   scrollToDiffCommentId: string | null
   setScrollToDiffCommentId: (id: string | null) => void
   persistedUIReady: boolean
@@ -955,24 +883,26 @@ export type UISlice = {
   setUIZoomLevel: (level: number) => void
   editorFontZoomLevel: number
   setEditorFontZoomLevel: (level: number) => void
-  hydratePersistedUI: (ui: PersistedUIState, source?: 'startup' | 'sync') => void
+  hydratePersistedUI: (ui: PersistedUIState) => void
   updateStatus: UpdateStatus
   setUpdateStatus: (status: UpdateStatus) => void
-  // Why: cache last-'available' changelog so the card keeps rich content while downloading; cleared on idle/checking to avoid staleness.
+  // Why: cached changelog from the last 'available' status so the card still has
+  // rich content (title/media/description) during downloading, error, and downloaded
+  // states. Cleared on idle/checking/not-available to prevent stale leakage.
   updateChangelog: ChangelogData | null
-  // Why: UpdateCard is lazy-loaded and may miss the transient checking status; hold manual-check intent until a terminal state consumes it.
+  // Why: UpdateCard is lazy-loaded, so it may miss the transient
+  // checking/userInitiated status. Keep manual-check intent in the store until
+  // the resulting available/error/not-available state can consume it.
   updateUserInitiatedCycle: boolean
   dismissedUpdateVersion: string | null
   dismissUpdate: (versionOverride?: string) => void
   clearDismissedUpdateVersion: () => void
-  // Why: ephemeral, renderer-only — never persisted; resets each session and on every phase transition (see setUpdateStatus).
+  // Why: ephemeral and renderer-only — never persisted and never crosses IPC.
+  // Resets every session and on every phase transition (see setUpdateStatus).
   updateCardCollapsed: boolean
   setUpdateCardCollapsed: (collapsed: boolean) => void
   updateReassuranceSeen: boolean
   markUpdateReassuranceSeen: () => void
-  /** True on the launch where the OSC 52 default-on migration overrode a persisted `false`. */
-  osc52ClipboardDefaultOnNoticePending: boolean
-  clearOsc52ClipboardDefaultOnNotice: () => void
   isFullScreen: boolean
   setIsFullScreen: (v: boolean) => void
   /** URL opened when a new browser tab is created. Null = blank tab (default). */
@@ -1023,32 +953,6 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       get().revealWorktreeInSidebar(args.worktreeId, { behavior: 'auto', highlight: true })
     }
   },
-  diffNotesSendMenuOpenRequest: null,
-  openDiffNotesSendMenuForActiveWorktree: () => {
-    const worktreeId = get().activeWorktreeId
-    if (!worktreeId) {
-      return false
-    }
-    // Why: no unsent notes means nothing to send, so don't hijack focus or reveal the panel.
-    if (
-      !get()
-        .getDiffComments(worktreeId)
-        .some((comment) => !comment.sentAt)
-    ) {
-      return false
-    }
-    get().setRightSidebarTab('source-control')
-    get().setRightSidebarOpen(true)
-    const nonce = (get().diffNotesSendMenuOpenRequest?.nonce ?? 0) + 1
-    set({ diffNotesSendMenuOpenRequest: { worktreeId, nonce, issuedAt: Date.now() } })
-    return true
-  },
-  consumeDiffNotesSendMenuOpenRequest: (worktreeId) =>
-    set((s) =>
-      s.diffNotesSendMenuOpenRequest?.worktreeId === worktreeId
-        ? { diffNotesSendMenuOpenRequest: null }
-        : s
-    ),
   closeAgentSendPopoverTargetMode: (id, instanceId) =>
     set((s) => {
       if (!s.agentSendPopoverTargetMode) {
@@ -1070,7 +974,9 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
 
     const target = resolveRunningAgentSendTarget(get(), mode.worktreeId, paneKey)
     if (!target || target.status !== 'eligible' || !target.ptyId) {
-      // Why: eligibility can drop after the menu opened; keep the picker open (row title explains) rather than adding toast noise.
+      // Why: live revalidation can lose eligibility after the user opened the
+      // menu. Treat that like an ineligible row click: keep the picker open and
+      // let the row title explain the current reason without adding toast noise.
       return false
     }
 
@@ -1162,7 +1068,13 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         return s
       }
       const now = Date.now()
-      // Why: only reallocate if an ack advances; compare prev<now not !== — Date.now() ticks every ms and !== would rewrite the map every call.
+      // Why: only allocate a new map (and emit a store update) if at least
+      // one ack is actually moving forward. Comparing `prev < now` instead
+      // of `prev !== now` matters because stored values are historical
+      // timestamps and `Date.now()` advances every millisecond — a strict-
+      // inequality guard would fire on every call and rewrite the map on
+      // every dashboard click or auto-ack tick, forcing every subscriber
+      // (all agent rows, the SidebarHeader count, etc.) to re-render.
       let next: Record<string, number> | null = null
       for (const key of paneKeys) {
         const prev = s.acknowledgedAgentsByPaneKey[key] ?? 0
@@ -1253,7 +1165,12 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     if (data.openJiraIssue) {
       get().recordFeatureInteraction?.('jira-tasks')
     }
-    // Why: record a Tasks visit in shared back/forward history; all task-source variants collapse to one deduped 'tasks' entry.
+    // Why: record a Tasks visit in the shared back/forward history so the
+    // titlebar Back/Forward buttons can return to Tasks. All task-source
+    // variants (github/linear presets) collapse to a single 'tasks' entry;
+    // the slice's adjacent-entry dedupe drops re-opens. No isNavigatingHistory
+    // guard needed — back-to-Tasks routes through setActiveView('tasks') and
+    // never re-enters openTaskPage.
     const detailEntry = data.openGitHubWorkItem
       ? ({
           kind: 'task-detail',
@@ -1300,7 +1217,11 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         state.activeView === 'tasks' ? state.previousViewBeforeTasks : state.activeView,
       taskPageData: data
     }))
-    // Why: prefetch the work-item list during first render so the page's effect hits a warm/in-flight SWR cache (~300–800ms win).
+    // Why: prefetch the GitHub work-item list in parallel with React's first
+    // render of the TaskPage — by the time the page's own effect runs, the SWR
+    // cache is either already populated or the request is in-flight and will
+    // be deduped. This removes ~300–800ms of perceived latency on initial
+    // page load.
     const state = get()
     const preferredVisibleTaskProviders = normalizeVisibleTaskProviders(
       state.settings?.visibleTaskProviders
@@ -1338,7 +1259,11 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
 
       const resume = state.taskResumeState
       const defaultPreset = state.settings?.defaultTaskViewPreset ?? 'all'
-      // Why: must match the query TaskPage's resume effect mounts with, else the warm cache key misses and prefetch is wasted.
+      // Why: must match the exact query TaskPage's resume effect mounts with,
+      // otherwise the warm cache key (e.g. 'is:issue is:open') misses the
+      // page's actual fetch key and the prefetch is wasted. When the user has
+      // an explicit custom search (preset === null), preserve it so both sides
+      // agree.
       const query =
         resume?.githubItemsPreset === null
           ? (resume.githubItemsQuery ?? '').trim()
@@ -1364,7 +1289,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
           { sourceContext }
         )
       } else {
-        // Why: TaskPage no longer exposes Linear preset filters; keep prefetch aligned with the default unsearched issue list.
+        // Why: TaskPage no longer exposes Linear preset filters; keep warm
+        // prefetch aligned with the default unsearched issue list.
         state.prefetchLinearIssues(
           {
             kind: 'list',
@@ -1385,7 +1311,15 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   setGithubTaskDrawerWorkItem: (item) => set({ githubTaskDrawerWorkItem: item }),
   closeTaskPage: () =>
     set((state) => {
-      // Why: if parked on a 'tasks' entry, rewind the history index so Back/Forward aren't no-ops; keep 0 if it's the only entry.
+      // Why: Esc-close from Tasks must rewind the history index if we're
+      // currently parked on a 'tasks' entry. Without this, A → Tasks → Esc
+      // leaves the index at the 'tasks' entry, making Back a visual no-op
+      // (activator re-activates A) and Forward re-opens Tasks. If there is no
+      // earlier live entry (e.g. history is just ['tasks']), leave the index
+      // at 0 — setting it to -1 would lose the only forward target, while the
+      // resulting Back visual no-op self-heals as soon as a real visit records
+      // a new entry. closeTaskPage never runs from the history-nav path, so no
+      // isNavigatingHistory guard is needed.
       const currentEntry = state.worktreeNavHistory[state.worktreeNavHistoryIndex]
       let nextHistoryIndex = state.worktreeNavHistoryIndex
       if (
@@ -1483,11 +1417,15 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   setNewWorkspaceDraft: (draft) => set({ newWorkspaceDraft: draft }),
   clearNewWorkspaceDraft: () => set({ newWorkspaceDraft: null }),
   openSettingsPage: () => {
-    // Why: settings search is a transient filter; opening Settings shouldn't inherit hidden sections from last visit.
+    // Why: settings search is a transient page filter; opening Settings
+    // should never inherit hidden sections from the previous visit.
     get().setSettingsSearchQuery('')
     set((state) => ({
       activeView: 'settings',
-      // Why: preserve the originating view so Settings back returns there (e.g. in-progress draft), not always terminal.
+      // Why: Settings is a temporary detour from either terminal or the
+      // full-page tasks view. Preserve the originating view so the Settings
+      // back action restores an in-progress workspace draft instead of always
+      // dumping the user into terminal.
       previousViewBeforeSettings:
         state.activeView === 'settings' ? state.previousViewBeforeSettings : state.activeView
     }))
@@ -1504,34 +1442,6 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   settingsNavigationTarget: null,
   openSettingsTarget: (target) => set({ settingsNavigationTarget: target }),
   clearSettingsTarget: () => set({ settingsNavigationTarget: null }),
-  settingsProjectHostSelection: {},
-  settingsProjectSetupSelection: {},
-  // Why: renderer-only, never persisted — no window.api.ui.set, and absent from the debounced UI writer in App.tsx.
-  setSettingsProjectHostSelection: (projectId, hostId, setupId) =>
-    set((s) => {
-      const nextSetupSelections = { ...s.settingsProjectSetupSelection }
-      if (setupId) {
-        nextSetupSelections[projectId] = setupId
-      } else {
-        delete nextSetupSelections[projectId]
-      }
-      if (
-        s.settingsProjectHostSelection[projectId] === hostId &&
-        s.settingsProjectSetupSelection[projectId] === setupId
-      ) {
-        return s
-      }
-      return {
-        settingsProjectHostSelection: {
-          ...s.settingsProjectHostSelection,
-          [projectId]: hostId
-        },
-        settingsProjectSetupSelection: nextSetupSelections
-      }
-    }),
-  appearanceAccordionDeepLink: null,
-  setAppearanceAccordionDeepLink: (section) => set({ appearanceAccordionDeepLink: section }),
-  clearAppearanceAccordionDeepLink: () => set({ appearanceAccordionDeepLink: null }),
 
   activeModal: 'none',
   modalData: {},
@@ -1602,7 +1512,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         persistPromise = persist.catch(console.error)
       }
       if (tourProgression === 'reveal-sidebar-and-advance') {
-        // Why: split can fire from keyboard/menu with the sidebar closed, but the next tour target lives in the sidebar.
+        // Why: the split can be triggered by keyboard/menu paths while the
+        // sidebar is closed, but the next tour target lives in the sidebar.
         return {
           featureInteractions: next,
           sidebarOpen: true,
@@ -1956,16 +1867,6 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       window.api.ui.set({ projectOrderManualDefaultNoticeDismissed: true }).catch(console.error)
       return { projectOrderManualDefaultNoticeDismissed: true }
     }),
-  // Why: default true so pre-hydration / new sessions never flash the change notice before persistence resolves.
-  usagePercentageDisplayChangeNoticeDismissed: true,
-  dismissUsagePercentageDisplayChangeNotice: () =>
-    set((s) => {
-      if (s.usagePercentageDisplayChangeNoticeDismissed) {
-        return s
-      }
-      window.api.ui.set({ usagePercentageDisplayChangeNoticeDismissed: true }).catch(console.error)
-      return { usagePercentageDisplayChangeNoticeDismissed: true }
-    }),
   usageEmptyStateDismissed: false,
   dismissUsageEmptyState: () =>
     set((s) => {
@@ -1977,7 +1878,9 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     }),
 
   groupBy: 'repo',
-  // Why: group keys are mode-specific, so clear collapsed state on mode switch — stale keys are meaningless and accumulate.
+  // Why: group keys are mode-specific (e.g. repo id vs PR status), so
+  // collapsed state from one mode is meaningless in another. Clearing
+  // also prevents unbounded accumulation of stale keys across mode switches.
   setGroupBy: (g) => {
     window.api.ui.set({ groupBy: g, collapsedGroups: [] }).catch(console.error)
     set({ groupBy: g, collapsedGroups: new Set<string>() })
@@ -1986,7 +1889,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   sortBy: 'recent',
   setSortBy: (s) => set({ sortBy: s }),
 
-  // Why: bare set — persists only via the debounced window.api.ui.set writer in App.tsx, not on its own.
+  // Why: like setSortBy, this is a bare set — it persists only via the
+  // debounced window.api.ui.set writer in App.tsx, not on its own.
   projectOrderBy: 'manual',
   setProjectOrderBy: (p) => set({ projectOrderBy: p }),
 
@@ -1997,7 +1901,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   setShowSleepingWorkspaces: (v) => set({ showSleepingWorkspaces: v }),
 
   workspaceHostScope: 'all',
-  // Why: host scope is presentation/filtering only — must never trigger resource teardown (terminals, browser pages).
+  // Why (multi-host design): host scope is presentation/filtering only — it must
+  // never trigger resource teardown (terminals, browser pages, etc.).
   setWorkspaceHostScope: (scope) => {
     const normalized = normalizeExecutionHostScope(scope)
     const visibleWorkspaceHostIds = normalized === 'all' ? null : [normalized]
@@ -2009,7 +1914,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   visibleWorkspaceHostIds: null,
   setVisibleWorkspaceHostIds: (ids) => {
     const normalized = normalizeVisibleExecutionHostIds(ids)
-    // Why: workspaceHostScope stays the compat/default-host signal for creation flows; visibility can now be multi-select.
+    // Why: workspaceHostScope remains the compatibility/default-host signal
+    // for creation flows while visibility can now be multi-select.
     let workspaceHostScope: WorkspaceHostScope = get().workspaceHostScope
     if (normalized === null) {
       workspaceHostScope = 'all'
@@ -2027,16 +1933,11 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     set({ workspaceHostOrder })
     window.api.ui.set({ workspaceHostOrder }).catch(console.error)
   },
-  manualRepoOrder: [],
 
   hideDefaultBranchWorkspace: false,
   setHideDefaultBranchWorkspace: (v) => set({ hideDefaultBranchWorkspace: v }),
   hideAutomationGeneratedWorkspaces: false,
   setHideAutomationGeneratedWorkspaces: (v) => set({ hideAutomationGeneratedWorkspaces: v }),
-  hideCliCreatedWorkspaces: false,
-  setHideCliCreatedWorkspaces: (v) => set({ hideCliCreatedWorkspaces: v }),
-  hideDetachedHeadWorkspaces: false,
-  setHideDetachedHeadWorkspaces: (v) => set({ hideDetachedHeadWorkspaces: v }),
 
   showDotfilesByWorktree: {},
   setShowDotfilesForWorktree: (worktreeId, showDotfiles) =>
@@ -2158,33 +2059,10 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       return { statusBarItems: updated }
     }),
 
-  agentDashboardDrawerOpen: false,
-  setAgentDashboardDrawerOpen: (open) => set({ agentDashboardDrawerOpen: open }),
   statusBarVisible: true,
   setStatusBarVisible: (v) => {
     window.api.ui.set({ statusBarVisible: v }).catch(console.error)
     set({ statusBarVisible: v })
-  },
-  usagePercentageDisplay: DEFAULT_USAGE_PERCENTAGE_DISPLAY,
-  setUsagePercentageDisplay: (display) => {
-    const normalized = normalizeUsagePercentageDisplay(display)
-    // Why: changing the control is the discovery path, so permanently dismiss the one-time change notice.
-    window.api.ui
-      .set({
-        usagePercentageDisplay: normalized,
-        usagePercentageDisplayChangeNoticeDismissed: true
-      })
-      .catch(console.error)
-    set({
-      usagePercentageDisplay: normalized,
-      usagePercentageDisplayChangeNoticeDismissed: true
-    })
-  },
-  statusBarUsageMode: DEFAULT_STATUS_BAR_USAGE_MODE,
-  setStatusBarUsageMode: (mode) => {
-    const normalized = normalizeStatusBarUsageMode(mode)
-    window.api.ui.set({ statusBarUsageMode: normalized }).catch(console.error)
-    set({ statusBarUsageMode: normalized })
   },
   workspacePortScan: null,
   workspacePortScansByKey: {},
@@ -2192,52 +2070,15 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   setWorkspacePortScan: (scan) =>
     set((state) => {
       if (!scan) {
-        if (!state.workspacePortScan && Object.keys(state.workspacePortScansByKey).length === 0) {
-          return state
-        }
         return { workspacePortScan: null, workspacePortScansByKey: {} }
-      }
-      if (
-        state.workspacePortScan?.key === scan.key &&
-        state.workspacePortScan.result === scan.result &&
-        state.workspacePortScansByKey[scan.key] === scan.result
-      ) {
-        return state
       }
       return {
         workspacePortScan: scan,
         workspacePortScansByKey: { ...state.workspacePortScansByKey, [scan.key]: scan.result }
       }
     }),
-  // Why: target changes rebuild the aggregate without republishing or clearing per-host scans.
-  setWorkspacePortScanProjection: (scan) =>
-    set((state) => {
-      if (
-        state.workspacePortScan?.key === scan?.key &&
-        state.workspacePortScan?.result === scan?.result
-      ) {
-        return state
-      }
-      return { workspacePortScan: scan }
-    }),
-  // Why: drop stale per-host scans in one store update so a large host set can't fan out notifications to every subscriber.
-  replaceWorkspacePortScans: (scansByKey, projection) =>
-    set((state) => {
-      if (
-        state.workspacePortScansByKey === scansByKey &&
-        state.workspacePortScan?.key === projection?.key &&
-        state.workspacePortScan?.result === projection?.result
-      ) {
-        return state
-      }
-      return { workspacePortScansByKey: scansByKey, workspacePortScan: projection }
-    }),
   setWorkspacePortScanForKey: (key, result) =>
     set((state) => {
-      const currentResult = state.workspacePortScansByKey[key]
-      if (currentResult === result || (!result && !currentResult)) {
-        return state
-      }
       const nextScansByKey = { ...state.workspacePortScansByKey }
       if (result) {
         nextScansByKey[key] = result
@@ -2256,7 +2097,9 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     }),
   setWorkspacePortScanRefreshing: (refreshing) => set({ workspacePortScanRefreshing: refreshing }),
 
-  // Why: default true so enabling experimentalPet shows the pet immediately (persisted; "Hide pet" flips it false).
+  // Why: default true so a user who enables experimentalPet sees the
+  // pet immediately. Hide pet from the status-bar menu flips this
+  // to false; the value is persisted via the standard PersistedUIState pipeline.
   petVisible: true,
   setPetVisible: (v) => {
     window.api.ui.set({ petVisible: v }).catch(console.error)
@@ -2290,9 +2133,11 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         return s
       }
       const next = s.customPets.filter((m) => m.id !== id)
-      // Why: removing the active custom pet falls back to bundled default so the overlay isn't empty.
+      // Why: if the user removes the currently-active custom pet, fall
+      // back to the bundled default so the overlay doesn't render nothing.
       const fallback = s.petId === id ? DEFAULT_PET_ID : s.petId
-      // Why: single combined IPC update so customPets and petId persist atomically.
+      // Why: send a single combined IPC update so customPets and
+      // petId persist atomically when both change.
       const ipcPayload: { customPets: CustomPet[]; petId?: string } = {
         customPets: next
       }
@@ -2300,9 +2145,13 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         ipcPayload.petId = fallback
       }
       window.api.ui.set(ipcPayload).catch(console.error)
-      // Why: revoke the cached blob: URL so the Blob is released, not leaked for the session.
+      // Why: revoke the cached blob: URL so the underlying Blob is released;
+      // otherwise it stays in memory for the rest of the session.
       revokeCustomPetBlobUrl(id)
-      // Why: best-effort delete — bytes owned by main; fresh-UUID imports mean an orphaned file is never re-referenced.
+      // Why: best-effort — the bytes are owned by main. If the disk delete
+      // fails, the orphaned image stays in userData; each import uses a fresh
+      // UUID so the file won't be hit again, and the renderer's metadata
+      // index no longer references it.
       window.api.pet.delete(id, target.fileName, target.kind).catch(console.error)
       const partial: Partial<UISlice> = { customPets: next }
       if (fallback !== s.petId) {
@@ -2340,20 +2189,26 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   editorFontZoomLevel: 0,
   setEditorFontZoomLevel: (level) => set({ editorFontZoomLevel: level }),
 
-  hydratePersistedUI: (ui, source = 'sync') =>
+  hydratePersistedUI: (ui) =>
     set((s) => {
-      const manualRepoOrder = normalizeManualRepoOrder(ui.manualRepoOrder)
-      const orderedRepos = applyManualRepoOrder(s.repos, manualRepoOrder)
       const validRepoIds = new Set(s.repos.map((repo) => repo.id))
-      const persistedFilterRepoIds = sanitizePersistedRepoIds(ui.filterRepoIds)
-      // Why: pre-rename builds used sidekick* keys; read as fallback only so new pet* writes win after upgrade.
+      // Why: persisted UI from pre-rename builds used sidekick* keys. Read
+      // those only as fallbacks so new pet* writes win immediately after upgrade.
       const customPets = Array.isArray(ui.customPets)
         ? ui.customPets
         : Array.isArray(ui.customSidekicks)
           ? ui.customSidekicks
           : []
       const petId = ui.petId ?? ui.sidekickId
-      // Migration: one-shot old-'recent'→'smart' runs in main (_sortBySmartMigrated), not here, so a deliberate 'recent' choice survives restart.
+      // Migration history:
+      // v1: sort was called 'smart' internally
+      // v2: renamed 'smart' → 'recent' (same weighted-score behavior)
+      // v3: 'smart' reintroduced as the weighted-score sort, 'recent' becomes
+      //     a last-activity sort (worktree.lastActivityAt descending). The
+      //     one-shot migration from old 'recent' to 'smart' happens in the
+      //     main process (persistence.ts load()) using the _sortBySmartMigrated
+      //     flag — not here — so that users who intentionally select the new
+      //     'recent' sort keep it across restarts.
       const sortBy = ui.sortBy
       const migratedStatusBarItems = migrateStatusBarItems(ui.statusBarItems)
       const statusBarItemsWithPorts =
@@ -2368,30 +2223,18 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         ui._minimaxStatusBarDefaultAdded || statusBarItems.includes('minimax')
           ? statusBarItems
           : [...statusBarItems, DEFAULT_ON_MINIMAX_STATUS_BAR_ITEM]
-      const statusBarItemsWithAntigravity =
-        ui._antigravityStatusBarDefaultAdded || statusBarItemsWithMiniMax.includes('antigravity')
-          ? statusBarItemsWithMiniMax
-          : [...statusBarItemsWithMiniMax, DEFAULT_ON_ANTIGRAVITY_STATUS_BAR_ITEM]
-      const statusBarItemsWithGrok =
-        ui._grokStatusBarDefaultAdded || statusBarItemsWithAntigravity.includes('grok')
-          ? statusBarItemsWithAntigravity
-          : [...statusBarItemsWithAntigravity, DEFAULT_ON_GROK_STATUS_BAR_ITEM]
       if (
         (!ui._portsStatusBarDefaultAdded ||
           !ui._kimiStatusBarDefaultAdded ||
-          !ui._minimaxStatusBarDefaultAdded ||
-          !ui._antigravityStatusBarDefaultAdded ||
-          !ui._grokStatusBarDefaultAdded) &&
+          !ui._minimaxStatusBarDefaultAdded) &&
         typeof window !== 'undefined'
       ) {
         window.api.ui
           .set({
-            statusBarItems: statusBarItemsWithGrok,
+            statusBarItems: statusBarItemsWithMiniMax,
             _portsStatusBarDefaultAdded: true,
             _kimiStatusBarDefaultAdded: true,
-            _minimaxStatusBarDefaultAdded: true,
-            _antigravityStatusBarDefaultAdded: true,
-            _grokStatusBarDefaultAdded: true
+            _minimaxStatusBarDefaultAdded: true
           })
           .catch(console.error)
       }
@@ -2400,7 +2243,10 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         ui.rightSidebarExplorerView
       )
       const hydrated = {
-        // Why: persisted widths may be stale/corrupt/hand-edited; clamp during hydration so invalid values can't break layout.
+        // Why: persisted UI data comes from disk and may be stale, corrupted,
+        // or manually edited. Clamp widths during hydration so invalid values
+        // cannot push the renderer into broken layouts before the user drags a
+        // sidebar again.
         sidebarWidth: sanitizePersistedSidebarWidth(
           ui.sidebarWidth,
           s.sidebarWidth,
@@ -2421,28 +2267,23 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         rightSidebarExplorerView: rightSidebarRoute.rightSidebarExplorerView,
         groupBy: (ui.groupBy as UISlice['groupBy'] | 'parent') === 'parent' ? 'repo' : ui.groupBy,
         sortBy,
-        // Why: main-process getUI() already normalized this (defaulting to 'manual'); read it through without migrating.
+        // Why: main-process getUI() already normalized this to a valid value
+        // (defaulting to 'manual'); read it through without migrating sortBy.
         projectOrderBy: ui.projectOrderBy,
-        // Why: Active-only was retired; force the old flag off so an old profile can't invisibly narrow the workspace list.
+        // Why: Active-only was retired. Force the old persisted flag off so an
+        // old profile cannot invisibly keep narrowing the workspace list.
         showActiveOnly: false,
-        // Why: ignore older positive-form keys so old profiles start from the new default (sleeping workspaces visible).
+        // Why: `hideSleepingWorkspaces` is the canonical negative-form filter.
+        // Older positive-form keys are intentionally ignored so old profiles
+        // start from the new default: sleeping workspaces visible.
         showSleepingWorkspaces: !(ui.hideSleepingWorkspaces ?? DEFAULT_HIDE_SLEEPING_WORKSPACES),
         workspaceHostScope: normalizeExecutionHostScope(ui.workspaceHostScope),
         visibleWorkspaceHostIds: normalizeHydratedVisibleWorkspaceHostIds(ui),
         workspaceHostOrder: normalizeExecutionHostOrder(ui.workspaceHostOrder),
-        manualRepoOrder,
-        // Why: apply the desktop-owned overlay immediately since UI state can arrive after a catalog or from another client.
-        repos: orderedRepos,
         hideDefaultBranchWorkspace: ui.hideDefaultBranchWorkspace ?? false,
         hideAutomationGeneratedWorkspaces: ui.hideAutomationGeneratedWorkspaces === true,
-        hideCliCreatedWorkspaces: ui.hideCliCreatedWorkspaces === true,
-        hideDetachedHeadWorkspaces: ui.hideDetachedHeadWorkspaces === true,
         showDotfilesByWorktree: sanitizeShowDotfilesByWorktree(ui.showDotfilesByWorktree),
-        // Why: startup hydrates UI before repo catalogs, so defer repo-filter validation to the all-host refresh.
-        filterRepoIds:
-          validRepoIds.size === 0
-            ? persistedFilterRepoIds
-            : persistedFilterRepoIds.filter((repoId) => validRepoIds.has(repoId)),
+        filterRepoIds: (ui.filterRepoIds ?? []).filter((repoId) => validRepoIds.has(repoId)),
         collapsedGroups: new Set(ui.collapsedGroups ?? []),
         uiZoomLevel: ui.uiZoomLevel ?? 0,
         editorFontZoomLevel: ui.editorFontZoomLevel ?? 0,
@@ -2453,15 +2294,17 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         workspaceBoardOpacity: clampWorkspaceBoardOpacity(ui.workspaceBoardOpacity),
         workspaceBoardColumnWidth: clampWorkspaceBoardColumnWidth(ui.workspaceBoardColumnWidth),
         syncTaskStatusFromWorkspaceBoard: ui.syncTaskStatusFromWorkspaceBoard === true,
-        statusBarItems: statusBarItemsWithGrok,
+        statusBarItems: statusBarItemsWithMiniMax,
         statusBarVisible: ui.statusBarVisible ?? true,
-        usagePercentageDisplay: normalizeUsagePercentageDisplay(ui.usagePercentageDisplay),
-        statusBarUsageMode: normalizeStatusBarUsageMode(ui.statusBarUsageMode),
-        // Why: default true so existing users see the pet on first enabling the flag; only an explicit Hide persists false.
+        // Why: absent → true so existing users see the pet the first time
+        // they enable the experimental flag. Only an explicit Hide pet
+        // dismissal persists a `false` value.
         petVisible: ui.petVisible ?? ui.sidekickVisible ?? true,
         petSize: clampPetSize(ui.petSize ?? ui.sidekickSize ?? PET_SIZE_DEFAULT),
         customPets,
-        // Why: fall back to default when the persisted id is unknown (e.g. custom pet removed elsewhere) so the overlay renders.
+        // Why: accept the persisted id if it matches a bundled pet or a
+        // known custom one; otherwise fall back so the overlay never renders
+        // nothing (e.g. custom pet was removed by another session).
         petId: ((): string => {
           const id = petId
           if (typeof id !== 'string') {
@@ -2477,7 +2320,6 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         })(),
         dismissedUpdateVersion: ui.dismissedUpdateVersion ?? null,
         updateReassuranceSeen: ui.updateReassuranceSeen ?? false,
-        osc52ClipboardDefaultOnNoticePending: ui.osc52ClipboardDefaultOnNoticePending === true,
         browserDefaultUrl: ui.browserDefaultUrl ?? null,
         browserDefaultSearchEngine: ui.browserDefaultSearchEngine ?? null,
         browserDefaultZoomLevel: normalizeBrowserPageZoomLevel(ui.browserDefaultZoomLevel),
@@ -2490,14 +2332,14 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
           typeof ui.contextualToursAutoEligible === 'boolean'
             ? ui.contextualToursAutoEligible
             : null,
-        trustedOrcaHooks: hydrateTrustedOrcaHooks(ui.trustedOrcaHooks, validRepoIds),
-        setupScriptPromptDismissedRepoIds:
-          validRepoIds.size === 0
-            ? sanitizeSetupScriptPromptDismissals(ui.setupScriptPromptDismissedRepoIds)
-            : filterSetupScriptPromptDismissalsToValidRepos(
-                ui.setupScriptPromptDismissedRepoIds,
-                validRepoIds
-              ),
+        trustedOrcaHooks: filterTrustedOrcaHooksToValidRepos(
+          ui.trustedOrcaHooks ?? {},
+          validRepoIds
+        ),
+        setupScriptPromptDismissedRepoIds: filterSetupScriptPromptDismissalsToValidRepos(
+          ui.setupScriptPromptDismissedRepoIds,
+          validRepoIds
+        ),
         setupGuideSidebarDismissed: ui.setupGuideSidebarDismissed === true,
         setupGuideBrowserMilestoneMigrated: ui.setupGuideBrowserMilestoneMigrated === true,
         setupGuideBrowserMilestoneLegacyComplete:
@@ -2507,26 +2349,26 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         mobileEmulatorAgentSetupDismissed: ui.mobileEmulatorAgentSetupDismissed === true,
         projectOrderManualDefaultNoticeDismissed:
           ui.projectOrderManualDefaultNoticeDismissed === true,
-        // Why: treat only explicit true as dismissed so a false from migration still surfaces.
-        usagePercentageDisplayChangeNoticeDismissed:
-          ui.usagePercentageDisplayChangeNoticeDismissed === true,
-        // Why: default false so existing users still see the CTA; only explicit dismissal persists true.
+        // Why: default false when undefined so existing users still see the CTA;
+        // only an explicit dismissal persists true.
         usageEmptyStateDismissed: ui.usageEmptyStateDismissed === true,
-        // Why: stale acks are inert (paneKey reuse beats them via stateStartedAt); sanitizer bounds growth past HYDRATE_MAX_AGE_MS.
+        // Why: restore visited-row acks alongside the persisted hook entries
+        // they pair with. Stale acks for paneKeys whose tab/PTY no longer
+        // exists are inert (no row references them); a paneKey reuse stamps a
+        // fresh stateStartedAt that beats the old ack via the ackAt <
+        // stateStartedAt comparison in WorktreeCardAgents. Sanitizer drops
+        // entries past HYDRATE_MAX_AGE_MS so hard-quit/crash paths that miss
+        // the in-session cleanup in agent-status.ts can't accumulate forever.
         acknowledgedAgentsByPaneKey: sanitizeAcknowledgedAgentsByPaneKey(
           ui.acknowledgedAgentsByPaneKey
         ),
         workspaceCleanupDismissals: sanitizeWorkspaceCleanupDismissals(
           ui.workspaceCleanup?.dismissals
         ),
-        // Why: restore only on startup; on 'sync' broadcasts it would clobber the window's current per-window view.
-        activeView:
-          source === 'startup'
-            ? sanitizeHydratedActiveView(ui.activeView, s.settings?.experimentalActivity === true)
-            : s.activeView,
         persistedUIReady: true
       }
-      // Why: return the same ref on identical hydration so App's debounced writer doesn't echo it back to main.
+      // Why: main rebroadcasts UI written by any client. Identical hydration must
+      // not create fresh references that App's debounced writer echoes to main.
       return hydratedUIPartialMatchesState(s, hydrated) ? s : hydrated
     }),
 
@@ -2547,19 +2389,25 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       update.updateUserInitiatedCycle = false
     }
     if (status.state === 'available') {
-      // Why: always overwrite (even with null) so a prior version's changelog can't leak into a later simple-mode update.
+      // Why: cache changelog from each 'available' payload so the card retains
+      // rich content across downloading/error/downloaded transitions. Always
+      // overwrite (even with null) to prevent a previous rich changelog from
+      // leaking into a later simple-mode update for a different version.
       update.updateChangelog = status.changelog ?? null
     } else if (
       status.state === 'idle' ||
       status.state === 'checking' ||
       status.state === 'not-available'
     ) {
-      // Why: reset on cycle-boundary states so stale rich content from a previous cycle can't resurface.
+      // Why: reset on cycle-boundary states so stale rich content from a
+      // previous update cycle cannot resurface.
       update.updateChangelog = null
     }
-    // 'downloading'/'downloaded'/'error': leave updateChangelog untouched to keep the original 'available' content.
+    // For 'downloading', 'downloaded', 'error': leave updateChangelog untouched
+    // so the card can keep showing rich content from the original 'available'.
     if (status.state !== prevState) {
-      // Why: re-surface the card on each phase transition so a collapsed `downloading` doesn't bury `downloaded`/`error`.
+      // Why: re-surface the card on every phase transition so a prior collapse
+      // of `downloading` doesn't bury the `downloaded`/`error` that follows.
       update.updateCardCollapsed = false
     }
     set(update)
@@ -2572,14 +2420,19 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   },
   dismissUpdate: (versionOverride?: string) =>
     set((s) => {
-      // Why: the 'error' variant has no version field, so the card passes it via versionOverride.
+      // Why: the 'error' variant has no version field, so the card passes
+      // the cached version explicitly via versionOverride.
       const dismissedUpdateVersion =
         versionOverride ?? ('version' in s.updateStatus ? (s.updateStatus.version ?? null) : null)
       const activeNudgeId =
         'activeNudgeId' in s.updateStatus ? (s.updateStatus.activeNudgeId ?? null) : null
-      // Why: persist dismissal so relaunch doesn't immediately re-show the same card until a newer release.
+      // Why: dismissing an update is user intent, not transient view state. Persist
+      // the dismissed version so relaunching the app does not immediately re-show
+      // the same reminder card until a newer release appears.
       void window.api.ui.set({ dismissedUpdateVersion }).catch(console.error)
-      // Why: only consume the nudge campaign for cards from a nudge cycle, not ordinary dismissals.
+      // Why: only dismiss the main-process nudge campaign when the visible card
+      // actually came from a nudge-driven update cycle. Ordinary update dismissals
+      // must not consume the active campaign state.
       if (activeNudgeId) {
         void window.api.updater.dismissNudge().catch(console.error)
       }
@@ -2591,13 +2444,6 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   markUpdateReassuranceSeen: () => {
     void window.api.ui.set({ updateReassuranceSeen: true }).catch(console.error)
     set({ updateReassuranceSeen: true })
-  },
-  osc52ClipboardDefaultOnNoticePending: false,
-  clearOsc52ClipboardDefaultOnNotice: () => {
-    // Why clear locally first: a failed persist must not re-toast this session. It will
-    // re-arm on the next launch, which is the safe direction for a one-shot notice.
-    set({ osc52ClipboardDefaultOnNoticePending: false })
-    void window.api.ui.set({ osc52ClipboardDefaultOnNoticePending: false }).catch(console.error)
   },
   isFullScreen: false,
   setIsFullScreen: (v) => set({ isFullScreen: v }),

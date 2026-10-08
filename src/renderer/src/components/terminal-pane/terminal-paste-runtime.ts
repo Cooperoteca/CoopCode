@@ -85,7 +85,7 @@ function resolveWslRuntimeKey(
   return null
 }
 
-export function isWslShellOverride(shellOverride: string | null | undefined): boolean {
+function isWslShellOverride(shellOverride: string | null | undefined): boolean {
   const executable = getShellOverrideExecutableToken(shellOverride)
   const segmentStart = getShellOverridePathSegmentStart(executable)
   const name = executable.slice(segmentStart).toLowerCase()

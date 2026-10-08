@@ -23,7 +23,6 @@ export type FileContent = {
   isBinary: boolean
   isImage?: boolean
   mimeType?: string
-  fileIdentity?: string
   loadError?: string
 }
 

@@ -366,22 +366,19 @@ describe('shouldRecoverRendererAfterProcessGone', () => {
     ).toBe(false)
   })
 
-  it('recovers transient renderer launch failures', () => {
+  it('does not recover renderer startup and security launch failures', () => {
     expect(
       shouldRecoverRendererAfterProcessGone({
         reason: 'launch-failed',
         expectedTeardown: 'none'
       })
-    ).toBe(true)
+    ).toBe(false)
     expect(
       shouldRecoverRendererAfterProcessGone({
         reason: 'launch-failed',
         expectedTeardown: 'renderer-reload'
       })
-    ).toBe(true)
-  })
-
-  it('does not recover renderer integrity failures', () => {
+    ).toBe(false)
     expect(
       shouldRecoverRendererAfterProcessGone({
         reason: 'integrity-failure',

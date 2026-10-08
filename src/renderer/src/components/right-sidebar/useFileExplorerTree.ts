@@ -1,22 +1,17 @@
 import type { Dispatch, SetStateAction } from 'react'
 import { useCallback, useRef, useState } from 'react'
-import type { DirCache } from './file-explorer-types'
+import { joinPath, normalizeRelativePath } from '@/lib/path'
+import { getConnectionId } from '@/lib/connection-context'
+import type { DirEntry } from '../../../../shared/types'
+import type { DirCache, TreeNode } from './file-explorer-types'
 import { splitPathSegments } from './path-tree'
-import { statRuntimePath } from '@/runtime/runtime-file-client'
+import { shouldIncludeFileExplorerEntry } from './file-explorer-entries'
+import { readRuntimeDirectory, statRuntimePath } from '@/runtime/runtime-file-client'
 import {
   createFileExplorerDirLoadTracker,
   type FileExplorerDirLoadTracker
 } from './file-explorer-dir-load-tracker'
-import {
-  getFileExplorerOperationOwner,
-  getFileExplorerOwnerUnresolvedMessage,
-  getFileExplorerOperationRoute
-} from './file-explorer-operation-owner'
-import {
-  fileExplorerEntriesToTreeNodes,
-  readFileExplorerDirectory,
-  type FileExplorerDirectoryListing
-} from './file-explorer-directory-listing'
+import { getRightSidebarWorktreeRuntimeSettings } from './file-explorer-runtime-owner'
 
 type UseFileExplorerTreeResult = {
   dirCache: Record<string, DirCache>
@@ -45,7 +40,45 @@ type RefreshFileExplorerExpandedDirsParams = {
   worktreePath: string
   dirLoadTracker: FileExplorerDirLoadTracker
   setDirCache: Dispatch<SetStateAction<Record<string, DirCache>>>
-  readDirectory: (dirPath: string) => Promise<FileExplorerDirectoryListing>
+  readDirectory: (dirPath: string) => Promise<DirEntry[]>
+}
+
+function entriesToTreeNodes(
+  entries: DirEntry[],
+  dirPath: string,
+  depth: number,
+  worktreePath: string | null
+): TreeNode[] {
+  return entries.filter(shouldIncludeFileExplorerEntry).map((entry) => {
+    const path = joinPath(dirPath, entry.name)
+    return {
+      name: entry.name,
+      path,
+      relativePath: worktreePath
+        ? normalizeRelativePath(path.slice(worktreePath.length + 1))
+        : entry.name,
+      isDirectory: entry.isDirectory,
+      isSymlink: entry.isSymlink,
+      depth: depth + 1
+    }
+  })
+}
+
+async function readWorktreeDirectory(
+  activeWorktreeId: string | null | undefined,
+  worktreePath: string | null,
+  dirPath: string
+): Promise<DirEntry[]> {
+  const connectionId = getConnectionId(activeWorktreeId ?? null) ?? undefined
+  return readRuntimeDirectory(
+    {
+      settings: getRightSidebarWorktreeRuntimeSettings(activeWorktreeId),
+      worktreeId: activeWorktreeId,
+      worktreePath,
+      connectionId
+    },
+    dirPath
+  )
 }
 
 export async function refreshFileExplorerExpandedDirs({
@@ -82,7 +115,7 @@ export async function refreshFileExplorerExpandedDirs({
     uniqueDirs.map(async ({ dirPath, depth }) => {
       const loadToken = loadTokens.get(dirPath)!
       try {
-        const listing = await readDirectory(dirPath)
+        const entries = await readDirectory(dirPath)
         if (!dirLoadTracker.isCurrent(loadToken)) {
           return { current: false as const }
         }
@@ -90,15 +123,8 @@ export async function refreshFileExplorerExpandedDirs({
           current: true as const,
           dirPath,
           cache: {
-            children: fileExplorerEntriesToTreeNodes(
-              listing.entries,
-              dirPath,
-              depth,
-              worktreePath,
-              listing.operationOwner
-            ),
-            loading: false,
-            operationOwner: listing.operationOwner
+            children: entriesToTreeNodes(entries, dirPath, depth, worktreePath),
+            loading: false
           }
         }
       } catch {
@@ -171,24 +197,15 @@ export function useFileExplorerTree(
         }
       }))
       try {
-        const listing = await readFileExplorerDirectory(activeWorktreeId, worktreePath, dirPath)
+        const entries = await readWorktreeDirectory(activeWorktreeId, worktreePath, dirPath)
         if (!dirLoadTrackerRef.current.isCurrent(loadToken)) {
           return false
         }
         if (depth === -1) {
           setRootError(null)
         }
-        const children = fileExplorerEntriesToTreeNodes(
-          listing.entries,
-          dirPath,
-          depth,
-          worktreePath,
-          listing.operationOwner
-        )
-        setDirCache((prev) => ({
-          ...prev,
-          [dirPath]: { children, loading: false, operationOwner: listing.operationOwner }
-        }))
+        const children = entriesToTreeNodes(entries, dirPath, depth, worktreePath)
+        setDirCache((prev) => ({ ...prev, [dirPath]: { children, loading: false } }))
         return true
       } catch (error) {
         if (!dirLoadTrackerRef.current.isCurrent(loadToken)) {
@@ -230,17 +247,13 @@ export function useFileExplorerTree(
 
   const statPath = useCallback(
     async (path: string) => {
-      const operationOwner = getFileExplorerOperationOwner(activeWorktreeId)
-      const route = getFileExplorerOperationRoute(operationOwner)
-      if (!route) {
-        throw new Error(getFileExplorerOwnerUnresolvedMessage())
-      }
+      const connectionId = getConnectionId(activeWorktreeId ?? null) ?? undefined
       return statRuntimePath(
         {
-          settings: route.settings,
+          settings: getRightSidebarWorktreeRuntimeSettings(activeWorktreeId),
           worktreeId: activeWorktreeId,
           worktreePath,
-          connectionId: route.connectionId
+          connectionId
         },
         path
       )
@@ -273,7 +286,7 @@ export function useFileExplorerTree(
       worktreePath,
       dirLoadTracker: dirLoadTrackerRef.current,
       setDirCache,
-      readDirectory: (dirPath) => readFileExplorerDirectory(activeWorktreeId, worktreePath, dirPath)
+      readDirectory: (dirPath) => readWorktreeDirectory(activeWorktreeId, worktreePath, dirPath)
     })
   }, [activeWorktreeId, expanded, loadDir, worktreePath])
 

@@ -57,8 +57,8 @@ vi.mock('@/lib/worktree-activation', () => ({
   ensureWorktreeHasInitialTerminal: vi.fn()
 }))
 
-vi.mock('@/lib/workspace-activation-terminal-focus', () => ({
-  queueWorkspaceActivationTerminalFocus: vi.fn()
+vi.mock('@/lib/new-workspace-terminal-focus', () => ({
+  queueNewWorkspaceTerminalFocus: vi.fn()
 }))
 
 vi.mock('@/lib/new-workspace', () => ({
@@ -80,7 +80,7 @@ import {
   activateAndRevealWorktree,
   ensureWorktreeHasInitialTerminal
 } from '@/lib/worktree-activation'
-import { queueWorkspaceActivationTerminalFocus } from '@/lib/workspace-activation-terminal-focus'
+import { queueNewWorkspaceTerminalFocus } from '@/lib/new-workspace-terminal-focus'
 import {
   beginBackgroundWorktreePreparation,
   continueBackgroundWorktreeCreation,
@@ -498,69 +498,10 @@ describe('staged background worktree creation', () => {
       undefined,
       { activateCreatedTabs: false }
     )
-    expect(queueWorkspaceActivationTerminalFocus).not.toHaveBeenCalled()
+    expect(queueNewWorkspaceTerminalFocus).not.toHaveBeenCalled()
     expect(store.removePendingWorktreeCreation).toHaveBeenCalledWith('creation-1', {
       cleanupVm: false
     })
-  })
-
-  it('reveals the completed workspace after the user switches to another workspace', async () => {
-    let resolveCreate!: (result: { worktree: { id: string; repoId: string } }) => void
-    store.createWorktree.mockReturnValueOnce(
-      new Promise((resolve) => {
-        resolveCreate = resolve
-      })
-    )
-
-    const started = continueBackgroundWorktreeCreation('creation-1', makeRequest(), {
-      revealCreationSurface: false
-    })
-
-    expect(started).toBe(true)
-    await vi.waitFor(() => expect(store.createWorktree).toHaveBeenCalledTimes(1))
-    // Why: selecting a real workspace clears only the pending surface pointer;
-    // completion should still finish the task-launch handoff once it is ready.
-    store.activePendingCreationId = null
-    resolveCreate({ worktree: { id: 'wt-1', repoId: 'repo-1' } })
-    await flushAsyncWorktreeCreation()
-
-    expect(activateAndRevealWorktree).toHaveBeenCalledWith('wt-1', {
-      sidebarRevealBehavior: 'auto'
-    })
-    expect(ensureWorktreeHasInitialTerminal).not.toHaveBeenCalled()
-    expect(store.removePendingWorktreeCreation).toHaveBeenCalledWith('creation-1', {
-      cleanupVm: false
-    })
-  })
-
-  it('does not reveal a workspace cancelled during post-create trust preflight', async () => {
-    let resolveTrust!: () => void
-    const markTrusted = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveTrust = resolve
-        })
-    )
-    globalThis.window = { api: { agentTrust: { markTrusted } } } as never
-    store.repos = [{ id: 'repo-1', connectionId: null }]
-    store.createWorktree.mockResolvedValueOnce({
-      worktree: { id: 'wt-1', repoId: 'repo-1', path: '/repo/wt-1' }
-    })
-
-    const started = continueBackgroundWorktreeCreation(
-      'creation-1',
-      makeRequest({ agent: 'codex' }),
-      { revealCreationSurface: false }
-    )
-
-    expect(started).toBe(true)
-    await vi.waitFor(() => expect(markTrusted).toHaveBeenCalledTimes(1))
-    delete store.pendingWorktreeCreations['creation-1']
-    store.activePendingCreationId = null
-    resolveTrust()
-    await vi.waitFor(() => expect(ensureWorktreeHasInitialTerminal).toHaveBeenCalledTimes(1))
-
-    expect(activateAndRevealWorktree).not.toHaveBeenCalled()
   })
 
   // Why: one-click "Start workspace from issue" commonly backgrounds, so the

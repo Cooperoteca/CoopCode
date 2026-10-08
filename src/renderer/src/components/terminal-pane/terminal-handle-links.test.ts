@@ -299,7 +299,7 @@ describe('createTerminalHandleLinkProvider', () => {
 
     expect(window.api.runtime.call).toHaveBeenCalledWith({
       method: 'terminal.focus',
-      params: { terminal: 'term_worker', navigation: 'host' }
+      params: { terminal: 'term_worker' }
     })
   })
 
@@ -361,7 +361,7 @@ describe('createTerminalHandleLinkProvider', () => {
     expect(window.api.runtimeEnvironments.call).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'terminal.focus',
-      params: { terminal: 'term_worker', navigation: 'host' },
+      params: { terminal: 'term_worker' },
       timeoutMs: undefined
     })
   })
@@ -389,7 +389,7 @@ describe('createTerminalHandleLinkProvider', () => {
     })
     expect(window.api.runtime.call).toHaveBeenNthCalledWith(2, {
       method: 'terminal.focus',
-      params: { terminal: 'term_worker', navigation: 'host' }
+      params: { terminal: 'term_worker' }
     })
     expect(preventDefault).toHaveBeenCalled()
   })
@@ -561,7 +561,7 @@ describe('createTerminalHandleLinkProvider', () => {
     expect(window.api.runtimeEnvironments.call).toHaveBeenNthCalledWith(2, {
       selector: 'env-1',
       method: 'terminal.focus',
-      params: { terminal: 'term_worker', navigation: 'host' },
+      params: { terminal: 'term_worker' },
       timeoutMs: undefined
     })
   })
@@ -620,7 +620,7 @@ describe('createTerminalHandleLinkProvider', () => {
     })
     expect(window.api.runtime.call).toHaveBeenNthCalledWith(2, {
       method: 'terminal.focus',
-      params: { terminal: 'term_worker', navigation: 'host' }
+      params: { terminal: 'term_worker' }
     })
   })
 
@@ -662,7 +662,7 @@ describe('createTerminalHandleLinkProvider', () => {
     expect(window.api.runtimeEnvironments.call).toHaveBeenNthCalledWith(2, {
       selector: 'env-1',
       method: 'terminal.focus',
-      params: { terminal: 'term_remote', navigation: 'host' },
+      params: { terminal: 'term_remote' },
       timeoutMs: undefined
     })
   })

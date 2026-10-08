@@ -10,7 +10,6 @@ import {
 } from './github-pr-mutations'
 
 const WORKTREE_ID = 'repo-42::/path/to/wt'
-const ENTERPRISE_PR_REPO = { owner: 'fork', repo: 'proj', host: 'github.acme.test' }
 
 function okStatus(): RpcResponse {
   return { id: 'x', ok: true, result: { ok: true }, _meta: { runtimeId: 'r' } }
@@ -47,17 +46,13 @@ function fakeMutations(overrides: Partial<PrActionMutations> = {}): PrActionMuta
   }
 }
 
-function makeEngine(
-  mutations: PrActionMutations,
-  refetch = vi.fn(async () => {}),
-  prRepo: typeof ENTERPRISE_PR_REPO | null = null
-) {
+function makeEngine(mutations: PrActionMutations, refetch = vi.fn(async () => {})) {
   const onChange = vi.fn()
   const engine = new PrActionsEngine({
     mutations,
     prNumber: 7,
     headSha: 'abc123',
-    prRepo,
+    prRepo: null,
     refetch,
     onChange
   })
@@ -72,7 +67,7 @@ describe('mutation wrappers — prRepo + param shapes', () => {
     await fetchMergePR(client, WORKTREE_ID, {
       prNumber: 7,
       method: 'squash',
-      prRepo: ENTERPRISE_PR_REPO
+      prRepo: { owner: 'fork', repo: 'proj' }
     })
     expect(sendRequest).toHaveBeenCalledWith(
       'github.mergePR',
@@ -80,25 +75,17 @@ describe('mutation wrappers — prRepo + param shapes', () => {
         repo: 'id:repo-42',
         prNumber: 7,
         method: 'squash',
-        prRepo: ENTERPRISE_PR_REPO
+        prRepo: { owner: 'fork', repo: 'proj' }
       })
     )
   })
 
-  it('updatePRState carries the host-qualified PR repo and state update', async () => {
+  it('updatePRState close carries NO prRepo and the state update', async () => {
     const { client, sendRequest } = mockClient(okStatus())
-    await fetchUpdatePRState(client, WORKTREE_ID, {
-      prNumber: 7,
-      state: 'closed',
-      prRepo: ENTERPRISE_PR_REPO
-    })
+    await fetchUpdatePRState(client, WORKTREE_ID, { prNumber: 7, state: 'closed' })
     const [, params] = sendRequest.mock.calls[0]
-    expect(params).toEqual({
-      repo: 'id:repo-42',
-      prNumber: 7,
-      updates: { state: 'closed' },
-      prRepo: ENTERPRISE_PR_REPO
-    })
+    expect(params).toEqual({ repo: 'id:repo-42', prNumber: 7, updates: { state: 'closed' } })
+    expect(params).not.toHaveProperty('prRepo')
   })
 
   it('updatePRState reopen passes state:open', async () => {
@@ -108,43 +95,27 @@ describe('mutation wrappers — prRepo + param shapes', () => {
     expect((params.updates as { state: string }).state).toBe('open')
   })
 
-  it('request/remove reviewers carry the host-qualified PR repo', async () => {
+  it('request/remove reviewers carry NO prRepo even when a fork is in play', async () => {
     const { client, sendRequest } = mockClient(okStatus())
-    await fetchRequestPRReviewers(client, WORKTREE_ID, {
-      prNumber: 7,
-      reviewers: ['alice'],
-      prRepo: ENTERPRISE_PR_REPO
-    })
-    await fetchRemovePRReviewers(client, WORKTREE_ID, {
-      prNumber: 7,
-      reviewers: ['bob'],
-      prRepo: ENTERPRISE_PR_REPO
-    })
-    expect(sendRequest.mock.calls[0][1]).toMatchObject({
-      reviewers: ['alice'],
-      prRepo: ENTERPRISE_PR_REPO
-    })
-    expect(sendRequest.mock.calls[1][1]).toMatchObject({
-      reviewers: ['bob'],
-      prRepo: ENTERPRISE_PR_REPO
-    })
+    await fetchRequestPRReviewers(client, WORKTREE_ID, { prNumber: 7, reviewers: ['alice'] })
+    await fetchRemovePRReviewers(client, WORKTREE_ID, { prNumber: 7, reviewers: ['bob'] })
+    for (const [, params] of sendRequest.mock.calls) {
+      expect(params).not.toHaveProperty('prRepo')
+    }
+    expect(sendRequest.mock.calls[0][1]).toMatchObject({ reviewers: ['alice'] })
+    expect(sendRequest.mock.calls[1][1]).toMatchObject({ reviewers: ['bob'] })
   })
 
-  it('rerunPRChecks carries failedOnly, headSha, and the host-qualified PR repo', async () => {
+  it('rerunPRChecks carries failedOnly + headSha and NO prRepo', async () => {
     const { client, sendRequest } = mockClient(okStatus())
     await fetchRerunPRChecks(client, WORKTREE_ID, {
       prNumber: 7,
       headSha: 'abc',
-      failedOnly: true,
-      prRepo: ENTERPRISE_PR_REPO
+      failedOnly: true
     })
     const [, params] = sendRequest.mock.calls[0]
-    expect(params).toMatchObject({
-      prNumber: 7,
-      failedOnly: true,
-      headSha: 'abc',
-      prRepo: ENTERPRISE_PR_REPO
-    })
+    expect(params).toMatchObject({ prNumber: 7, failedOnly: true, headSha: 'abc' })
+    expect(params).not.toHaveProperty('prRepo')
   })
 
   it('a host { ok:false, error } result surfaces as a failure outcome', async () => {
@@ -184,14 +155,14 @@ describe('PrActionsEngine — auto-merge optimistic revert', () => {
     const mutations = fakeMutations({
       setPRAutoMerge: vi.fn(async () => ({ ok: false as const, error: 'connection lost' }))
     })
-    const { engine } = makeEngine(mutations, undefined, ENTERPRISE_PR_REPO)
+    const { engine } = makeEngine(mutations)
     // authoritative = false; user enables.
     await engine.setAutoMerge(true, 'squash')
     expect(mutations.setPRAutoMerge).toHaveBeenCalledWith({
       prNumber: 7,
       enabled: true,
       method: 'squash',
-      prRepo: ENTERPRISE_PR_REPO
+      prRepo: null
     })
     // Reverted to authoritative after transient failure.
     expect(engine.resolveAutoMerge(false)).toBe(false)
@@ -211,32 +182,20 @@ describe('PrActionsEngine — auto-merge optimistic revert', () => {
 describe('PrActionsEngine — updateState close/reopen', () => {
   it('close fires state:closed and reopen fires state:open', async () => {
     const mutations = fakeMutations()
-    const { engine } = makeEngine(mutations, undefined, ENTERPRISE_PR_REPO)
+    const { engine } = makeEngine(mutations)
     await engine.updateState('closed')
     await engine.updateState('open')
-    expect(mutations.updatePRState).toHaveBeenNthCalledWith(1, {
-      prNumber: 7,
-      state: 'closed',
-      prRepo: ENTERPRISE_PR_REPO
-    })
-    expect(mutations.updatePRState).toHaveBeenNthCalledWith(2, {
-      prNumber: 7,
-      state: 'open',
-      prRepo: ENTERPRISE_PR_REPO
-    })
+    expect(mutations.updatePRState).toHaveBeenNthCalledWith(1, { prNumber: 7, state: 'closed' })
+    expect(mutations.updatePRState).toHaveBeenNthCalledWith(2, { prNumber: 7, state: 'open' })
   })
 })
 
 describe('PrActionsEngine — reviewers', () => {
-  it('requestReviewer adds via requestReviewers with a host-qualified PR repo', async () => {
+  it('requestReviewer adds via requestReviewers with a single login (no prRepo at engine level)', async () => {
     const mutations = fakeMutations()
-    const { engine } = makeEngine(mutations, undefined, ENTERPRISE_PR_REPO)
+    const { engine } = makeEngine(mutations)
     await engine.requestReviewer('alice')
-    expect(mutations.requestReviewers).toHaveBeenCalledWith({
-      prNumber: 7,
-      reviewers: ['alice'],
-      prRepo: ENTERPRISE_PR_REPO
-    })
+    expect(mutations.requestReviewers).toHaveBeenCalledWith({ prNumber: 7, reviewers: ['alice'] })
   })
 
   it('removeReviewer optimistic revert on transient failure', async () => {
@@ -254,13 +213,12 @@ describe('PrActionsEngine — reviewers', () => {
 describe('PrActionsEngine — rerun checks', () => {
   it('fires failedOnly:true with headSha and refetches on success', async () => {
     const mutations = fakeMutations()
-    const { engine, refetch } = makeEngine(mutations, undefined, ENTERPRISE_PR_REPO)
+    const { engine, refetch } = makeEngine(mutations)
     await engine.rerunFailingChecks()
     expect(mutations.rerunChecks).toHaveBeenCalledWith({
       prNumber: 7,
       headSha: 'abc123',
-      failedOnly: true,
-      prRepo: ENTERPRISE_PR_REPO
+      failedOnly: true
     })
     expect(refetch).toHaveBeenCalledOnce()
   })

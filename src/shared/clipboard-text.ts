@@ -1,5 +1,3 @@
-import { yieldToEventLoop } from './event-loop-yield'
-
 export const CLIPBOARD_TEXT_READ_MAX_BYTES = 16 * 1024 * 1024
 export const CLIPBOARD_TEXT_WRITE_MAX_BYTES = 16 * 1024 * 1024
 export const CLIPBOARD_TEXT_TOO_LARGE_ERROR = 'Clipboard text is too large for this paste target.'
@@ -55,7 +53,7 @@ export async function measureClipboardTextByteLengthWithYield(
     1,
     options.yieldAfterCodeUnits ?? CLIPBOARD_TEXT_MEASURE_YIELD_CODE_UNITS
   )
-  const yieldBetweenBatches = options.yieldToEventLoop ?? yieldToEventLoop
+  const yieldToEventLoop = options.yieldToEventLoop ?? defaultClipboardTextMeasureYield
   let nextYieldAt = yieldAfterCodeUnits
   let byteLength = 0
 
@@ -69,7 +67,7 @@ export async function measureClipboardTextByteLengthWithYield(
       index += 1
     }
     if (index >= nextYieldAt) {
-      await yieldBetweenBatches()
+      await yieldToEventLoop()
       nextYieldAt = index + yieldAfterCodeUnits
     }
   }
@@ -184,4 +182,8 @@ function getUtf8ByteLengthForCodePoint(codePoint: number): number {
     return 3
   }
   return 4
+}
+
+function defaultClipboardTextMeasureYield(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }

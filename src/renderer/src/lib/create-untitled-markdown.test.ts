@@ -15,14 +15,6 @@ describe('createUntitledMarkdownFile', () => {
     vi.unstubAllGlobals()
   })
 
-  it('rejects captured ownership without a current-generation assertion', async () => {
-    await expect(
-      createUntitledMarkdownFile('/repo', 'wt-1', undefined, undefined, {
-        operationProvenance: {} as never
-      })
-    ).rejects.toThrow("Couldn't verify which host owns this file")
-  })
-
   it('retries with the next untitled name when createFile loses the EEXIST race', async () => {
     const pathExists = vi
       .fn()
@@ -56,16 +48,8 @@ describe('createUntitledMarkdownFile', () => {
       mode: 'edit'
     })
 
-    expect(createFile).toHaveBeenNthCalledWith(1, {
-      filePath: '/repo/untitled-2.md',
-      connectionId: undefined,
-      expectedExecutionHostId: 'local'
-    })
-    expect(createFile).toHaveBeenNthCalledWith(2, {
-      filePath: '/repo/untitled-3.md',
-      connectionId: undefined,
-      expectedExecutionHostId: 'local'
-    })
+    expect(createFile).toHaveBeenNthCalledWith(1, { filePath: '/repo/untitled-2.md' })
+    expect(createFile).toHaveBeenNthCalledWith(2, { filePath: '/repo/untitled-3.md' })
     expect(pathExists).toHaveBeenCalledTimes(3)
   })
 
@@ -114,8 +98,7 @@ describe('createUntitledMarkdownFile', () => {
     expect(stat).not.toHaveBeenCalled()
     expect(createFile).toHaveBeenCalledWith({
       filePath: '/repo/untitled.md',
-      connectionId: 'conn-1',
-      expectedExecutionHostId: 'ssh:conn-1'
+      connectionId: 'conn-1'
     })
   })
 
@@ -272,12 +255,7 @@ describe('createUntitledMarkdownFile', () => {
     expect(runtimeEnvironmentCall).toHaveBeenNthCalledWith(2, {
       selector: 'env-1',
       method: 'files.createFile',
-      expectedEnvironmentPairingRevision: undefined,
-      params: {
-        worktree: 'id:wt-1',
-        relativePath: 'untitled.md',
-        expectedExecutionHostId: 'local'
-      },
+      params: { worktree: 'id:wt-1', relativePath: 'untitled.md' },
       timeoutMs: 15_000
     })
     expect(stat).not.toHaveBeenCalled()

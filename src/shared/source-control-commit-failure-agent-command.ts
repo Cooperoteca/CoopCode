@@ -1,4 +1,7 @@
-import { buildSourceControlRecoveryAgentCommandInput } from './source-control-recovery-agent-command'
+import {
+  DEFAULT_SOURCE_CONTROL_ACTION_COMMAND_TEMPLATES,
+  renderSourceControlActionCommandTemplate
+} from './source-control-ai-actions'
 
 export function buildCommitFailureAgentCommandInput({
   promptOverride,
@@ -9,10 +12,11 @@ export function buildCommitFailureAgentCommandInput({
   commandInputTemplate?: string | null
   basePrompt: string
 }): string {
-  return buildSourceControlRecoveryAgentCommandInput({
-    actionId: 'fixCommitFailure',
-    promptOverride,
-    commandInputTemplate,
-    basePrompt
-  })
+  return (
+    promptOverride ??
+    renderSourceControlActionCommandTemplate(
+      commandInputTemplate ?? DEFAULT_SOURCE_CONTROL_ACTION_COMMAND_TEMPLATES.fixCommitFailure,
+      { basePrompt }
+    )
+  ).trim()
 }

@@ -1,15 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react'
-import {
-  CalendarClock,
-  Check,
-  FolderPlus,
-  GitBranch,
-  GitCommitHorizontal,
-  ListFilter,
-  Moon,
-  Server,
-  SquareTerminal
-} from 'lucide-react'
+import { Check, FolderPlus, GitBranch, ListFilter, Moon, Server, Workflow } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import {
@@ -58,10 +48,6 @@ const SidebarFilter = React.memo(function SidebarFilter({
   const setHideAutomationGeneratedWorkspaces = useAppStore(
     (s) => s.setHideAutomationGeneratedWorkspaces
   )
-  const hideCliCreatedWorkspaces = useAppStore((s) => s.hideCliCreatedWorkspaces)
-  const setHideCliCreatedWorkspaces = useAppStore((s) => s.setHideCliCreatedWorkspaces)
-  const hideDetachedHeadWorkspaces = useAppStore((s) => s.hideDetachedHeadWorkspaces)
-  const setHideDetachedHeadWorkspaces = useAppStore((s) => s.setHideDetachedHeadWorkspaces)
   const filterRepoIds = useAppStore((s) => s.filterRepoIds)
   const setFilterRepoIds = useAppStore((s) => s.setFilterRepoIds)
   const repos = useAppStore((s) => s.repos)
@@ -112,15 +98,11 @@ const SidebarFilter = React.memo(function SidebarFilter({
     hasSleepingFilter ||
     hideDefaultBranchWorkspace ||
     hideAutomationGeneratedWorkspaces ||
-    hideCliCreatedWorkspaces ||
-    hideDetachedHeadWorkspaces ||
     hasRepoFilter
   const activeFilterCount =
     (hasSleepingFilter ? 1 : 0) +
     (hideDefaultBranchWorkspace ? 1 : 0) +
     (hideAutomationGeneratedWorkspaces ? 1 : 0) +
-    (hideCliCreatedWorkspaces ? 1 : 0) +
-    (hideDetachedHeadWorkspaces ? 1 : 0) +
     selectedCount
 
   const filteredRepos = useMemo(() => searchRepos(repos, query), [repos, query])
@@ -134,15 +116,11 @@ const SidebarFilter = React.memo(function SidebarFilter({
     setShowSleepingWorkspaces(DEFAULT_SHOW_SLEEPING_WORKSPACES)
     setHideDefaultBranchWorkspace(false)
     setHideAutomationGeneratedWorkspaces(false)
-    setHideCliCreatedWorkspaces(false)
-    setHideDetachedHeadWorkspaces(false)
     setFilterRepoIds([])
   }, [
     setShowSleepingWorkspaces,
     setHideDefaultBranchWorkspace,
     setHideAutomationGeneratedWorkspaces,
-    setHideCliCreatedWorkspaces,
-    setHideDetachedHeadWorkspaces,
     setFilterRepoIds
   ])
 
@@ -222,28 +200,13 @@ const SidebarFilter = React.memo(function SidebarFilter({
           onChange={setHideDefaultBranchWorkspace}
         />
         <FilterToggleRow
-          icon={<CalendarClock className="size-3.5" />}
+          icon={<Workflow className="size-3.5" />}
           label={translate(
             'auto.components.sidebar.SidebarFilter.automationCreated',
             'Hide automation-created'
           )}
           checked={hideAutomationGeneratedWorkspaces}
           onChange={setHideAutomationGeneratedWorkspaces}
-        />
-        <FilterToggleRow
-          icon={<SquareTerminal className="size-3.5" />}
-          label={translate('auto.components.sidebar.SidebarFilter.cliCreated', 'Hide CLI-created')}
-          checked={hideCliCreatedWorkspaces}
-          onChange={setHideCliCreatedWorkspaces}
-        />
-        <FilterToggleRow
-          icon={<GitCommitHorizontal className="size-3.5" />}
-          label={translate(
-            'auto.components.sidebar.SidebarFilter.detachedHead',
-            'Hide detached HEAD'
-          )}
-          checked={hideDetachedHeadWorkspaces}
-          onChange={setHideDetachedHeadWorkspaces}
         />
 
         {canFilterRepos && (

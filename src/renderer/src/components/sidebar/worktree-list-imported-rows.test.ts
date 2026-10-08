@@ -3,7 +3,6 @@ import {
   canKeepImportedWorktreesHidden,
   getRenderRowKey,
   getWorktreeDragGroups,
-  getWorktreeDragIndexes,
   renderRowContainsWorktree
 } from './WorktreeList'
 import type { Repo, Worktree } from '../../../../shared/types'
@@ -60,13 +59,6 @@ const makeWorktreeRow = (id: string): Extract<Row, { type: 'item' }> => ({
   lineageChildCount: 0
 })
 
-const makePinnedWorktreeRow = (id: string): Extract<Row, { type: 'item' }> => ({
-  ...makeWorktreeRow(id),
-  rowKey: `pinned:${id}`,
-  sectionKey: 'pinned',
-  worktree: { ...makeWorktree(id), isPinned: true }
-})
-
 const makeImportedCardRow = (): Extract<Row, { type: 'imported-worktrees-card' }> => ({
   type: 'imported-worktrees-card',
   key: 'imported-worktrees-card:repo-group:repo-1',
@@ -92,29 +84,6 @@ describe('imported worktree virtual rows', () => {
         makeWorktreeRow('feature')
       ])
     ).toEqual([{ key: 'repo:repo-1', worktreeIds: ['main', 'feature'] }])
-  })
-
-  it('indexes pinned rows for sidebar drag when they are the only rendered copy', () => {
-    const rows = [makeHeaderRow('pinned'), makePinnedWorktreeRow('main')]
-    const { groupIndexByRowKey, groupKeyByRowKey } = getWorktreeDragIndexes(rows)
-
-    expect(getWorktreeDragGroups(rows)).toEqual([{ key: 'pinned', worktreeIds: ['main'] }])
-    expect(groupKeyByRowKey.get('pinned:main')).toBe('pinned')
-    expect(groupIndexByRowKey.get('pinned:main')).toBe(0)
-  })
-
-  it('uses natural drag metadata when pinned rows have duplicate natural copies', () => {
-    const rows = [
-      makeHeaderRow('pinned'),
-      makePinnedWorktreeRow('main'),
-      makeHeaderRow('all'),
-      makeWorktreeRow('main')
-    ]
-    const { groupKeyByRowKey } = getWorktreeDragIndexes(rows)
-
-    expect(getWorktreeDragGroups(rows)).toEqual([{ key: 'all', worktreeIds: ['main'] }])
-    expect(groupKeyByRowKey.has('pinned:main')).toBe(false)
-    expect(groupKeyByRowKey.get('all:main')).toBe('all')
   })
 
   it('only allows keep-hidden actions for repo-group cards that are not forced visible', () => {

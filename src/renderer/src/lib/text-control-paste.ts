@@ -1,4 +1,3 @@
-import { yieldToEventLoop } from '../../../shared/event-loop-yield'
 import {
   createTextControlCancelledResult,
   createTextControlPastedResult,
@@ -185,6 +184,10 @@ function getSelectionRange(target: HTMLInputElement | HTMLTextAreaElement): {
     start: Math.min(start, end),
     end: Math.max(start, end)
   }
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, 0))
 }
 
 function defaultNow(): number {

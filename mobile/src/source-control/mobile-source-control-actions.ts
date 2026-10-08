@@ -217,7 +217,7 @@ export function buildMobileSourceControlActions(
       onPress: handlers.checkout
     },
     {
-      label: 'Commits',
+      label: 'History',
       iconKey: 'history',
       disabled: busy,
       onPress: handlers.history

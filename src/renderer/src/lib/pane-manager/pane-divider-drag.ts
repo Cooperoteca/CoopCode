@@ -77,7 +77,6 @@ export function attachDividerDrag(
   let prevInitialFlex = ''
   let nextInitialFlex = ''
   let activePointerId: number | null = null
-  let activePointerType: string | null = null
   let releasePtyResizeHold: { flush: () => void; cancel: () => void } | null = null
   let windowListenersAttached = false
   const flexScheduler = createDividerFlexFrameScheduler({
@@ -94,8 +93,6 @@ export function attachDividerDrag(
     if (windowListenersAttached || typeof window === 'undefined') {
       return
     }
-    // Why: Chromium can transiently lose capture while the button remains held,
-    // so window events keep ownership until pointerup, pointercancel, or blur.
     windowListenersAttached = true
     window.addEventListener('pointermove', onPointerMove, true)
     window.addEventListener('pointerup', onPointerUp, true)
@@ -132,14 +129,12 @@ export function attachDividerDrag(
       removeWindowListeners()
       releasePointerCaptureIfHeld(activePointerId)
       activePointerId = null
-      activePointerType = null
       return
     }
 
     const pointerId = activePointerId
     dragging = false
     activePointerId = null
-    activePointerType = null
     removeWindowListeners()
 
     if (commitLayout) {
@@ -201,7 +196,6 @@ export function attachDividerDrag(
 
     divider.setPointerCapture(e.pointerId)
     activePointerId = e.pointerId
-    activePointerType = e.pointerType
     divider.classList.add('is-dragging')
     dragging = true
     didMove = false
@@ -222,18 +216,8 @@ export function attachDividerDrag(
     prevFlex = prevSize
   }
 
-  // Why: WSLg's RDP input path reports press/release as a `mouse` pointer but
-  // streams motion as a `pen` pointer with a different pointerId, so a strict
-  // pointerId match drops every move. A foreign primary pointer may take over
-  // only when neither end is touch: each pointer type has its own primary, so
-  // otherwise a stray finger hijacks a mouse/pen drag and a stray mouse hijacks
-  // a touch drag. Either drag still matches its own pointer by pointerId.
-  const isActiveDragPointer = (e: PointerEvent): boolean =>
-    e.pointerId === activePointerId ||
-    (e.isPrimary && e.pointerType !== 'touch' && activePointerType !== 'touch')
-
   const onPointerMove = (e: PointerEvent): void => {
-    if (!dragging || !isActiveDragPointer(e) || !prevEl || !nextEl) {
+    if (!dragging || e.pointerId !== activePointerId || !prevEl || !nextEl) {
       return
     }
     didMove = true
@@ -254,7 +238,7 @@ export function attachDividerDrag(
   }
 
   const onPointerUp = (e: PointerEvent): void => {
-    if (isActiveDragPointer(e)) {
+    if (e.pointerId === activePointerId) {
       finishActiveDrag(true)
     }
   }
@@ -275,7 +259,13 @@ export function attachDividerDrag(
   }
 
   const onPointerCancel = (e: PointerEvent): void => {
-    if (isActiveDragPointer(e)) {
+    if (e.pointerId === activePointerId) {
+      finishActiveDrag(false)
+    }
+  }
+
+  const onLostPointerCapture = (): void => {
+    if (dragging) {
       finishActiveDrag(false)
     }
   }
@@ -288,6 +278,7 @@ export function attachDividerDrag(
   divider.addEventListener('pointermove', onPointerMove)
   divider.addEventListener('pointerup', onPointerUp)
   divider.addEventListener('pointercancel', onPointerCancel)
+  divider.addEventListener('lostpointercapture', onLostPointerCapture)
   divider.addEventListener('dblclick', onDoubleClick)
   dividerDragCleanups.set(divider, () => {
     finishActiveDrag(false)
@@ -295,6 +286,7 @@ export function attachDividerDrag(
     divider.removeEventListener('pointermove', onPointerMove)
     divider.removeEventListener('pointerup', onPointerUp)
     divider.removeEventListener('pointercancel', onPointerCancel)
+    divider.removeEventListener('lostpointercapture', onLostPointerCapture)
     divider.removeEventListener('dblclick', onDoubleClick)
   })
 }

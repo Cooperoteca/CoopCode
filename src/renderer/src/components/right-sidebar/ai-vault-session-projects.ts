@@ -12,11 +12,15 @@ import {
   normalizeRuntimePathForComparison,
   normalizeRuntimePathSeparators
 } from '../../../../shared/cross-platform-path'
-import type { AiVaultSessionProject } from '../../../../shared/ai-vault-session-filters'
 
-// Why: the plain project descriptor moved to /shared (so the lifted filter core
-// stays renderer-free). Re-export it here for renderer import parity.
-export type { AiVaultSessionProject } from '../../../../shared/ai-vault-session-filters'
+export type AiVaultSessionProject = {
+  kind: 'repo' | 'folder' | 'unknown'
+  key: string
+  label: string
+  projectId?: string
+  repoId?: string
+  hostKey?: ExecutionHostId
+}
 
 export type AiVaultProjectContext = {
   activeProjectKey: string | null

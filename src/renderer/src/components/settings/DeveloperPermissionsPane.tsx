@@ -128,7 +128,10 @@ const PERMISSIONS: PermissionDefinition[] = [
   {
     id: 'local-network',
     get label() {
-      return translate('auto.components.settings.DeveloperPermissionsPane.e7bb06007c', 'LAN')
+      return translate(
+        'auto.components.settings.DeveloperPermissionsPane.e7bb06007c',
+        'Local Network'
+      )
     },
     get description() {
       return translate(

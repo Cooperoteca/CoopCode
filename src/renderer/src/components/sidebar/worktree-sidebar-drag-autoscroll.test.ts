@@ -21,9 +21,7 @@ const SESSION: WorktreeSidebarDragSession = {
   draggedIds: ['b'],
   reorderDraggedIds: ['b'],
   reorderUnitDraggedIds: ['b'],
-  rects: [{ worktreeId: 'b', groupIndex: 1, top: 48, bottom: 88 }],
-  grab: null,
-  anchor: null
+  rects: [{ worktreeId: 'b', groupIndex: 1, top: 48, bottom: 88 }]
 }
 
 describe('getWorktreeSidebarDragAutoscroll', () => {
@@ -160,7 +158,6 @@ describe('refreshWorktreeSidebarDragSession', () => {
         ],
         rects
       })
-      // Why: the row set changed ('a' mounted), so the fresh measurement is adopted.
     ).toEqual({ ...SESSION, rects })
   })
 

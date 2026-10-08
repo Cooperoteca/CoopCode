@@ -65,7 +65,7 @@ describe('deliverLaunchPromptToAgentTab', () => {
     })
     await deliverLaunchPromptToAgentTab({
       tabId: 'unsupported-tab',
-      agent: 'gemini',
+      agent: 'grok',
       content: 'Fix failing checks',
       submit: true,
       forcePaste: true
@@ -121,7 +121,7 @@ describe('deliverLaunchPromptToAgentTab', () => {
 
     await deliverLaunchPromptToAgentTab({
       tabId: 'tab-1',
-      agent: 'gemini',
+      agent: 'grok',
       content: 'Large generated prompt',
       submit: true,
       forcePaste: true

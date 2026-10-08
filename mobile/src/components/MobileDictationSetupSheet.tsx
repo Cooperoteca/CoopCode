@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from 'react-native'
 import { Check, Download } from 'lucide-react-native'
 import { BottomDrawer } from './BottomDrawer'
 import { colors, radii, spacing, typography } from '../theme/mobile-theme'
 import type { RpcClient } from '../transport/rpc-client'
 import { triggerError, triggerSuccess } from '../platform/haptics'
-import { useDictationSetupPoller } from '../dictation/use-dictation-setup-poller'
 import {
   downloadDictationModel,
   fetchDictationSetup,
@@ -38,34 +37,40 @@ export function MobileDictationSetupSheet({ visible, client, onClose, onReady }:
   const [setup, setSetup] = useState<MobileSpeechSetup | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const refresh = useCallback(async (): Promise<boolean | undefined> => {
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const refresh = useCallback(async () => {
     if (!client) {
-      return false
+      return
     }
     try {
-      const next = await fetchDictationSetup(client)
-      setSetup(next)
-      setError(null)
-      return next.models.some(isModelInFlight)
+      setSetup(await fetchDictationSetup(client))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load')
-      return undefined
     }
   }, [client])
-
-  const polling = setup?.models.some(isModelInFlight) ?? false
-  const refreshSetup = useDictationSetupPoller({
-    visible: visible && client !== null,
-    polling,
-    refresh,
-    intervalMs: POLL_INTERVAL_MS
-  })
 
   useEffect(() => {
     if (visible) {
       setError(null)
+      void refresh()
     }
-  }, [visible])
+  }, [visible, refresh])
+
+  // Poll only while something is downloading/extracting; stop otherwise.
+  useEffect(() => {
+    const inFlight = setup?.models.some(isModelInFlight) ?? false
+    if (visible && inFlight && client) {
+      pollRef.current = setInterval(() => void refresh(), POLL_INTERVAL_MS)
+      return () => {
+        if (pollRef.current) {
+          clearInterval(pollRef.current)
+          pollRef.current = null
+        }
+      }
+    }
+    return undefined
+  }, [visible, setup, client, refresh])
 
   const handleDownload = useCallback(
     async (model: MobileSpeechModel) => {
@@ -76,7 +81,7 @@ export function MobileDictationSetupSheet({ visible, client, onClose, onReady }:
       setError(null)
       try {
         await downloadDictationModel(client, model.id)
-        await refreshSetup()
+        await refresh()
       } catch (err) {
         triggerError()
         setError(err instanceof Error ? err.message : 'Download failed')
@@ -84,7 +89,7 @@ export function MobileDictationSetupSheet({ visible, client, onClose, onReady }:
         setBusy(null)
       }
     },
-    [client, refreshSetup]
+    [client, refresh]
   )
 
   const handleUseModel = useCallback(

@@ -9,8 +9,6 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { resolvePrimaryAction, type PrimaryActionInputs } from './source-control-primary-action'
 import { resolveDropdownItems, type DropdownActionKind } from './source-control-dropdown-items'
 import { getDefaultSettings } from '../../../../shared/constants'
-import { CUSTOM_AGENT_ID } from '../../../../shared/commit-message-agent-spec'
-import { resolveSourceControlAiForOperation } from '../../../../shared/source-control-ai'
 
 function buildInputs(overrides: Partial<PrimaryActionInputs> = {}): PrimaryActionInputs {
   return {
@@ -35,13 +33,12 @@ function baseProps(overrides: Partial<PrimaryActionInputs> = {}) {
     commitMessage: 'feat: add commit area',
     commitError: null as string | null,
     commitFailureRecoveryPrompt: null as string | null,
-    pushRecovery: null,
     remoteActionError: null as string | null,
     isCommitting: inputs.isCommitting,
     isFixingCommitFailureWithAI: false,
-    isFixingPushFailureWithAI: false,
     showComposer: true,
     sourceControlAiActionsVisible: true,
+    aiEnabled: false,
     aiAgentConfigured: false,
     isGenerating: false,
     generateError: null as string | null,
@@ -56,7 +53,6 @@ function baseProps(overrides: Partial<PrimaryActionInputs> = {}) {
     onGenerate: vi.fn(),
     onCancelGenerate: vi.fn(),
     onFixCommitFailureWithAI: vi.fn(),
-    onFixPushFailureWithAI: vi.fn(),
     onPrimaryAction: vi.fn(),
     onDropdownAction: vi.fn() as (kind: DropdownActionKind) => void
   }
@@ -86,12 +82,9 @@ function hasDisabledAttribute(markup: string): boolean {
 
 describe('CommitArea AI generation', () => {
   it('does not render the AI generate affordance when the feature is disabled', () => {
-    expect(
-      renderCommitArea({
-        ...baseProps(),
-        sourceControlAiActionsVisible: false
-      })
-    ).not.toContain('aria-label="Generate commit message with AI"')
+    expect(renderCommitArea(baseProps())).not.toContain(
+      'aria-label="Generate commit message with AI"'
+    )
   })
 
   it('enables AI generation only when an agent is configured, changes are staged, and the message is empty', () => {
@@ -99,6 +92,7 @@ describe('CommitArea AI generation', () => {
     const markup = renderCommitArea({
       ...props,
       commitMessage: '',
+      aiEnabled: true,
       aiAgentConfigured: true
     })
 
@@ -110,6 +104,7 @@ describe('CommitArea AI generation', () => {
   it('disables AI generation when the textarea already has user text', () => {
     const markup = renderCommitArea({
       ...baseProps(),
+      aiEnabled: true,
       aiAgentConfigured: true
     })
 
@@ -118,40 +113,17 @@ describe('CommitArea AI generation', () => {
     expect(button).toContain('title="Clear the message to regenerate."')
   })
 
-  it('keeps AI generation discoverable when the configured agent needs attention', () => {
-    const settings = getDefaultSettings('/tmp')
-    const resolved = resolveSourceControlAiForOperation({
-      settings: {
-        ...settings,
-        sourceControlAi: {
-          ...settings.sourceControlAi!,
-          customAgentCommand: '',
-          actions: {
-            ...settings.sourceControlAi!.actions,
-            commitMessage: {
-              agentId: CUSTOM_AGENT_ID
-            }
-          }
-        }
-      },
-      repo: null,
-      operation: 'commitMessage'
-    })
-    expect(resolved).toMatchObject({
-      ok: false,
-      error: 'Custom command is empty. Add one in Settings -> Git -> Source Control AI.'
-    })
-
+  it('hides AI generation until the configured agent can actually run', () => {
     const props = baseProps({ hasMessage: false })
     const markup = renderCommitArea({
       ...props,
       commitMessage: '',
-      aiAgentConfigured: resolved.ok
+      aiEnabled: true,
+      aiAgentConfigured: false
     })
 
-    const button = buttonByLabel(markup, 'Generate commit message with AI')
-    expect(hasDisabledAttribute(button)).toBe(false)
-    expect(button).toContain('title="Pick an agent in Settings -&gt; Git -&gt; Source Control AI."')
+    expect(markup).not.toContain('aria-label="Generate commit message with AI"')
+    expect(markup).toContain('Commit')
   })
 
   it('turns the generating icon into a stop affordance', () => {
@@ -159,6 +131,7 @@ describe('CommitArea AI generation', () => {
     const markup = renderCommitArea({
       ...props,
       commitMessage: '',
+      aiEnabled: true,
       aiAgentConfigured: true,
       isGenerating: true
     })
@@ -183,6 +156,7 @@ describe('CommitArea AI generation', () => {
   it('continues to render the split commit button alongside generation controls', () => {
     const markup = renderCommitArea({
       ...baseProps(),
+      aiEnabled: true,
       aiAgentConfigured: true
     })
     expect(markup).toContain('Commit')
@@ -194,6 +168,7 @@ describe('CommitArea AI generation', () => {
     const markup = renderCommitArea({
       ...props,
       commitMessage: '',
+      aiEnabled: true,
       aiAgentConfigured: true
     })
 
@@ -207,6 +182,7 @@ describe('CommitArea AI generation', () => {
     const markup = renderCommitArea({
       ...baseProps({ hasMessage: false, stagedCount: 0 }),
       commitMessage: '',
+      aiEnabled: true,
       aiAgentConfigured: true,
       showComposer: false
     })

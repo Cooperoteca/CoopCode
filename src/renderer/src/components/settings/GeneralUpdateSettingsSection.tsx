@@ -8,7 +8,6 @@ import { SearchableSetting } from './SearchableSetting'
 import { SettingsSubsectionHeader } from './SettingsFormControls'
 import { translate } from '@/i18n/i18n'
 import { getUpdateCheckClickOptions, getUpdateCheckHint } from '@/lib/update-check-click-options'
-import { GeneralRemoteServerUpdates } from './GeneralRemoteServerUpdates'
 
 export function GeneralUpdateSettingsSection(): React.JSX.Element {
   const updateStatus = useAppStore((s) => s.updateStatus)
@@ -162,28 +161,26 @@ export function GeneralUpdateSettingsSection(): React.JSX.Element {
               {translate(
                 'auto.components.settings.GeneralUpdateSettingsSection.a6b37929dc',
                 'Version'
-              )}{' '}
+              )}
               {updateStatus.version}{' '}
               {translate(
                 'auto.components.settings.GeneralUpdateSettingsSection.8311da27ba',
                 'is available. Click "Install Update" to download and install it.'
               )}{' '}
-              {updateStatus.source !== 'local' && (
-                <a
-                  href={
-                    updateStatus.releaseUrl ??
-                    `https://github.com/stablyai/orca/releases/tag/v${updateStatus.version}`
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline hover:text-foreground"
-                >
-                  {translate(
-                    'auto.components.settings.GeneralUpdateSettingsSection.8a52ca1d02',
-                    'Release notes'
-                  )}
-                </a>
-              )}
+              <a
+                href={
+                  updateStatus.releaseUrl ??
+                  `https://github.com/stablyai/orca/releases/tag/v${updateStatus.version}`
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-foreground"
+              >
+                {translate(
+                  'auto.components.settings.GeneralUpdateSettingsSection.8a52ca1d02',
+                  'Release notes'
+                )}
+              </a>
             </>
           )}
           {updateStatus.state === 'not-available' &&
@@ -202,28 +199,26 @@ export function GeneralUpdateSettingsSection(): React.JSX.Element {
               {translate(
                 'auto.components.settings.GeneralUpdateSettingsSection.a6b37929dc',
                 'Version'
-              )}{' '}
+              )}
               {updateStatus.version}{' '}
               {translate(
                 'auto.components.settings.GeneralUpdateSettingsSection.d89806cc89',
                 'is ready to install.'
               )}{' '}
-              {updateStatus.source !== 'local' && (
-                <a
-                  href={
-                    updateStatus.releaseUrl ??
-                    `https://github.com/stablyai/orca/releases/tag/v${updateStatus.version}`
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline hover:text-foreground"
-                >
-                  {translate(
-                    'auto.components.settings.GeneralUpdateSettingsSection.8a52ca1d02',
-                    'Release notes'
-                  )}
-                </a>
-              )}
+              <a
+                href={
+                  updateStatus.releaseUrl ??
+                  `https://github.com/stablyai/orca/releases/tag/v${updateStatus.version}`
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-foreground"
+              >
+                {translate(
+                  'auto.components.settings.GeneralUpdateSettingsSection.8a52ca1d02',
+                  'Release notes'
+                )}
+              </a>
             </>
           )}
           {updateStatus.state === 'error' &&
@@ -245,7 +240,6 @@ export function GeneralUpdateSettingsSection(): React.JSX.Element {
                 ))}
         </p>
       </SearchableSetting>
-      <GeneralRemoteServerUpdates />
     </section>
   )
 }

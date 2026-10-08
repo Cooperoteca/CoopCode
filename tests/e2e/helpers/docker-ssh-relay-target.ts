@@ -1,23 +1,20 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { getDockerSshRelayImage } from './docker-ssh-relay-image'
 
 import type { TestInfo } from '@stablyai/playwright-test'
 
 export const DOCKER_SSH_RELAY_REMOTE_REPO_PATH = '/tmp/orca-docker-relay-perf-repo'
-export const DOCKER_SSH_PROXY_JUMP_REMOTE_REPO_PATH = '/tmp/orca-docker-proxy-jump-repo'
-export const DOCKER_SSH_SECOND_HUB_REMOTE_REPO_PATH = '/tmp/orca-docker-second-hub-repo'
 
 export type DockerSshRelayTarget = {
   containerName: string
-  containerIp: string
   identityFile: string
   port: number
   tempDir: string
 }
+
+const CONTAINER_IMAGE = process.env.ORCA_E2E_SSH_DOCKER_IMAGE ?? 'node:22-bookworm'
 
 function run(command: string, args: string[], opts: { timeoutMs?: number } = {}): string {
   return execFileSync(command, args, {
@@ -31,14 +28,11 @@ function tryRun(command: string, args: string[], opts: { timeoutMs?: number } = 
   spawnSync(command, args, { stdio: 'ignore', timeout: opts.timeoutMs ?? 10_000 })
 }
 
-export function shellQuote(value: string): string {
+function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`
 }
 
-export function execDockerSshRelayTargetCommand(
-  target: DockerSshRelayTarget,
-  command: string
-): string {
+function dockerExec(target: DockerSshRelayTarget, command: string): string {
   return run('docker', ['exec', target.containerName, 'bash', '-lc', command], {
     timeoutMs: 60_000
   })
@@ -56,8 +50,6 @@ function sshArgs(target: DockerSshRelayTarget, command: string): string[] {
     'UserKnownHostsFile=/dev/null',
     '-o',
     'BatchMode=yes',
-    '-o',
-    'IdentitiesOnly=yes',
     'root@127.0.0.1',
     command
   ]
@@ -78,46 +70,23 @@ function waitForSsh(target: DockerSshRelayTarget): void {
     lastError = result.stderr || result.stdout || `exit ${result.status}`
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_000)
   }
-  const logs = spawnSync('docker', ['logs', target.containerName], {
-    encoding: 'utf8',
-    timeout: 10_000
-  })
-  throw new Error(
-    `Timed out waiting for Docker SSH target: ${lastError}\n${logs.stderr || logs.stdout}`
-  )
+  throw new Error(`Timed out waiting for Docker SSH target: ${lastError}`)
 }
 
-export function dockerSshRelayRepoSentinel(target: DockerSshRelayTarget, repoPath: string): string {
-  return `${target.containerName}:${repoPath}`
-}
-
-function seedRemoteRepo(target: DockerSshRelayTarget, repoPath: string): void {
-  const sentinel = dockerSshRelayRepoSentinel(target, repoPath)
-  execDockerSshRelayTargetCommand(
+function seedRemoteRepo(target: DockerSshRelayTarget): void {
+  dockerExec(
     target,
     [
-      `rm -rf ${shellQuote(repoPath)}`,
-      `mkdir -p ${shellQuote(repoPath)}`,
-      `cd ${shellQuote(repoPath)}`,
+      `rm -rf ${shellQuote(DOCKER_SSH_RELAY_REMOTE_REPO_PATH)}`,
+      `mkdir -p ${shellQuote(DOCKER_SSH_RELAY_REMOTE_REPO_PATH)}`,
+      `cd ${shellQuote(DOCKER_SSH_RELAY_REMOTE_REPO_PATH)}`,
       'git init',
       'git config user.email e2e@test.local',
       'git config user.name "Orca Docker SSH E2E"',
-      `printf '%s\\n' ${shellQuote(sentinel)} > .orca-e2e-destination-id`,
-      `printf '%s\\n' ${shellQuote(`remote relay ${sentinel}`)} > README.md`,
-      'git add README.md .orca-e2e-destination-id',
+      'printf "remote relay perf\\n" > README.md',
+      'git add README.md',
       'git commit -m initial'
     ].join(' && ')
-  )
-}
-
-export function writeDockerSshRelayTargetFile(
-  target: DockerSshRelayTarget,
-  filePath: string,
-  contents: string
-): void {
-  execDockerSshRelayTargetCommand(
-    target,
-    `printf '%s' ${shellQuote(contents)} > ${shellQuote(filePath)}`
   )
 }
 
@@ -126,7 +95,7 @@ export function startDockerSshRelayTarget(testInfo: TestInfo): DockerSshRelayTar
   const identityFile = path.join(tempDir, 'id_ed25519')
   run('ssh-keygen', ['-t', 'ed25519', '-N', '', '-f', identityFile, '-q'])
   const publicKey = readFileSync(`${identityFile}.pub`, 'utf8').trim()
-  const containerName = `orca-ssh-e2e-${testInfo.workerIndex}-${Date.now()}-${randomUUID().slice(0, 8)}`
+  const containerName = `orca-ssh-e2e-${testInfo.workerIndex}-${Date.now()}`
   let target: DockerSshRelayTarget | null = null
 
   try {
@@ -142,10 +111,14 @@ export function startDockerSshRelayTarget(testInfo: TestInfo): DockerSshRelayTar
         '127.0.0.1::22',
         '-e',
         `AUTHORIZED_KEY=${publicKey}`,
-        getDockerSshRelayImage(),
+        CONTAINER_IMAGE,
         'bash',
         '-lc',
         [
+          'apt-get update >/tmp/apt-update.log',
+          'DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server git >/tmp/apt-install.log',
+          'mkdir -p /run/sshd /root/.ssh',
+          'chmod 700 /root/.ssh',
           'printf "%s\\n" "$AUTHORIZED_KEY" > /root/.ssh/authorized_keys',
           'chmod 600 /root/.ssh/authorized_keys',
           'git config --global user.email e2e@test.local',
@@ -160,25 +133,12 @@ export function startDockerSshRelayTarget(testInfo: TestInfo): DockerSshRelayTar
     if (!Number.isInteger(port) || port <= 0) {
       throw new Error(`Unable to read mapped SSH port for ${containerName}`)
     }
-    const containerIp = run('docker', [
-      'inspect',
-      '--format',
-      '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}',
-      containerName
-    ])
-    if (!containerIp) {
-      throw new Error(`Unable to read container IP for ${containerName}`)
-    }
-    target = { containerName, containerIp, identityFile, port, tempDir }
+    target = { containerName, identityFile, port, tempDir }
     waitForSsh(target)
-    seedRemoteRepo(target, DOCKER_SSH_RELAY_REMOTE_REPO_PATH)
-    seedRemoteRepo(target, DOCKER_SSH_PROXY_JUMP_REMOTE_REPO_PATH)
-    seedRemoteRepo(target, DOCKER_SSH_SECOND_HUB_REMOTE_REPO_PATH)
+    seedRemoteRepo(target)
     return target
   } catch (error) {
-    cleanupDockerSshRelayTarget(
-      target ?? { containerName, containerIp: '', identityFile, port: 0, tempDir }
-    )
+    cleanupDockerSshRelayTarget(target ?? { containerName, identityFile, port: 0, tempDir })
     throw error
   }
 }

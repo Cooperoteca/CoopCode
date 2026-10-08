@@ -14,7 +14,6 @@ function eligibility(
     canCreate: false,
     blockedReason: 'needs_push',
     nextAction: 'push',
-    reviewLookupOutcome: 'not_found',
     ...overrides
   }
 }

@@ -6,12 +6,11 @@ import {
   moveFromEmptyDetailsBodyToSummary
 } from './rich-markdown-details-extension'
 import { createRichMarkdownExtensions } from './rich-markdown-extensions'
-import { createRichMarkdownEditorCodec } from './rich-markdown-source-transport'
 
 function createEditor(content: string | JSONContent) {
   return new Editor({
     element: null,
-    extensions: createRichMarkdownExtensions({ codec: createRichMarkdownEditorCodec() }),
+    extensions: createRichMarkdownExtensions(),
     content,
     contentType: 'markdown'
   })

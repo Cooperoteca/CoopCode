@@ -3,7 +3,6 @@ import type {
   GitHubProjectSettings,
   GitHubProjectSummary
 } from '../../../../shared/github-project-types'
-import { githubProjectIdentityKey } from '../../../../shared/github-project-identity'
 
 export const GITHUB_PROJECT_PICKER_QUERY_MAX_BYTES = 2 * 1024
 
@@ -15,9 +14,9 @@ export function isGitHubProjectPickerQueryTooLarge(
 }
 
 function getProjectKey(
-  project: Pick<GitHubProjectSummary, 'ownerType' | 'owner' | 'number' | 'host'>
+  project: Pick<GitHubProjectSummary, 'ownerType' | 'owner' | 'number'>
 ): string {
-  return githubProjectIdentityKey(project)
+  return `${project.ownerType}:${project.owner}:${project.number}`
 }
 
 export function filterGitHubProjectPickerProjects({

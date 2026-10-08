@@ -8,12 +8,15 @@ import { translate } from '@/i18n/i18n'
 import type { PRCheckDetail, PRCheckRunDetails } from '../../../../shared/types'
 import { getAttachedWorktreesForFolderWorkspace } from './folder-workspace-attached-worktrees'
 import { FolderWorkspacePrChecksRow } from './FolderWorkspacePrChecksRow'
-import type { ParentPrChecksRefreshOutcome, ParentPrChecksRow } from './parent-pr-checks-rows'
+import {
+  buildParentPrChecksProjection,
+  type ParentPrChecksRefreshOutcome,
+  type ParentPrChecksRow
+} from './parent-pr-checks-rows'
 import {
   getParentPrChecksRefreshCandidates,
   runLimitedParentPrChecksRefreshes
 } from './parent-pr-checks-refresh'
-import { createParentPrChecksProjectionSelector } from './parent-pr-checks-projection-selector'
 
 type FolderWorkspacePrChecksPanelProps = {
   isVisible?: boolean
@@ -30,6 +33,9 @@ export default function FolderWorkspacePrChecksPanel({
   const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
   const repos = useAppStore((s) => s.repos)
   const settings = useAppStore((s) => s.settings)
+  const hostedReviewCache = useAppStore((s) => s.hostedReviewCache)
+  const prCache = useAppStore((s) => s.prCache)
+  const checksCache = useAppStore((s) => s.checksCache)
   const fetchHostedReviewForBranch = useAppStore((s) => s.fetchHostedReviewForBranch)
   const fetchPRChecks = useAppStore((s) => s.fetchPRChecks)
   const fetchPRCheckDetails = useAppStore((s) => s.fetchPRCheckDetails)
@@ -59,17 +65,19 @@ export default function FolderWorkspacePrChecksPanel({
       worktreesByRepo
     ]
   )
-  const projectionSelector = useMemo(
+  const projection = useMemo(
     () =>
-      createParentPrChecksProjectionSelector({
+      buildParentPrChecksProjection({
         worktrees: childWorktrees,
         repos,
         settings,
+        hostedReviewCache,
+        prCache,
+        checksCache,
         refreshOutcomes
       }),
-    [childWorktrees, repos, settings, refreshOutcomes]
+    [childWorktrees, repos, settings, hostedReviewCache, prCache, checksCache, refreshOutcomes]
   )
-  const projection = useAppStore(projectionSelector)
   const folderWorkspaceId = folderWorkspace?.id ?? null
   const headerSummary = useMemo(
     () => formatReviewChecksHeaderSummary(projection.summary),

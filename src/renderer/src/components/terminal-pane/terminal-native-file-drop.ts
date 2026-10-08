@@ -7,6 +7,7 @@ import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import { importExternalPathsToRuntime } from '@/runtime/runtime-file-client'
 import { useAppStore } from '@/store'
 import { translate } from '@/i18n/i18n'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { isWindowsAbsolutePathLike } from '../../../../shared/cross-platform-path'
 import { isWslUncPath, parseWslUncPath } from '../../../../shared/wsl-paths'
 import type { PtyTransport } from './pty-transport'
@@ -22,12 +23,10 @@ import { writeTerminalDropPathsToCapturedTarget } from './terminal-drop-path-wri
 import { resolveNativeTerminalDropPane } from './terminal-drop-pane-resolution'
 import { getTerminalPasteSshRemotePlatform } from './terminal-paste-ssh-platform'
 import { showTerminalDropWriteFailure } from './terminal-drop-write-failure'
-import { captureDirectSshMutationExpectation } from '@/lib/ssh-mutation-expectation'
 import {
   joinRuntimeTerminalDropDir,
   resolveTerminalDropWorktreePath
 } from './terminal-drop-worktree-path'
-import { captureRuntimeTerminalDropOwner } from './terminal-drop-runtime-owner'
 
 export type NativeTerminalFileDropArgs = {
   manager: PaneManager
@@ -49,17 +48,6 @@ export type NativeTerminalFileDropArgs = {
 export async function handleNativeTerminalFileDrop(
   args: NativeTerminalFileDropArgs
 ): Promise<void> {
-  try {
-    await handleNativeTerminalFileDropWithCapturedOwner(args)
-  } catch (err) {
-    // Why: native drop listeners fire-and-forget, so owner-capture failures must terminate here.
-    toast.error(extractIpcErrorMessage(err, 'Failed to drop files.'))
-  }
-}
-
-async function handleNativeTerminalFileDropWithCapturedOwner(
-  args: NativeTerminalFileDropArgs
-): Promise<void> {
   const { manager, paneTransports, worktreeId, tabId, cwd, data } = args
   if (data.paths.length === 0) {
     return
@@ -75,7 +63,7 @@ async function handleNativeTerminalFileDropWithCapturedOwner(
   const dropTarget = captureTerminalDropTarget(pane, transport)
   const state = useAppStore.getState()
   const settings = state.settings
-  const runtimeOwner = captureRuntimeTerminalDropOwner(worktreeId)
+  const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(state, worktreeId)
   const worktreePath = resolveTerminalDropWorktreePath(worktreeId, cwd)
   if (!worktreePath) {
     toast.error(
@@ -87,18 +75,18 @@ async function handleNativeTerminalFileDropWithCapturedOwner(
     return
   }
 
-  if (runtimeOwner) {
+  if (runtimeEnvironmentId) {
     await uploadRuntimeDropPaths({
       dataPaths: data.paths,
       dropTarget,
       manager,
       paneTransports,
       pane,
+      runtimeEnvironmentId,
       settings,
       tabId,
       worktreeId,
-      worktreePath,
-      ...runtimeOwner
+      worktreePath
     })
     return
   }
@@ -143,7 +131,6 @@ async function handleNativeTerminalFileDropWithCapturedOwner(
 
   await uploadRemoteDropPaths({
     connectionId,
-    ...captureDirectSshMutationExpectation(state, connectionId),
     dataPaths: data.paths,
     dropTarget,
     manager,
@@ -163,10 +150,6 @@ type NativeDropFlowArgs = {
   pane: ReturnType<typeof resolveNativeTerminalDropPane> & {}
   tabId: string
   worktreePath: string
-  expectedSshTargetId?: string
-  expectedSshConnectionGeneration?: number
-  expectedExecutionHostId?: 'local' | `ssh:${string}`
-  assertCurrent?: () => void
 }
 
 async function uploadRuntimeDropPaths(
@@ -192,14 +175,10 @@ async function uploadRuntimeDropPaths(
         // not the currently focused host in the sidebar.
         settings: { ...args.settings, activeRuntimeEnvironmentId: args.runtimeEnvironmentId },
         worktreeId: args.worktreeId,
-        worktreePath: args.worktreePath,
-        expectedExecutionHostId: args.expectedExecutionHostId,
-        expectedSshTargetId: args.expectedSshTargetId,
-        expectedSshConnectionGeneration: args.expectedSshConnectionGeneration
+        worktreePath: args.worktreePath
       },
       args.dataPaths,
-      destinationDir,
-      { assertCurrent: args.assertCurrent }
+      destinationDir
     )
     const imported = results.filter((result) => result.status === 'imported')
     const importedPaths = imported.map((result) =>
@@ -261,10 +240,7 @@ async function uploadRemoteDropPaths(
     const { resolvedPaths, skipped, failed } = await window.api.fs.resolveDroppedPathsForAgent({
       paths: args.dataPaths,
       worktreePath: args.worktreePath,
-      connectionId: args.connectionId,
-      expectedExecutionHostId: args.expectedExecutionHostId,
-      expectedSshTargetId: args.expectedSshTargetId,
-      expectedSshConnectionGeneration: args.expectedSshConnectionGeneration
+      connectionId: args.connectionId
     })
     await pasteResolvedDropPaths({ ...args, paths: resolvedPaths, targetShell: args.targetShell })
     reportTerminalDropUploadSkipsAndFailures(skipped, failed)

@@ -3,7 +3,6 @@
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import type { OnboardingFeatureSetupDeps } from '@/components/onboarding/onboarding-feature-setup'
 import type { languages } from 'monaco-editor'
-import type { MonacoE2EProbe } from './components/editor/monaco-e2e-probe'
 
 declare module 'monaco-editor/esm/vs/basic-languages/python/python.js' {
   export const conf: languages.LanguageConfiguration
@@ -68,12 +67,6 @@ declare global {
   interface Window {
     __paneManagers?: Map<string, PaneManager>
     __onboardingFeatureSetupDeps?: OnboardingFeatureSetupDeps
-    __terminalParkingDebug?: {
-      parkDelayMs: number
-      parkedTabIds: () => string[]
-    }
-    __monacoEditorE2E?: MonacoE2EProbe
-    __e2ePtyAppliedSizeReadDelayMs?: number
   }
 }
 

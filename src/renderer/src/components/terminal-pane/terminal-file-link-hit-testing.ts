@@ -1,11 +1,7 @@
 import type { IBufferLine, IBufferRange } from '@xterm/xterm'
 import { extractTerminalFileLinkCandidates, resolveTerminalFileLink } from '@/lib/terminal-links'
 import { isRemoteRuntimeFileOperation } from '@/runtime/runtime-file-client'
-import {
-  getTerminalFileContext,
-  mapTerminalFilePath,
-  openDetectedFilePath
-} from './terminal-file-open-routing'
+import { getTerminalFileContext, openDetectedFilePath } from './terminal-file-open-routing'
 import { getTerminalPathExistsCacheKey } from './terminal-path-exists-cache'
 import { resolveKnownWorktreeRootPathLink } from './terminal-worktree-path-link'
 import {
@@ -61,19 +57,18 @@ export function openFilePathLinkAtBufferPosition(
         deps.worktreePath,
         deps.runtimeEnvironmentId
       )
-      const mappedPath = mapTerminalFilePath(resolved.absolutePath, deps.worktreePath)
       const cacheKey = getTerminalPathExistsCacheKey({
-        absolutePath: mappedPath,
+        absolutePath: resolved.absolutePath,
         connectionId: fileContext.connectionId,
-        isRemoteRuntimePath: isRemoteRuntimeFileOperation(fileContext, mappedPath),
+        isRemoteRuntimePath: isRemoteRuntimeFileOperation(fileContext, resolved.absolutePath),
         runtimeEnvironmentId: deps.runtimeEnvironmentId
       })
-      const isKnownWorktreeRoot = Boolean(resolveKnownWorktreeRootPathLink(mappedPath))
+      const isKnownWorktreeRoot = Boolean(resolveKnownWorktreeRootPathLink(resolved.absolutePath))
       if (/[\\/]$/.test(parsed.pathText) && !isKnownWorktreeRoot) {
         continue
       }
       matches.push({
-        absolutePath: mappedPath,
+        absolutePath: resolved.absolutePath,
         line: resolved.line,
         column: resolved.column,
         pathText: parsed.pathText,

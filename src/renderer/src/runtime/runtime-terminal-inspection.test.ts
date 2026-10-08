@@ -28,7 +28,6 @@ describe('runtime terminal owner routing', () => {
   const localWriteAccepted = vi.fn()
   const localForeground = vi.fn()
   const localHasChildren = vi.fn()
-  const localInspect = vi.fn()
 
   beforeEach(() => {
     clearRuntimeCompatibilityCacheForTests()
@@ -48,8 +47,7 @@ describe('runtime terminal owner routing', () => {
           write: localWrite,
           writeAccepted: localWriteAccepted,
           getForegroundProcess: localForeground,
-          hasChildProcesses: localHasChildren,
-          inspectProcess: localInspect
+          hasChildProcesses: localHasChildren
         }
       }
     })
@@ -116,69 +114,19 @@ describe('runtime terminal owner routing', () => {
     expect(localHasChildren).not.toHaveBeenCalled()
   })
 
-  it('preserves unavailable inspection from the PTY owning environment', async () => {
+  it('treats stale remote terminal handles as gone during process inspection', async () => {
     runtimeCall.mockResolvedValue({
-      ok: true,
-      result: {
-        process: { foregroundProcess: null, hasChildProcesses: true, unavailable: true }
-      },
-      _meta: { runtimeId: 'runtime-1' }
+      ok: false,
+      error: { code: 'terminal_handle_stale', message: 'terminal_handle_stale' }
     })
 
     await expect(
       inspectRuntimeTerminalProcess(
         { activeRuntimeEnvironmentId: 'env-2' },
-        'remote:env-1@@terminal-1'
+        'remote:env-1@@terminal-stale'
       )
-    ).resolves.toEqual({
-      foregroundProcess: null,
-      hasChildProcesses: true,
-      unavailable: true
-    })
+    ).resolves.toEqual({ foregroundProcess: null, hasChildProcesses: false })
   })
-
-  it('uses strict main-process inspection for a direct SSH PTY', async () => {
-    localInspect.mockResolvedValue({ foregroundProcess: 'codex', hasChildProcesses: true })
-
-    await expect(inspectRuntimeTerminalProcess(null, 'ssh:host@@pty-1')).resolves.toEqual({
-      foregroundProcess: 'codex',
-      hasChildProcesses: true
-    })
-    expect(localInspect).toHaveBeenCalledExactlyOnceWith('ssh:host@@pty-1')
-    expect(localForeground).not.toHaveBeenCalled()
-    expect(localHasChildren).not.toHaveBeenCalled()
-  })
-
-  it('preserves unavailable inspection for a direct SSH PTY', async () => {
-    localInspect.mockResolvedValue({
-      foregroundProcess: null,
-      hasChildProcesses: true,
-      unavailable: true
-    })
-
-    await expect(inspectRuntimeTerminalProcess(null, 'ssh:host@@pty-1')).resolves.toEqual({
-      foregroundProcess: null,
-      hasChildProcesses: true,
-      unavailable: true
-    })
-  })
-
-  it.each(['no_connected_pty', 'terminal_handle_stale', 'terminal_gone'])(
-    'reports %s remote process inspection as unavailable',
-    async (code) => {
-      runtimeCall.mockResolvedValue({
-        ok: false,
-        error: { code, message: code }
-      })
-
-      await expect(
-        inspectRuntimeTerminalProcess(
-          { activeRuntimeEnvironmentId: 'env-2' },
-          'remote:env-1@@terminal-stale'
-        )
-      ).resolves.toEqual({ foregroundProcess: null, hasChildProcesses: false, unavailable: true })
-    }
-  )
 
   it('records accepted fire-and-forget runtime input against the owning pane key', async () => {
     runtimeCall.mockResolvedValue({

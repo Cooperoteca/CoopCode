@@ -12,11 +12,7 @@ import {
   canOpenMobileBranchCompareDiff,
   type MobileGitBranchChangeEntry
 } from './mobile-branch-compare'
-import {
-  canOpenMobileGitStatusEntry,
-  isMobileGitUnavailable,
-  type MobileGitStatusEntry
-} from './mobile-git-status'
+import { isMobileGitUnavailable, type MobileGitStatusEntry } from './mobile-git-status'
 import { buildMobileReviewFileRoute } from './mobile-review-route'
 import type {
   GitDiffTextResult,
@@ -74,9 +70,7 @@ export function useMobileSourceControlOpeners(params: Params) {
 
   const openFile = useCallback(
     async (entry: MobileGitStatusEntry) => {
-      // Deletions are openable (pre-delete text/image via git.diff); only block
-      // unresolved conflicts, matching canOpenMobileGitStatusEntry / row UI.
-      if (!canOpenMobileGitStatusEntry(entry)) {
+      if (entry.status === 'deleted' || entry.conflictStatus === 'unresolved') {
         return
       }
       if (openingPathRef.current || busyActionRef.current) {

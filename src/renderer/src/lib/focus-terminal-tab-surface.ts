@@ -1,5 +1,3 @@
-import { refreshTerminalImeInputContext } from '@/components/terminal-pane/terminal-ime-input-context-refresh'
-
 /**
  * Move keyboard focus into the xterm instance for a freshly-mounted terminal
  * tab. Handles the two-step race where React must first mount the new
@@ -12,29 +10,6 @@ function cssAttributeString(value: string): string {
 }
 
 let pendingFocusFrameIds: number[] = []
-
-type FocusTerminalTabSurfaceOptions = {
-  onlyIfFocusUnclaimed?: boolean
-  onImeRefocusSkipped?: (activeElement: Element | null) => void
-  refreshImeContext?: boolean
-}
-
-function focusTerminalHelper(helper: HTMLElement, options: FocusTerminalTabSurfaceOptions): void {
-  if (options.onlyIfFocusUnclaimed) {
-    const active = document.activeElement
-    if (active !== helper && active !== null && active !== document.body) {
-      return
-    }
-  }
-  helper.focus()
-  if (options.refreshImeContext) {
-    // Why: a CSS-hidden, long-lived xterm can retain a stale macOS native text
-    // input context even after DOM focus returns; blur/refocus rebuilds it.
-    refreshTerminalImeInputContext(helper, {
-      onRefocusSkipped: options.onImeRefocusSkipped
-    })
-  }
-}
 
 function cancelPendingFocusFrames(): void {
   if (typeof cancelAnimationFrame === 'function') {
@@ -54,11 +29,7 @@ function canUseSinglePaneStaleLeafFallback(tabId: string, leafId: string): boole
   return expectedLeafIds?.length === 1 && !expectedLeafIds.includes(leafId)
 }
 
-export function focusTerminalTabSurface(
-  tabId: string,
-  leafId?: string | null,
-  options: FocusTerminalTabSurfaceOptions = {}
-): void {
+export function focusTerminalTabSurface(tabId: string, leafId?: string | null): void {
   cancelPendingFocusFrames()
   const firstFrameId = requestAnimationFrame(() => {
     pendingFocusFrameIds = pendingFocusFrameIds.filter((frameId) => frameId !== firstFrameId)
@@ -75,7 +46,7 @@ export function focusTerminalTabSurface(
         : `[data-terminal-tab-id="${escapedTabId}"] .xterm-helper-textarea`
       const scoped = document.querySelector(scopedSelector) as HTMLElement | null
       if (scoped) {
-        focusTerminalHelper(scoped, options)
+        scoped.focus()
         return
       }
       if (leafId) {
@@ -91,17 +62,13 @@ export function focusTerminalTabSurface(
         )
         if (tabScopedHelpers.length === 1) {
           const fallback = tabScopedHelpers.item(0) as HTMLElement | null
-          if (fallback) {
-            focusTerminalHelper(fallback, options)
-          }
+          fallback?.focus()
           return
         }
         return
       }
       const fallback = document.querySelector('.xterm-helper-textarea') as HTMLElement | null
-      if (fallback) {
-        focusTerminalHelper(fallback, options)
-      }
+      fallback?.focus()
     })
     pendingFocusFrameIds.push(secondFrameId)
   })

@@ -13,22 +13,21 @@ export async function gitSyncForkDefaultBranch(
   expectedUpstream: GitForkSyncExpectedUpstream,
   options: GitRuntimeOptions = {}
 ): Promise<GitForkSyncResult> {
-  // Compose the caller's cancel signal with the 60s timeout so neither is lost —
-  // the caller's signal was previously clobbered by the timeout controller.
-  const signal = options.signal
-    ? AbortSignal.any([options.signal, AbortSignal.timeout(60_000)])
-    : AbortSignal.timeout(60_000)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 60_000)
   try {
     return await syncForkDefaultBranch(
       (args) =>
         gitExecFileAsync(args, {
           ...gitOptionsForWorktree(worktreePath, options),
           timeout: 60_000,
-          signal
+          signal: controller.signal
         }),
       { expectedUpstream }
     )
   } catch (error) {
     throw new Error(normalizeGitErrorMessage(error, 'push'))
+  } finally {
+    clearTimeout(timeout)
   }
 }

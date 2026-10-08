@@ -31,6 +31,7 @@ export function useAddRepoHostSelection({
   handleConnectAddProjectHost: (hostId: ExecutionHostId) => Promise<void>
 } {
   const settings = useAppStore((s) => s.settings)
+  const switchRuntimeEnvironment = useAppStore((s) => s.switchRuntimeEnvironment)
   const setSshConnectionState = useAppStore((s) => s.setSshConnectionState)
   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
   const runtimeEnvironments = useAppStore((s) => s.runtimeEnvironments)
@@ -95,10 +96,22 @@ export function useAddRepoHostSelection({
       if (!host || !canSelectAddRepoHost(host)) {
         return
       }
+      const parsed = parseExecutionHostId(hostId)
+      if (parsed?.kind === 'runtime') {
+        const switched = await switchRuntimeEnvironment(parsed.environmentId)
+        if (!switched) {
+          return
+        }
+      } else if (settings?.activeRuntimeEnvironmentId?.trim()) {
+        const switched = await switchRuntimeEnvironment(null)
+        if (!switched) {
+          return
+        }
+      }
       setSelectedAddProjectHostId(hostId)
       setStep('add')
     },
-    [selectableHostOptions, setStep]
+    [selectableHostOptions, settings?.activeRuntimeEnvironmentId, setStep, switchRuntimeEnvironment]
   )
 
   const handleConnectAddProjectHost = useCallback(
@@ -135,6 +148,12 @@ export function useAddRepoHostSelection({
         if (state?.status !== 'connected') {
           return
         }
+        if (settings?.activeRuntimeEnvironmentId?.trim()) {
+          const switched = await switchRuntimeEnvironment(null)
+          if (!switched) {
+            return
+          }
+        }
         setSelectedAddProjectHostId(hostId)
         setStep('add')
         setHostSelectorOpen(false)
@@ -164,7 +183,14 @@ export function useAddRepoHostSelection({
         )
       }
     },
-    [selectableHostOptions, setSshConnectionState, setStep, sshConnectionStates]
+    [
+      selectableHostOptions,
+      settings?.activeRuntimeEnvironmentId,
+      setSshConnectionState,
+      setStep,
+      sshConnectionStates,
+      switchRuntimeEnvironment
+    ]
   )
 
   return {

@@ -1,12 +1,16 @@
 import { Trash2 } from 'lucide-react'
 import { Button } from '../ui/button'
 import { translate } from '@/i18n/i18n'
-import type { PairedMobileDevice } from '../mobile/paired-mobile-devices'
 
-export type PairedDevice = PairedMobileDevice
+export type PairedDevice = {
+  deviceId: string
+  name: string
+  pairedAt: number
+  lastSeenAt: number
+}
 
 type MobilePairedDevicesSectionProps = {
-  devices: readonly PairedDevice[]
+  devices: PairedDevice[]
   hasQrCode: boolean
   onRevokeDevice: (deviceId: string) => void
 }

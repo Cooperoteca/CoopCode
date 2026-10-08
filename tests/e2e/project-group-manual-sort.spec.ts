@@ -79,42 +79,24 @@ async function seedProjectHeaderSortScenario(
     state.setSidebarOpen(true)
     state.setGroupBy('repo')
     state.setProjectOrderBy('manual')
-    // Why: repos.add broadcasts repos:changed, which schedules background
-    // fetchRepos() calls; those bump reposFetchGeneration and can make our awaited
-    // fetchRepos() drop its own complete result as superseded (#7020), leaving the
-    // store transiently missing the last-added repo. Re-fetch until every seeded
-    // repo is present rather than racing a single fetch (converges once the adds
-    // stop firing repos:changed).
-    const findSeededRepos = () =>
-      paths.map((repoPath) =>
-        store.getState().repos.find((candidate) => candidate.path === repoPath)
-      )
-    let repos = findSeededRepos()
-    const deadline = Date.now() + 10_000
-    while (repos.some((repo) => !repo) && Date.now() < deadline) {
-      await state.fetchRepos()
-      repos = findSeededRepos()
-      if (repos.every((repo) => repo)) {
-        break
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100))
-    }
+    await state.fetchRepos()
 
-    const resolvedRepos = repos.map((repo, index) => {
+    const repos = paths.map((repoPath) => {
+      const repo = store.getState().repos.find((candidate) => candidate.path === repoPath)
       if (!repo) {
-        throw new Error(`Expected project repo to be loaded: ${paths[index]}`)
+        throw new Error(`Expected project repo to be loaded: ${repoPath}`)
       }
       return repo
     })
 
-    for (const repo of resolvedRepos) {
+    for (const repo of repos) {
       await store.getState().fetchWorktrees(repo.id)
     }
 
     return {
-      alphaId: resolvedRepos[0]!.id,
-      bravoId: resolvedRepos[1]!.id,
-      charlieId: resolvedRepos[2]!.id
+      alphaId: repos[0]!.id,
+      bravoId: repos[1]!.id,
+      charlieId: repos[2]!.id
     }
   }, repoPaths)
 }
@@ -300,7 +282,7 @@ test.describe('Project Group manual sorting', () => {
       .toEqual([projects.alphaId, projects.charlieId, projects.bravoId])
   })
 
-  test('dropping a project over another project body snaps to that section boundary', async ({
+  test('dropping a project over another project body does not reorder projects', async ({
     orcaPage
   }) => {
     await waitForSessionReady(orcaPage)
@@ -314,10 +296,6 @@ test.describe('Project Group manual sorting', () => {
       })
       .toEqual([projects.alphaId, projects.bravoId, projects.charlieId])
 
-    // Dragging alpha into bravo's expanded body drops the pointer 32px below
-    // bravo's header. Both nearest boundaries (bravo's section bottom and
-    // charlie's top) map to the slot after bravo, so alpha lands between bravo
-    // and charlie deterministically regardless of the exact section height.
     await dragProjectIntoProjectBody({
       page: orcaPage,
       draggedProjectId: projects.alphaId,
@@ -327,9 +305,9 @@ test.describe('Project Group manual sorting', () => {
     await expect
       .poll(() => getProjectHeaderOrder(orcaPage, projects), {
         timeout: 12_000,
-        message: 'Dropping into a project body should snap to the nearest boundary slot'
+        message: 'Dropping on a project body should not persist a project reorder'
       })
-      .toEqual([projects.bravoId, projects.alphaId, projects.charlieId])
+      .toEqual([projects.alphaId, projects.bravoId, projects.charlieId])
   })
 
   test('dragging a duplicate-ranked Project Group header reorders the visible headers', async ({

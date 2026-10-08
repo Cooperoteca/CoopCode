@@ -8,7 +8,6 @@ import {
   type SimulatorDeviceRow
 } from './emulator-pane-types'
 import { markSimulatorDeviceBooted, markSimulatorDeviceShutdown } from './emulator-device-state'
-import { toSimulatorDeviceRows, type RawEmulatorDevice } from './emulator-device-row-mapping'
 import { useEmulatorPaneControls } from './use-emulator-pane-controls'
 import { useEmulatorPaneSessionEvents } from './use-emulator-pane-session-events'
 import {
@@ -57,25 +56,25 @@ export function useEmulatorPaneSession({
   const liveTargetRef = useRef<string | null>(prelaunchedState.liveTarget)
   const deviceRefreshErrorRef = useRef<unknown>(null)
   const suppressAutoAttachRef = useRef(false)
-  const refreshStreamKey = useCallback(() => setStreamKey(String(Date.now())), [])
-  const {
-    sendTap,
-    sendButton,
-    sendGesture,
-    sendRotate,
-    visualOrientation,
-    resetVisualOrientation
-  } = useEmulatorPaneControls(worktreeId, refreshStreamKey)
+  const { sendTap, sendButton, sendGesture, sendRotate } = useEmulatorPaneControls(worktreeId)
 
   const refreshDevices = useCallback(async (bootedTarget?: string | null) => {
     try {
       // Unified list so Android devices/AVDs appear alongside iOS simulators.
-      const raw = (await callRuntimeRpc(
-        { kind: 'local' },
-        'emulator.listDevices',
-        {}
-      )) as RawEmulatorDevice[]
-      const list = toSimulatorDeviceRows(raw)
+      const raw = (await callRuntimeRpc({ kind: 'local' }, 'emulator.listDevices', {})) as {
+        id: string
+        name: string
+        state: string
+        detail?: string
+        isAvailable?: boolean
+      }[]
+      const list: SimulatorDeviceRow[] = raw.map((device) => ({
+        name: device.name,
+        udid: device.id,
+        state: device.state === 'booted' ? 'Booted' : 'Shutdown',
+        runtime: device.detail,
+        isAvailable: device.isAvailable
+      }))
       const next = markSimulatorDeviceBooted(list, bootedTarget)
       if (!mountedRef.current) {
         return next
@@ -107,9 +106,6 @@ export function useEmulatorPaneSession({
       if (attached && rows !== deviceRows) {
         setDevices(rows)
       }
-      if (attached && target && target !== liveTargetRef.current) {
-        resetVisualOrientation()
-      }
       const row = rows.find((d) => d.udid === target || d.name === target)
       const displayName = row?.name || deviceLabel(info)
       const enriched = { ...info, displayName, state: attached ? 'Booted' : info?.state }
@@ -130,7 +126,7 @@ export function useEmulatorPaneSession({
         useAppStore.getState().setTabLabel(tabId, displayName)
       }
     },
-    [devices, resetVisualOrientation, tabId]
+    [devices, tabId]
   )
 
   const clearSessionAfterShutdown = useCallback(
@@ -145,14 +141,13 @@ export function useEmulatorPaneSession({
       liveTargetRef.current = null
       suppressAutoAttachRef.current = true
       setStreamKey(null)
-      resetVisualOrientation()
       setError(null)
       if (tabId) {
         const row = devices.find((device) => device.udid === target || device.name === target)
         useAppStore.getState().setTabLabel(tabId, row?.name || 'Mobile Emulator')
       }
     },
-    [devices, resetVisualOrientation, selectedUdid, session, tabId]
+    [devices, selectedUdid, session, tabId]
   )
 
   const attach = useCallback(
@@ -194,7 +189,6 @@ export function useEmulatorPaneSession({
           setSession(null)
           setStreamKey(null)
           liveTargetRef.current = null
-          resetVisualOrientation()
         }
         const res = (await callRuntimeRpc({ kind: 'local' }, 'emulator.attach', {
           device: target,
@@ -244,7 +238,6 @@ export function useEmulatorPaneSession({
       devices,
       loading,
       refreshDevices,
-      resetVisualOrientation,
       selectedUdid,
       tabId,
       worktreeId
@@ -308,7 +301,6 @@ export function useEmulatorPaneSession({
     sendButton,
     sendGesture,
     sendRotate,
-    visualOrientation,
     displayName: view.displayName,
     previewUrl: view.previewUrl,
     wsUrl: view.wsUrl,

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Why: onboarding E2E coverage shares one first-launch wizard fixture and step helpers; splitting this file would make the linear flow harder to audit. */
 /**
  * E2E tests for the first-launch Onboarding flow.
  *
@@ -12,7 +13,6 @@ import { waitForSessionReady } from './helpers/store'
 import type { Page } from '@stablyai/playwright-test'
 import type { GlobalSettings, TuiAgent } from '../../src/shared/types'
 import { ONBOARDING_FINAL_STEP } from '../../src/shared/constants'
-import { encodePairingOffer, PAIRING_OFFER_VERSION } from '../../src/shared/pairing'
 
 type OnboardingState = {
   closedAt: number | null
@@ -63,10 +63,6 @@ async function expectOnboardingNotificationSoundMenuClosed(page: Page): Promise<
 
 async function expectOnboardingSkipConfirmationClosed(page: Page): Promise<void> {
   await expect(page.getByRole('dialog', { name: /Skip onboarding\?/i })).toHaveCount(0)
-}
-
-async function expectOnboardingSkipConfirmationOpen(page: Page): Promise<void> {
-  await expect(page.getByRole('dialog', { name: /Skip onboarding\?/i })).toBeVisible()
 }
 
 async function expectOnboardingNotificationSound(page: Page, name: RegExp): Promise<void> {
@@ -245,17 +241,12 @@ test.describe('Onboarding flow', () => {
       .toBe(oppositeTheme)
 
     await continueOnboarding(orcaPage)
-    // Why: the theme Continue persists step 2, then persists *through* any
-    // skipped optional steps (integrations is skipped when gh is installed,
-    // windows_terminal off macOS), so lastCompletedStep can land at 2, 3, or 4.
-    // Key off the settled "theme step committed" lower bound rather than a fixed
-    // window that assumed integrations always renders.
     await expect
-      .poll(async () => (await getOnboardingState(orcaPage)).lastCompletedStep, {
+      .poll(async () => [2, 3].includes((await getOnboardingState(orcaPage)).lastCompletedStep), {
         timeout: 5_000,
-        message: 'lastCompletedStep did not advance past the theme step after second Continue'
+        message: 'lastCompletedStep did not advance after second Continue'
       })
-      .toBeGreaterThanOrEqual(2)
+      .toBe(true)
     await expect
       .poll(async () => (await getSettings(orcaPage)).theme, { timeout: 5_000 })
       .toBe(oppositeTheme)
@@ -422,73 +413,22 @@ test.describe('Onboarding flow', () => {
     await expect(orcaPage.getByRole('heading', { name: /Pick your default agent/i })).toBeVisible({
       timeout: 15_000
     })
-    // Why: since #10011 `settings:set` strips activeRuntimeEnvironmentId — the
-    // durable Active Server preference is only writable through its dedicated
-    // handler, which resolves the id against the main-process environment
-    // store. So the host has to be registered for real, not faked in the
-    // renderer. Pairing is offline (no live server needed).
-    const pairingCode = encodePairingOffer({
-      v: PAIRING_OFFER_VERSION,
-      scope: 'runtime',
-      endpoint: 'wss://e2e.invalid/ws',
-      deviceToken: 'e2e-device-token',
-      publicKeyB64: 'ZTJlLXB1YmxpYy1rZXk'
+    await orcaPage.evaluate(async () => {
+      await window.__store?.getState().updateSettings({ activeRuntimeEnvironmentId: 'env-e2e' })
     })
-    const environmentId = await orcaPage.evaluate(async (code) => {
-      const store = window.__store
-      if (!store) {
-        throw new Error('window.__store is not available')
-      }
-      const { environment } = await window.api.runtimeEnvironments.addFromPairingCode({
-        name: 'E2E Server',
-        pairingCode: code
-      })
-      // Why: after #5071 the server-path add step gates on the registered
-      // runtime-environment list (store.runtimeEnvironments), not just the
-      // activeRuntimeEnvironmentId setting.
-      store.getState().setRuntimeEnvironments(await window.api.runtimeEnvironments.list())
-      // Why: a runtime host is only auto-selectable (health 'available') when it
-      // has a live, protocol-compatible status; without one it reads
-      // 'disconnected' and the Add Project dialog falls back to Local Mac.
-      // runtimeProtocolVersion 3 clears MIN_COMPATIBLE_RUNTIME_SERVER_VERSION.
-      store.getState().setRuntimeEnvironmentStatus(environment.id, {
-        status: {
-          runtimeId: `${environment.id}-runtime`,
-          rendererGraphEpoch: 0,
-          graphStatus: 'ready',
-          authoritativeWindowId: null,
-          liveTabCount: 0,
-          liveLeafCount: 0,
-          runtimeProtocolVersion: 3,
-          minCompatibleRuntimeClientVersion: 1
-        },
-        checkedAt: Date.now()
-      })
-      // Why: the store's switchRuntimeEnvironment probes reachability, which a
-      // synthetic host can't satisfy — write the preference directly and push
-      // the returned settings in rather than refetching (fetchSettings would
-      // kick off a status hydrate that clobbers the seeded 'available' health).
-      const settings = await window.api.settings.setActiveRuntimeEnvironmentPreference({
-        environmentId: environment.id
-      })
-      store.setState({ settings })
-      return environment.id
-    }, pairingCode)
     await expect
       .poll(async () => (await getSettings(orcaPage)).activeRuntimeEnvironmentId, {
         timeout: 5_000
       })
-      .toBe(environmentId)
+      .toBe('env-e2e')
 
     await onboardingFooterButton(orcaPage, SKIP_TO_PROJECT_SETUP_BUTTON).click()
 
     await expectAddProjectDialog(orcaPage)
-    // The runtime env is selected as the Add Project host and the browse action
-    // is host-scoped, proving the server project-setup UI is preserved on skip.
-    await expect(orcaPage.getByText('Existing Git repository or folder on this host')).toBeVisible()
-    await expect(orcaPage.getByRole('button', { name: /Browse folder/i })).toBeVisible()
+    await expect(orcaPage.getByRole('button', { name: /Browse server/i })).toBeVisible()
     await expect(orcaPage.getByRole('button', { name: /Clone from URL/i })).toBeVisible()
-    await expect(orcaPage.getByRole('button', { name: /Create new project/i })).toBeVisible()
+    await expect(orcaPage.getByRole('button', { name: /Create on server/i })).toBeVisible()
+    await expect(orcaPage.getByText(/Or enter a server path manually/i)).toBeVisible()
     await expect(onboardingFooterButton(orcaPage, SKIP_TO_PROJECT_SETUP_BUTTON)).toHaveCount(0)
     expect((await getOnboardingState(orcaPage)).closedAt).not.toBeNull()
   })
@@ -625,49 +565,32 @@ test.describe('Onboarding flow', () => {
       .toBe(1)
   })
 
-  test('final notification step can be dismissed via Escape or click-off', async ({ orcaPage }) => {
+  test('final notification step does not offer a skip or dismiss action', async ({ orcaPage }) => {
     await expect(orcaPage.getByRole('heading', { name: /Pick your default agent/i })).toBeVisible({
       timeout: 15_000
     })
 
-    // Advance to the final notification step. Its primary button hands off to
-    // Add Project, so the footer offers no "Skip to project setup" shortcut —
-    // but click-off and Escape must still open the skip-confirmation dialog like
-    // every other step, so the modal never feels stuck.
+    // Advance through the optional preference step. The final notification step
+    // finishes onboarding, so no skip/dismiss path should be available there.
     await continueOnboarding(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Make it feel like home/i })).toBeVisible()
     await continueFromThemeToNotifications(orcaPage)
 
-    await expect(orcaPage.getByRole('heading', { name: /Set up notifications/i })).toBeVisible()
     await expect(onboardingFooterButton(orcaPage, SKIP_TO_PROJECT_SETUP_BUTTON)).toHaveCount(0)
-
-    // Escape opens the confirmation; "No, keep going" returns to the step with
-    // onboarding still open.
+    await expect(onboardingFooterButton(orcaPage, /Skip all onboarding/i)).toHaveCount(0)
     await orcaPage.keyboard.press('Escape')
-    await expectOnboardingSkipConfirmationOpen(orcaPage)
-    await orcaPage.getByRole('button', { name: /No, keep going/i }).click()
     await expectOnboardingSkipConfirmationClosed(orcaPage)
     await expect(orcaPage.getByRole('heading', { name: /Set up notifications/i })).toBeVisible()
-    expect((await getOnboardingState(orcaPage)).closedAt).toBeNull()
-
-    // Click-off opens the confirmation; Skip dismisses onboarding outright (no
-    // Add Project handoff — that is the primary button's job).
     await orcaPage.locator('[data-onboarding-overlay]').click({ position: { x: 8, y: 40 } })
-    await expectOnboardingSkipConfirmationOpen(orcaPage)
-    await orcaPage.getByRole('button', { name: /^Skip$/ }).click()
+    await expectOnboardingSkipConfirmationClosed(orcaPage)
+    await expect(orcaPage.getByRole('heading', { name: /Set up notifications/i })).toBeVisible()
 
-    await expect
-      .poll(
-        async () => {
-          const state = await getOnboardingState(orcaPage)
-          return {
-            closedAt: state.closedAt === null ? null : 'set',
-            outcome: state.outcome,
-            dismissed: state.checklist.dismissed
-          }
-        },
-        { timeout: 5_000 }
-      )
-      .toEqual({ closedAt: 'set', outcome: 'dismissed', dismissed: true })
+    await continueOnboarding(orcaPage)
+    await expectAddProjectDialog(orcaPage)
+    const final = await getOnboardingState(orcaPage)
+    expect(final.closedAt).not.toBeNull()
+    expect(final.outcome).toBe('completed')
+    expect(final.checklist.dismissed).toBe(false)
+    expect(final.lastCompletedStep).toBe(ONBOARDING_FINAL_STEP)
   })
 })

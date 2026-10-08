@@ -1,11 +1,11 @@
 import { ipcMain } from 'electron'
+import { getTuiAgentDetectCommands, TUI_AGENT_CONFIG } from '../../shared/tui-agent-config'
 import type { PathSource, ShellHydrationFailureReason } from '../../shared/types'
 import { hydrateShellPath, mergePathSegments } from '../startup/hydrate-shell-path'
 import { getAzureDevOpsAuthStatus } from '../azure-devops/client'
 import { getBitbucketAuthStatus } from '../bitbucket/client'
 import { getGiteaAuthStatus } from '../gitea/client'
 import { _resetKnownHostsCache } from '../gitlab/gl-utils'
-import { mergePersistedWindowsPathAsync } from '../pty/windows-environment-path'
 import { getActiveMultiplexer } from './ssh'
 import { detectWslCommandsOnPath, type WslPreflightTarget } from './preflight-wsl-agent-detection'
 import { detectCommandsInInstallDirs } from './local-agent-install-dir-detection'
@@ -22,11 +22,6 @@ import {
   detectRemoteWindowsTerminalCapabilities,
   type RemoteWindowsTerminalCapabilities
 } from './preflight-remote-windows-terminal-capabilities'
-import {
-  getTuiAgentDetectionProbeCommands,
-  KNOWN_TUI_AGENT_DETECTION_COMMANDS,
-  resolveDetectedTuiAgentIds
-} from './tui-agent-detection-commands'
 
 export type PreflightStatus = {
   git: { installed: boolean }
@@ -65,6 +60,13 @@ export function _resetPreflightCache(): void {
   cached = null
 }
 
+const KNOWN_AGENT_COMMANDS = Object.entries(TUI_AGENT_CONFIG).flatMap(([id, config]) =>
+  getTuiAgentDetectCommands(config).map((cmd) => ({
+    id,
+    cmd
+  }))
+)
+
 function uniqueAgentIds(ids: Iterable<string>): string[] {
   return [...new Set(ids)]
 }
@@ -90,17 +92,16 @@ export async function detectInstalledAgents(context?: PreflightRuntimeContext): 
   if (wslTarget) {
     const foundCommands = await detectWslCommandsOnPath(
       wslTarget,
-      getTuiAgentDetectionProbeCommands(KNOWN_TUI_AGENT_DETECTION_COMMANDS, 'wsl')
+      KNOWN_AGENT_COMMANDS.map(({ cmd }) => cmd)
     )
-    return resolveDetectedTuiAgentIds(KNOWN_TUI_AGENT_DETECTION_COMMANDS, foundCommands, 'wsl')
+    return uniqueAgentIds(
+      KNOWN_AGENT_COMMANDS.filter(({ cmd }) => foundCommands.has(cmd)).map(({ id }) => id)
+    )
   }
 
-  const probeCommands = getTuiAgentDetectionProbeCommands(
-    KNOWN_TUI_AGENT_DETECTION_COMMANDS,
-    process.platform
-  )
   const pathChecks = await Promise.all(
-    probeCommands.map(async (cmd) => ({
+    KNOWN_AGENT_COMMANDS.map(async ({ id, cmd }) => ({
+      id,
       cmd,
       installedOnPath: await isCommandOnPath(cmd)
     }))
@@ -109,16 +110,11 @@ export async function detectInstalledAgents(context?: PreflightRuntimeContext): 
   // Why: PATH may still be unhydrated on a cold GUI launch; bulk resolution
   // computes user install dirs once instead of blocking once per missed CLI.
   const installDirCommands = detectCommandsInInstallDirs(missedCommands)
-  const foundCommands = new Set(
-    pathChecks
-      .filter(({ cmd, installedOnPath }) => installedOnPath || installDirCommands.has(cmd))
-      .map(({ cmd }) => cmd)
-  )
-  return resolveDetectedTuiAgentIds(
-    KNOWN_TUI_AGENT_DETECTION_COMMANDS,
-    foundCommands,
-    process.platform
-  )
+  const checks = pathChecks.map(({ id, cmd, installedOnPath }) => ({
+    id,
+    installed: installedOnPath || installDirCommands.has(cmd)
+  }))
+  return uniqueAgentIds(checks.filter((c) => c.installed).map((c) => c.id))
 }
 
 export async function detectInstalledAgentsWithShellPathHydration(
@@ -185,7 +181,7 @@ export async function detectRemoteAgents(args: { connectionId: string }): Promis
     return []
   }
   const result = (await mux.request('preflight.detectAgents', {
-    commands: KNOWN_TUI_AGENT_DETECTION_COMMANDS
+    commands: KNOWN_AGENT_COMMANDS
   })) as { agents: string[] }
   return uniqueAgentIds(result.agents)
 }
@@ -229,14 +225,9 @@ export async function runPreflightCheck(
   force = false,
   context?: PreflightRuntimeContext
 ): Promise<PreflightStatus> {
-  const wslTarget = getPreflightWslTarget(context)
-  const cacheable = !wslTarget
+  const cacheable = !getPreflightWslTarget(context)
   if (cacheable && cached && !force) {
     return cached
-  }
-
-  if (process.platform === 'win32' && !wslTarget) {
-    await mergePersistedWindowsPathAsync(process.env, { forceRefresh: force })
   }
 
   if (force) {

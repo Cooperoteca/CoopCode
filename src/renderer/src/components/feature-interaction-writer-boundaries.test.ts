@@ -205,11 +205,8 @@ describe('feature interaction writer boundaries', () => {
     const taskPageSource = componentSource('TaskPage.tsx')
     const jiraWriter = "recordFeatureInteraction('jira-tasks')"
 
-    // End boundary is the declaration after the handler: the Jira connect flow
-    // now lives in the shared JiraConnectDialog, so handleJiraConnect (the prior
-    // marker) no longer exists in TaskPage.
     expect(
-      sourceBetween(taskPageSource, 'const handleUseJiraItem', 'const taskPageListChromeHidden')
+      sourceBetween(taskPageSource, 'const handleUseJiraItem', 'const handleJiraConnect')
     ).toContain(jiraWriter)
   })
 

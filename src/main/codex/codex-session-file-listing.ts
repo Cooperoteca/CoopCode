@@ -56,36 +56,7 @@ function appendSessionFilePaths(target: string[], source: readonly string[]): vo
  */
 export async function* listCodexSessionJsonlFilesIncrementally(
   rootPath: string,
-  options: CodexSessionBridgeIncrementalOptions,
-  onDirectoryError?: (directoryPath: string, error: unknown) => void | Promise<void>
-): AsyncGenerator<string> {
-  yield* listCodexSessionFilesIncrementally(
-    rootPath,
-    options,
-    (fileName) => fileName.endsWith('.jsonl'),
-    onDirectoryError
-  )
-}
-
-/** Yields both physical representations that current Codex can resume. */
-export async function* listCodexSessionRolloutFilesIncrementally(
-  rootPath: string,
-  options: CodexSessionBridgeIncrementalOptions,
-  onDirectoryError?: (directoryPath: string, error: unknown) => void | Promise<void>
-): AsyncGenerator<string> {
-  yield* listCodexSessionFilesIncrementally(
-    rootPath,
-    options,
-    (fileName) => fileName.endsWith('.jsonl') || fileName.endsWith('.jsonl.zst'),
-    onDirectoryError
-  )
-}
-
-async function* listCodexSessionFilesIncrementally(
-  rootPath: string,
-  options: CodexSessionBridgeIncrementalOptions,
-  isSessionFile: (fileName: string) => boolean,
-  onDirectoryError?: (directoryPath: string, error: unknown) => void | Promise<void>
+  options: CodexSessionBridgeIncrementalOptions
 ): AsyncGenerator<string> {
   const batchSize = Math.max(1, options.batchSize ?? INCREMENTAL_BRIDGE_BATCH_SIZE)
   const yieldMs = Math.max(0, options.yieldMs ?? INCREMENTAL_BRIDGE_YIELD_MS)
@@ -103,7 +74,7 @@ async function* listCodexSessionFilesIncrementally(
         const childPath = join(currentDirectory, entry.name)
         if (entry.isDirectory()) {
           pendingDirectories.push(childPath)
-        } else if (entry.isFile() && isSessionFile(entry.name)) {
+        } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
           yield childPath
         }
         entriesSinceYield += 1
@@ -113,7 +84,6 @@ async function* listCodexSessionFilesIncrementally(
         }
       }
     } catch (error) {
-      await onDirectoryError?.(currentDirectory, error)
       console.warn('[codex-session-bridge] Failed to list system Codex sessions:', error)
     }
   }

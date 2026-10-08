@@ -5,6 +5,7 @@ import { Code } from '@tiptap/extension-code'
 import Image from '@tiptap/extension-image'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import Placeholder from '@tiptap/extension-placeholder'
+import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Table } from '@tiptap/extension-table'
 import { TableCell } from '@tiptap/extension-table-cell'
@@ -15,24 +16,16 @@ import { Markdown } from '@tiptap/markdown'
 import { createLowlight, common } from 'lowlight'
 import { loadLocalImageSrc, onImageCacheInvalidated } from './useLocalImageSrc'
 import type { RuntimeFileOperationArgs } from '@/runtime/runtime-file-client'
-import {
-  createRawMarkdownHtmlBlock,
-  createRawMarkdownHtmlInline,
-  createRichMarkdownLiteral
-} from './raw-markdown-html'
+import { RawMarkdownHtmlBlock, RawMarkdownHtmlInline } from './raw-markdown-html'
 import {
   createOrcaDetailsExtensions,
   getRichMarkdownPlaceholder
 } from './rich-markdown-details-extension'
-import { createMarkdownDocLink } from './rich-markdown-doc-link'
+import { MarkdownDocLink } from './rich-markdown-doc-link'
 import { RichMarkdownCodeBlock } from './RichMarkdownCodeBlock'
 import { safeReactNodeViewRenderer } from './safe-react-node-view-renderer'
 import { DragSelectionGuard } from './drag-selection-guard'
 import { createRichMarkdownAnnotationHighlightExtension } from './rich-markdown-annotation-highlight'
-import type { RichMarkdownEditorCodec } from './rich-markdown-source-transport'
-import { createRichMarkdownHtmlSuperscriptLink } from './rich-markdown-html-superscript-link'
-import type { RichMarkdownHtmlSuperscriptLinkContext } from './rich-markdown-html-superscript-link-context'
-import { RichMarkdownTaskList } from './rich-markdown-task-list'
 
 const lowlight = createLowlight(common)
 
@@ -49,19 +42,10 @@ const RichMarkdownCode = Code.extend({
 })
 
 export function createRichMarkdownExtensions({
-  codec,
-  includePlaceholder = false,
-  htmlSuperscriptLinks = false,
-  htmlSuperscriptLinkContext
+  includePlaceholder = false
 }: {
-  codec: RichMarkdownEditorCodec
   includePlaceholder?: boolean
-  htmlSuperscriptLinks?: boolean
-  htmlSuperscriptLinkContext?: RichMarkdownHtmlSuperscriptLinkContext
-}): AnyExtension[] {
-  if (htmlSuperscriptLinks && !htmlSuperscriptLinkContext) {
-    throw new Error('HTML superscript links require a document interaction context')
-  }
+} = {}): AnyExtension[] {
   const extensions: AnyExtension[] = [
     // Why: rich-mode detection must use the exact same markdown extension set as
     // the live editor. If these drift, Orca can claim a document is editable in
@@ -190,7 +174,7 @@ export function createRichMarkdownExtensions({
     }).configure({
       allowBase64: true
     }),
-    RichMarkdownTaskList,
+    TaskList,
     TaskItem.configure({
       nested: true
     }),
@@ -212,16 +196,11 @@ export function createRichMarkdownExtensions({
         throwOnError: false
       }
     }),
-    createRichMarkdownLiteral(codec.transport),
-    ...(htmlSuperscriptLinks
-      ? [createRichMarkdownHtmlSuperscriptLink(codec.transport, htmlSuperscriptLinkContext!)]
-      : []),
-    createRawMarkdownHtmlInline(codec.transport),
-    createRawMarkdownHtmlBlock(codec.transport),
-    createMarkdownDocLink(codec.transport),
+    RawMarkdownHtmlInline,
+    RawMarkdownHtmlBlock,
+    MarkdownDocLink,
     DragSelectionGuard,
     Markdown.configure({
-      marked: codec.marked,
       markedOptions: {
         gfm: true
       }

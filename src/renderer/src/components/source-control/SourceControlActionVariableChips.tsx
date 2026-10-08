@@ -3,9 +3,8 @@ import { Braces } from 'lucide-react'
 import {
   SOURCE_CONTROL_ACTION_VARIABLE_INFO,
   SOURCE_CONTROL_ACTION_VARIABLES,
-  type SourceControlActionVariable
-} from '../../../../shared/source-control-ai-action-variables'
-import type { SourceControlActionId } from '../../../../shared/source-control-ai-actions'
+  type SourceControlActionId
+} from '../../../../shared/source-control-ai-actions'
 import { Button } from '../ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '../ui/hover-card'
 import { translate } from '@/i18n/i18n'
@@ -29,46 +28,37 @@ function hasVariablePreview(
   )
 }
 
-function SourceControlVariableSample({
-  label,
-  value
-}: {
-  label: string
-  value: string
-}): React.JSX.Element {
-  return (
-    <div className="space-y-1">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </div>
-      <pre className="rounded-sm bg-background/60 p-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
-        {value ||
-          translate(
-            'auto.components.source.control.SourceControlActionVariableChips.4bf6d88039',
-            '(empty)'
-          )}
-      </pre>
-    </div>
-  )
-}
-
 function SourceControlVariableDetails({
   variable,
   preview
 }: {
-  variable: SourceControlActionVariable
+  variable: string
   preview?: string
 }): React.JSX.Element {
-  // Why: for `basePrompt` the preview *is* the content — the static card only restates it.
-  if (preview !== undefined && variable === 'basePrompt') {
+  if (preview !== undefined) {
+    if (variable === 'basePrompt') {
+      return (
+        <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
+          {preview ||
+            translate(
+              'auto.components.source.control.SourceControlActionVariableChips.4bf6d88039',
+              '(empty)'
+            )}
+        </pre>
+      )
+    }
+
     return (
-      <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
-        {preview ||
-          translate(
-            'auto.components.source.control.SourceControlActionVariableChips.4bf6d88039',
-            '(empty)'
-          )}
-      </pre>
+      <div className="space-y-1.5">
+        <div className="font-mono text-[11px] text-muted-foreground">{`{${variable}}`}</div>
+        <pre className="rounded-sm bg-background/60 p-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
+          {preview ||
+            translate(
+              'auto.components.source.control.SourceControlActionVariableChips.4bf6d88039',
+              '(empty)'
+            )}
+        </pre>
+      </div>
     )
   }
 
@@ -79,24 +69,17 @@ function SourceControlVariableDetails({
         <div className="font-mono text-[11px]">{`{${variable}}`}</div>
         <div className="text-muted-foreground">{info.description}</div>
       </div>
-      <SourceControlVariableSample
-        label={translate(
-          'auto.components.source.control.SourceControlActionVariableChips.6b921a0ac2',
-          'Example'
-        )}
-        value={info.example}
-      />
-      {/* Why: a preview never replaces the description — it is the only in-product warning
-          that a bare `Fixes #{linkedIssue}` degrades to `Fixes #` on an unlinked workspace. */}
-      {preview !== undefined ? (
-        <SourceControlVariableSample
-          label={translate(
-            'auto.components.source.control.SourceControlActionVariableChips.7377483644',
-            'This workspace'
+      <div className="space-y-1">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {translate(
+            'auto.components.source.control.SourceControlActionVariableChips.6b921a0ac2',
+            'Example'
           )}
-          value={preview}
-        />
-      ) : null}
+        </div>
+        <pre className="rounded-sm bg-background/60 p-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
+          {info.example}
+        </pre>
+      </div>
     </div>
   )
 }

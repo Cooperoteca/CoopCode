@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -84,16 +84,13 @@ describe('ModelManager Windows model path handling', () => {
       appGetPathMock.mockImplementation((name: string) =>
         name === 'userData' ? userDataDir : join(dir, name)
       )
-      const manifest = SPEECH_MODEL_CATALOG.find(
-        (model) => model.id === 'zipformer-streaming-zh-14m'
-      )
+      const manifest = SPEECH_MODEL_CATALOG.find((model) => model.provider === 'local')
       expect(manifest?.files).toBeDefined()
       const legacyModelDir = join(userDataDir, 'speech-models', manifest!.id)
-      for (const file of manifest!.downloadFiles ?? []) {
-        const filePath = join(legacyModelDir, file.name)
+      for (const file of manifest!.files ?? []) {
+        const filePath = join(legacyModelDir, file)
         mkdirSync(dirname(filePath), { recursive: true })
-        writeFileSync(filePath, '')
-        truncateSync(filePath, file.sizeBytes)
+        writeFileSync(filePath, 'model file')
       }
 
       const manager = new ModelManager()
@@ -123,15 +120,12 @@ describe('ModelManager Windows model path handling', () => {
       appGetPathMock.mockImplementation((name: string) =>
         name === 'userData' ? userDataDir : join(dir, name)
       )
-      const manifest = SPEECH_MODEL_CATALOG.find(
-        (model) => model.id === 'zipformer-streaming-zh-14m'
-      )
+      const manifest = SPEECH_MODEL_CATALOG.find((model) => model.provider === 'local')
       const legacyModelDir = join(userDataDir, 'speech-models', manifest!.id)
-      for (const file of manifest!.downloadFiles ?? []) {
-        const filePath = join(legacyModelDir, file.name)
+      for (const file of manifest!.files ?? []) {
+        const filePath = join(legacyModelDir, file)
         mkdirSync(dirname(filePath), { recursive: true })
-        writeFileSync(filePath, '')
-        truncateSync(filePath, file.sizeBytes)
+        writeFileSync(filePath, 'model file')
       }
 
       const manager = new ModelManager()

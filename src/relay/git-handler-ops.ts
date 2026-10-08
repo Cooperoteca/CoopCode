@@ -16,13 +16,7 @@ import { readWorkingDiffFile } from './git-working-file-read'
 export type GitExec = (
   args: string[],
   cwd: string,
-  opts?: {
-    maxBuffer?: number
-    disableOptionalLocks?: boolean
-    signal?: AbortSignal
-    stdin?: string
-    timeout?: number
-  }
+  opts?: { maxBuffer?: number; disableOptionalLocks?: boolean; stdin?: string }
 ) => Promise<{ stdout: string; stderr: string }>
 
 export type GitBufferExec = (args: string[], cwd: string) => Promise<Buffer>
@@ -52,19 +46,17 @@ export async function readBlobAtIndex(
   gitBuffer: GitBufferExec,
   cwd: string,
   filePath: string
-): Promise<{ content: string; isBinary: boolean; missing: boolean }> {
+): Promise<{ content: string; isBinary: boolean }> {
   // Why: Git's `:<path>` syntax expects forward slashes even on Windows.
   const gitPath = filePath.replace(/\\/g, '/')
   try {
     const buf = await gitBuffer(['show', '--end-of-options', `:${gitPath}`], cwd)
-    return { ...bufferToBlob(buf, filePath), missing: false }
+    return bufferToBlob(buf, filePath)
   } catch (error) {
     if (isGitBufferOverflowError(error)) {
-      return { content: '', isBinary: true, missing: false }
+      return { content: '', isBinary: true }
     }
-    // Why: a non-overflow failure means the path is absent from the index (a
-    // staged deletion), distinct from the size-capped case handled above.
-    return { content: '', isBinary: false, missing: true }
+    return { content: '', isBinary: false }
   }
 }
 
@@ -93,7 +85,6 @@ export async function computeDiff(
   let modifiedContent = ''
   let originalIsBinary = false
   let modifiedIsBinary = false
-  let modifiedDeleted = false
 
   try {
     if (staged) {
@@ -104,7 +95,6 @@ export async function computeDiff(
       const right = await readBlobAtIndex(git, worktreePath, filePath)
       modifiedContent = right.content
       modifiedIsBinary = right.isBinary
-      modifiedDeleted = right.missing
     } else {
       const left = compareAgainstHead
         ? await readBlobAtOid(git, worktreePath, 'HEAD', filePath)
@@ -115,25 +105,18 @@ export async function computeDiff(
       const right = await readWorkingDiffFile(path.join(worktreePath, filePath))
       modifiedContent = right.content
       modifiedIsBinary = right.isBinary
-      modifiedDeleted = right.missing
     }
   } catch {
     // Fallback to empty
   }
 
-  const result = buildDiffResult(
+  return buildDiffResult(
     originalContent,
     modifiedContent,
     originalIsBinary,
     modifiedIsBinary,
     filePath
   )
-  // Why: mark a proven deletion so previewers can fall back to the original bytes
-  // without mistaking a read failure's empty modified side for a deletion.
-  if (result.kind === 'binary' && modifiedDeleted) {
-    return { ...result, modifiedDeleted: true }
-  }
-  return result
 }
 
 // ─── Branch compare ──────────────────────────────────────────────────
@@ -154,29 +137,27 @@ export async function branchCompare(
     status: 'loading'
   }
 
-  const readCompareRef = async (): Promise<string> => {
-    try {
-      const { stdout } = await git(['branch', '--show-current'], worktreePath)
-      return stdout.trim() || 'HEAD'
-    } catch {
-      return 'HEAD'
+  try {
+    const { stdout: branchOut } = await git(['branch', '--show-current'], worktreePath)
+    const branch = branchOut.trim()
+    if (branch) {
+      summary.compareRef = branch
     }
+  } catch {
+    /* keep HEAD */
   }
-  const readOid = (ref: string) =>
-    git(['rev-parse', '--verify', ref], worktreePath).then(
-      ({ stdout }) => ({ ok: true as const, oid: stdout.trim() }),
-      (error) => ({ ok: false as const, error })
-    )
-  const [compareRef, headOidResult, baseOidResult] = await Promise.all([
-    readCompareRef(),
-    readOid('HEAD'),
-    readOid(baseRef)
-  ])
-  summary.compareRef = compareRef
 
-  if (!headOidResult.ok) {
-    if (baseOidResult.ok) {
-      summary.baseOid = baseOidResult.oid
+  let headOid: string
+  let baseOid = ''
+  try {
+    const { stdout } = await git(['rev-parse', '--verify', 'HEAD'], worktreePath)
+    headOid = stdout.trim()
+    summary.headOid = headOid
+  } catch {
+    try {
+      const { stdout } = await git(['rev-parse', '--verify', baseRef], worktreePath)
+      baseOid = stdout.trim()
+      summary.baseOid = baseOid
       // Why: new remote worktrees can be on an unborn branch until the first
       // commit. There are no committed branch changes yet; surfacing this as a
       // compare error makes the source-control panel look broken.
@@ -184,6 +165,9 @@ export async function branchCompare(
       summary.commitsAhead = 0
       summary.status = 'ready'
       return { summary, entries: [] }
+    } catch {
+      // Preserve the existing unborn-head message when even the base is not
+      // resolvable; callers cannot compare or present a useful empty state.
     }
     summary.status = 'unborn-head'
     summary.errorMessage =
@@ -191,15 +175,15 @@ export async function branchCompare(
     return { summary, entries: [] }
   }
 
-  const headOid = headOidResult.oid
-  summary.headOid = headOid
-  if (!baseOidResult.ok) {
+  try {
+    const { stdout } = await git(['rev-parse', '--verify', baseRef], worktreePath)
+    baseOid = stdout.trim()
+    summary.baseOid = baseOid
+  } catch {
     summary.status = 'invalid-base'
     summary.errorMessage = `Base ref ${baseRef} could not be resolved in this repository.`
     return { summary, entries: [] }
   }
-  const baseOid = baseOidResult.oid
-  summary.baseOid = baseOid
 
   let mergeBase: string
   try {
@@ -213,12 +197,13 @@ export async function branchCompare(
   }
 
   try {
-    const [entries, { stdout: countOut }] = await Promise.all([
-      loadBranchChanges(mergeBase, headOid),
-      git(['rev-list', '--count', `${baseOid}..${headOid}`], worktreePath)
-    ])
+    const entries = await loadBranchChanges(mergeBase, headOid)
+    const { stdout: countOut } = await git(
+      ['rev-list', '--count', `${baseOid}..${headOid}`],
+      worktreePath
+    )
     summary.changedFiles = entries.length
-    summary.commitsAhead = Number.parseInt(countOut.trim(), 10) || 0
+    summary.commitsAhead = parseInt(countOut.trim(), 10) || 0
     summary.status = 'ready'
     return { summary, entries }
   } catch (error) {

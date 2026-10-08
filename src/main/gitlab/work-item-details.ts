@@ -10,7 +10,6 @@ import type {
   GitLabPipelineJob,
   GitLabWorkItem,
   GitLabWorkItemDetails,
-  IssueSourcePreference,
   MRComment
 } from '../../shared/types'
 import { mapIssueToWorkItem, mapMRToWorkItem } from './mappers'
@@ -25,6 +24,7 @@ import {
   type LocalGitExecOptions,
   type ProjectRef
 } from './gl-utils'
+import type { IssueSourcePreference } from '../../shared/types'
 
 function encodedProject(projectPath: string): string {
   return encodeURIComponent(projectPath)
@@ -361,7 +361,7 @@ export async function getWorkItemDetails(
       await resolveIssueSource(
         repoPath,
         preference,
-        await getGlabKnownHosts(connectionId, localGitOptions),
+        await getGlabKnownHosts(connectionId),
         connectionId,
         localGitOptions
       )

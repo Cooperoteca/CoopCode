@@ -16,10 +16,7 @@ export async function createTerminalAndSendPrompt(
   prompt: string
 ): Promise<void> {
   const created = await client.sendRequest('session.tabs.createTerminal', {
-    worktree: `id:${worktreeId}`,
-    activate: false,
-    select: true,
-    navigation: 'caller'
+    worktree: `id:${worktreeId}`
   })
   if (!created.ok) {
     throw new Error(created.error?.message || 'Failed to create terminal')

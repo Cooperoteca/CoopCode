@@ -25,20 +25,12 @@ import { translate } from '@/i18n/i18n'
 const FIELD_CONTROL_CLASS = 'border-input bg-input/30 shadow-xs dark:bg-input/30'
 
 export const AUTOMATION_SCHEDULE_PRESET_OPTIONS = [
-  ['hourly', 'Hourly', 'auto.components.automations.AutomationSchedulePicker.55b2ef82a4'],
-  ['daily', 'Daily', 'auto.components.automations.AutomationSchedulePicker.f0202f3a89'],
-  ['weekdays', 'Weekdays', 'auto.components.automations.AutomationSchedulePicker.57e83307d0'],
-  ['weekly', 'Weekly', 'auto.components.automations.AutomationSchedulePicker.837d902bba'],
-  ['custom', 'Custom cron', 'auto.components.automations.AutomationSchedulePicker.ddba78647e']
-] as const satisfies readonly (readonly [AutomationSchedulePreset, string, string])[]
-
-export function getAutomationSchedulePresetLabel([, fallbackLabel, labelKey]: readonly [
-  AutomationSchedulePreset,
-  string,
-  string
-]): string {
-  return translate(labelKey, fallbackLabel)
-}
+  ['hourly', 'Hourly'],
+  ['daily', 'Daily'],
+  ['weekdays', 'Weekdays'],
+  ['weekly', 'Weekly'],
+  ['custom', 'Custom cron']
+] as const satisfies readonly [AutomationSchedulePreset, string][]
 
 const DAY_OPTIONS = [
   ['0', 'Sunday'],
@@ -199,9 +191,9 @@ export function AutomationSchedulePicker({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {AUTOMATION_SCHEDULE_PRESET_OPTIONS.map(([value, fallbackLabel, labelKey]) => (
+                {AUTOMATION_SCHEDULE_PRESET_OPTIONS.map(([value, presetLabel]) => (
                   <SelectItem key={value} value={value}>
-                    {getAutomationSchedulePresetLabel([value, fallbackLabel, labelKey])}
+                    {presetLabel}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -139,32 +139,51 @@ describe('runSleepWorktree', () => {
     expect(requestAnimationFrame).toHaveBeenCalledTimes(1)
   })
 
-  it('anchors sleep restoration to the natural duplicate row when no primary row is marked', async () => {
-    const requestAnimationFrame = vi.fn(() => 1)
+  it('anchors sleep restoration to the primary duplicate row', async () => {
+    let frameCount = 0
+    const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      frameCount += 1
+      if (frameCount === 1) {
+        callback(0)
+      }
+      return frameCount
+    })
     const scroller = {
       dispatchEvent: vi.fn(),
       scrollHeight: 100,
       scrollTop: 0
     }
-    const pinnedGetBoundingClientRect = vi.fn(() => ({ top: 10 }))
-    const naturalGetBoundingClientRect = vi.fn(() => ({ top: 42 }))
     const pinnedRow = {
-      getBoundingClientRect: pinnedGetBoundingClientRect
+      closest: (selector: string) =>
+        selector === '[data-worktree-virtual-row]' ? pinnedRow : null,
+      getBoundingClientRect: () => ({ top: 10 })
     }
+    let naturalTop = 40
     const naturalRow = {
-      getBoundingClientRect: naturalGetBoundingClientRect
+      closest: (selector: string) =>
+        selector === '[data-worktree-virtual-row]' ? naturalRow : null,
+      getBoundingClientRect: () => ({ top: naturalTop })
     }
     const pinnedOption = {
-      dataset: { worktreeId: 'wt-1', worktreeRowKey: 'pinned:wt-1' },
+      dataset: {
+        worktreeId: 'wt-1',
+        worktreeRowKey: 'pinned:wt-1',
+        worktreeSectionKey: 'pinned'
+      },
       closest: (selector: string) =>
         selector === '[data-worktree-virtual-row]' ? pinnedRow : null,
       querySelector: () => null
     }
     const naturalOption = {
-      dataset: { worktreeId: 'wt-1', worktreeRowKey: 'all:wt-1' },
+      dataset: {
+        worktreeId: 'wt-1',
+        worktreeRowKey: 'all:wt-1',
+        worktreeSectionKey: 'all'
+      },
       closest: (selector: string) =>
         selector === '[data-worktree-virtual-row]' ? naturalRow : null,
-      querySelector: () => null
+      querySelector: (selector: string) =>
+        selector === '[data-worktree-card-active="primary"]' ? {} : null
     }
     vi.stubGlobal('document', {
       querySelector: (selector: string) =>
@@ -175,10 +194,13 @@ describe('runSleepWorktree', () => {
     vi.stubGlobal('window', { requestAnimationFrame })
     mocks.state.activeWorktreeId = 'wt-1'
 
+    mocks.state.setActiveWorktree.mockImplementation(() => {
+      naturalTop = 45
+    })
+
     await runSleepWorktree('wt-1')
 
-    expect(naturalGetBoundingClientRect).toHaveBeenCalled()
-    expect(pinnedGetBoundingClientRect).not.toHaveBeenCalled()
+    expect(scroller.scrollTop).toBe(5)
   })
 
   it('leaves activeWorktreeId alone when sleeping a background worktree', async () => {
@@ -202,32 +224,9 @@ describe('runSleepWorktree', () => {
     expect(mocks.state.shutdownWorktreeTerminals).not.toHaveBeenCalled()
     expect(mocks.suspendWorkspace).not.toHaveBeenCalled()
     expect(mocks.clearWorktreeSleepIntent).toHaveBeenCalledWith('wt-1')
-    expect(mocks.state.setActiveWorktree).toHaveBeenLastCalledWith('wt-1')
     expect(mocks.toastError).toHaveBeenCalledWith(
       'Failed to sleep workspace',
-      expect.objectContaining({
-        description:
-          'The workspace was kept open. Try again; if the problem continues, check the host connection.'
-      })
-    )
-  })
-
-  it('restores the active workspace when terminal convergence fails', async () => {
-    mocks.state.activeWorktreeId = 'wt-1'
-    mocks.state.shutdownWorktreeTerminals.mockRejectedValueOnce(
-      new Error('terminal_worktree_sleep_still_live')
-    )
-
-    await runSleepWorktree('wt-1')
-
-    expect(mocks.state.setActiveWorktree.mock.calls).toEqual([[null], ['wt-1']])
-    expect(mocks.suspendWorkspace).not.toHaveBeenCalled()
-    expect(mocks.toastError).toHaveBeenCalledWith(
-      'Failed to sleep workspace',
-      expect.objectContaining({
-        description:
-          'The host could not confirm terminal shutdown. The workspace was kept open; check the connection and try again.'
-      })
+      expect.objectContaining({ description: 'boom' })
     )
   })
 
@@ -251,10 +250,7 @@ describe('runSleepWorktree', () => {
     expect(mocks.suspendWorkspace).toHaveBeenCalledWith({ workspaceId: 'wt-2' })
     expect(mocks.toastError).toHaveBeenCalledWith(
       'Failed to sleep some workspaces',
-      expect.objectContaining({
-        description:
-          'The workspace was kept open. Try again; if the problem continues, check the host connection.'
-      })
+      expect.objectContaining({ description: 'first failed' })
     )
   })
 

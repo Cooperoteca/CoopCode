@@ -1,12 +1,9 @@
-import type { LinkedWorkItemSummary } from '@/lib/new-workspace'
+import { buildLinearIssueLinkedWorkItem } from '@/lib/linear-linked-work-item'
 import {
-  buildGitHubWorkspaceSource,
-  buildGitLabWorkspaceSource,
-  buildLinearWorkspaceSource,
-  buildWorkspaceSourceSelection,
-  getWorkspaceSourceName,
-  getWorkspaceSourceProvider
-} from '../../../../shared/new-workspace/workspace-source'
+  getLinkedWorkItemProvider,
+  getLinkedWorkItemWorkspaceName,
+  type LinkedWorkItemSummary
+} from '@/lib/new-workspace'
 import { isPathInsideOrEqual } from '../../../../shared/cross-platform-path'
 import {
   getRepoExecutionHostId,
@@ -66,7 +63,7 @@ export function toFolderWorkspaceLinkedTask(
   if (!item) {
     return null
   }
-  const provider = getWorkspaceSourceProvider(item)
+  const provider = getLinkedWorkItemProvider(item)
   return {
     provider,
     type: item.type,
@@ -82,23 +79,60 @@ export function toFolderWorkspaceLinkedTask(
 export function getSmartNameSelection(
   linkedWorkItem: LinkedWorkItemSummary | null
 ): SmartWorkspaceNameSelection | null {
-  return buildWorkspaceSourceSelection({ linkedWorkItem }) as SmartWorkspaceNameSelection | null
+  if (!linkedWorkItem) {
+    return null
+  }
+  const provider = getLinkedWorkItemProvider(linkedWorkItem)
+  const kind: SmartWorkspaceNameSelection['kind'] =
+    provider === 'linear'
+      ? 'linear'
+      : provider === 'jira'
+        ? 'jira'
+        : provider === 'gitlab'
+          ? linkedWorkItem.type === 'mr'
+            ? 'gitlab-mr'
+            : 'gitlab-issue'
+          : linkedWorkItem.type === 'pr'
+            ? 'github-pr'
+            : 'github-issue'
+  return {
+    kind,
+    label:
+      provider === 'linear' || provider === 'jira' || linkedWorkItem.number === 0
+        ? linkedWorkItem.title
+        : `#${linkedWorkItem.number} ${linkedWorkItem.title}`,
+    url: linkedWorkItem.url
+  }
 }
 
 export function getLinkedItemDisplayName(item: LinkedWorkItemSummary): string | null {
-  return getWorkspaceSourceName(item).displayName || null
+  return getLinkedWorkItemWorkspaceName(item)?.displayName ?? (item.title.trim() || null)
 }
 
 export function toGitHubLinkedWorkItem(item: GitHubWorkItem): LinkedWorkItemSummary {
-  return buildGitHubWorkspaceSource(item)
+  return {
+    type: item.type,
+    provider: 'github',
+    number: item.number,
+    title: item.title,
+    url: item.url,
+    repoId: item.repoId
+  }
 }
 
 export function toGitLabLinkedWorkItem(item: GitLabWorkItem): LinkedWorkItemSummary {
-  return buildGitLabWorkspaceSource(item)
+  return {
+    type: item.type,
+    provider: 'gitlab',
+    number: item.number,
+    title: item.title,
+    url: item.url,
+    repoId: item.repoId
+  }
 }
 
 export function toLinearLinkedWorkItem(issue: LinearIssue): LinkedWorkItemSummary {
-  return buildLinearWorkspaceSource(issue)
+  return buildLinearIssueLinkedWorkItem(issue)
 }
 
 export function getFolderWorkspacePrimaryActionLabel(): string {

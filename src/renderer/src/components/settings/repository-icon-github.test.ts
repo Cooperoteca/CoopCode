@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Repo } from '../../../../shared/types'
-import { githubAvatarIcon } from '../../../../shared/repo-icon'
 import {
   buildRepositoryGitHubAvatarUpdate,
   resolveRepositoryGitHubAvatar
@@ -160,19 +159,5 @@ describe('repository GitHub avatar resolution', () => {
     expect(apiMocks.repoSlug).not.toHaveBeenCalled()
     // Nothing changed, so no repo write is produced (no sticky null clobber).
     expect(buildRepositoryGitHubAvatarUpdate(repo, resolution)).toBeNull()
-  })
-
-  it('persists an upstream change when only the GitHub host differs', () => {
-    const repo = makeRepo({
-      upstream: { owner: 'acme', repo: 'widgets', host: 'github.com' }
-    })
-    const enterprise = { owner: 'acme', repo: 'widgets', host: 'github.acme.test' }
-
-    expect(
-      buildRepositoryGitHubAvatarUpdate(repo, {
-        repoIcon: githubAvatarIcon(enterprise),
-        upstream: enterprise
-      })
-    ).toMatchObject({ upstream: enterprise })
   })
 })

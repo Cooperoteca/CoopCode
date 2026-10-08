@@ -4,10 +4,9 @@ import {
   normalizeGlobalWindowsRuntimeDefault
 } from '../../../../shared/project-execution-runtime'
 import {
-  quotePowerShellLiteral,
-  quotePowerShellNativeArgument
-} from '../../../../shared/powershell-native-argument'
-import { buildWslLoginShellCommand } from '../../../../shared/wsl-login-shell-command'
+  buildWslLoginShellCommand,
+  escapeWslShCommandForWindows
+} from '../../../../shared/wsl-login-shell-command'
 import { buildAgentFeatureSkillInstallCommand } from '../../../../shared/agent-feature-install-commands'
 import { toast } from 'sonner'
 import type { CliInstallStatus } from '../../../../shared/cli-install-types'
@@ -57,13 +56,8 @@ export function getSelectedAgentRuntime(
   return { runtime: 'host', label: getHostRuntimeLabel() }
 }
 
-function encodeWslLoginShellScript(command: string): string {
-  const bytes = new TextEncoder().encode(buildWslLoginShellCommand(command))
-  let binary = ''
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte)
-  }
-  return btoa(binary)
+function quotePowerShellSingle(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
 }
 
 export function getWslCliDistroRequest(
@@ -90,17 +84,10 @@ export function buildSkillCommandForRuntime(
   }
 
   const distroArg = resolvedRuntime.wslDistro?.trim()
-    ? ` -d ${quotePowerShellLiteral(resolvedRuntime.wslDistro.trim())}`
+    ? ` -d ${quotePowerShellSingle(resolvedRuntime.wslDistro.trim())}`
     : ''
-  // Why: encoding preserves the user's configured login-shell PATH while
-  // avoiding raw multiline and nested quotes at the copy/paste boundary.
-  const encodedScript = encodeWslLoginShellScript(normalizedCommand)
-  const visibleCommand = normalizedCommand.replace(/[\r\n]+/g, ' ')
-  const shellScript = `eval "\`printf %s ${encodedScript} | base64 -d\`"`
-  const wslCommand = `wsl.exe${distroArg} -- sh -c ${quotePowerShellNativeArgument(shellScript)}`
-  // Why: scope Legacy argv parsing to this invocation so Windows PowerShell
-  // 5.1 and PowerShell 7 pass the same embedded quotes to wsl.exe.
-  return `& { $PSNativeCommandArgumentPassing = 'Legacy'; ${wslCommand} } # Runs: ${visibleCommand}`
+  const wslCommand = escapeWslShCommandForWindows(buildWslLoginShellCommand(normalizedCommand))
+  return `wsl.exe${distroArg} -- sh -c ${quotePowerShellSingle(wslCommand)}`
 }
 
 function normalizeWindowsSkillUpdateCommand(
@@ -193,17 +180,7 @@ export async function ensureWslCliAvailableForAgentSkillTerminal(
       )
       return status
     }
-    if (status.pathConfigured === null) {
-      toast.warning(
-        translate(
-          'auto.components.settings.CliSkillRuntimeSetup.windowsPathUnknown',
-          'WSL shell command PATH could not be checked'
-        ),
-        { description: status.detail ?? 'Refresh CLI registration status and try again.' }
-      )
-      return status
-    }
-    if (status.state !== 'installed' || status.pathConfigured === false) {
+    if (status.state !== 'installed' || !status.pathConfigured) {
       await showOrcaCliRegistrationPromptToast()
       const next = await window.api.cli.installWsl(args)
       if (!isOrcaCliAvailableOnPath(next)) {

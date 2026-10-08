@@ -30,11 +30,6 @@ jobs:
         with:
           node-version-file: package.json
 
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.3'
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -56,13 +51,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: npx tsc --noEmit
 
       - name: Test
         run: pnpm test
-
-      - name: Test iOS release version resolution
-        run: ruby fastlane/ios_release_version_test.rb
 
       - name: Lint
         run: pnpm lint

@@ -4,7 +4,7 @@ import {
   fileUriToFilesystemPath
 } from '../../../../shared/file-uri-path'
 import { isWindowsAbsolutePathLike } from '../../../../shared/cross-platform-path'
-import type { HttpLinkSourceOwner, OpenHttpLinkOptions } from '@/lib/http-link-routing'
+import type { OpenHttpLinkOptions } from '@/lib/http-link-routing'
 
 function toFileUrl(filePath: string): string {
   return filesystemPathToFileUri(filePath)
@@ -120,13 +120,12 @@ export function isMarkdownPreviewSystemBrowserModifier(
 export function resolveMarkdownPreviewHttpOpenOptions(
   event: Pick<MouseEvent, 'metaKey' | 'ctrlKey' | 'shiftKey'>,
   isMac: boolean,
-  worktreeId: string | null,
-  sourceOwner: HttpLinkSourceOwner
+  worktreeId: string | null
 ): OpenHttpLinkOptions {
   if (isMarkdownPreviewSystemBrowserModifier(event, isMac)) {
-    return { forceSystemBrowser: true, sourceOwner }
+    return { forceSystemBrowser: true }
   }
-  return { worktreeId, sourceOwner }
+  return { worktreeId }
 }
 
 /**

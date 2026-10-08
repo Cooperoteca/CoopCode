@@ -2,19 +2,36 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const callMock = vi.fn()
 
-vi.mock('../runtime-client', async () => {
+vi.mock('../runtime-client', () => {
   class RuntimeClient {
     call = callMock
     getCliStatus = vi.fn()
     openOrca = vi.fn()
   }
 
-  // Why: re-export the REAL error classes rather than redefining them. format.ts
-  // narrows with `instanceof` against ./runtime/types, so a look-alike class
-  // here would make every CLI error fall through to the generic `runtime_error`
-  // shape — mirroring the barrel keeps the mock faithful to production.
-  const { RuntimeClientError, RuntimeRpcFailureError } = await import('../runtime/types.js')
-  return { RuntimeClient, RuntimeClientError, RuntimeRpcFailureError }
+  class RuntimeClientError extends Error {
+    readonly code: string
+
+    constructor(code: string, message: string) {
+      super(message)
+      this.code = code
+    }
+  }
+
+  class RuntimeRpcFailureError extends RuntimeClientError {
+    readonly response: unknown
+
+    constructor(response: unknown) {
+      super('runtime_error', 'runtime_error')
+      this.response = response
+    }
+  }
+
+  return {
+    RuntimeClient,
+    RuntimeClientError,
+    RuntimeRpcFailureError
+  }
 })
 
 import { main } from '../index'

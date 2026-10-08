@@ -8,7 +8,6 @@ import { useAppStore } from '@/store'
 type AppStoreState = ReturnType<typeof useAppStore.getState>
 
 const initialTabsByWorktree = useAppStore.getState().tabsByWorktree
-const initialWorktreesByRepo = useAppStore.getState().worktreesByRepo
 const initialGetKnownWorktreeById = useAppStore.getState().getKnownWorktreeById
 const initialPendingIssueCommandSplitByTabId =
   useAppStore.getState().pendingIssueCommandSplitByTabId
@@ -34,7 +33,6 @@ afterEach(() => {
   resetHookCommandDelayedDeliveryForTests()
   useAppStore.setState({
     tabsByWorktree: initialTabsByWorktree,
-    worktreesByRepo: initialWorktreesByRepo,
     getKnownWorktreeById: initialGetKnownWorktreeById,
     pendingIssueCommandSplitByTabId: initialPendingIssueCommandSplitByTabId
   } as Partial<AppStoreState>)
@@ -224,17 +222,7 @@ describe('ensureWorktreeHasInitialTerminal', () => {
     useAppStore.setState((state) => ({
       settings: state.settings
         ? { ...state.settings, activeRuntimeEnvironmentId: 'web-runtime-1' }
-        : ({ activeRuntimeEnvironmentId: 'web-runtime-1' } as unknown as typeof state.settings),
-      worktreesByRepo: {
-        'repo-1': [
-          {
-            id: 'wt-1',
-            repoId: 'repo-1',
-            hostId: 'local',
-            runtimeOwnerEnvironmentId: 'web-runtime-1'
-          }
-        ] as never
-      }
+        : ({ activeRuntimeEnvironmentId: 'web-runtime-1' } as unknown as typeof state.settings)
     }))
     const store = createMockStore()
 
@@ -250,17 +238,7 @@ describe('ensureWorktreeHasInitialTerminal', () => {
     useAppStore.setState((state) => ({
       settings: state.settings
         ? { ...state.settings, activeRuntimeEnvironmentId: 'web-runtime-1' }
-        : ({ activeRuntimeEnvironmentId: 'web-runtime-1' } as unknown as typeof state.settings),
-      worktreesByRepo: {
-        'repo-1': [
-          {
-            id: 'wt-1',
-            repoId: 'repo-1',
-            hostId: 'local',
-            runtimeOwnerEnvironmentId: 'web-runtime-1'
-          }
-        ] as never
-      }
+        : ({ activeRuntimeEnvironmentId: 'web-runtime-1' } as unknown as typeof state.settings)
     }))
     let createdIndex = 1
     const createTab = vi.fn(() => ({ id: `tab-${++createdIndex}` }))
@@ -307,17 +285,7 @@ describe('ensureWorktreeHasInitialTerminal', () => {
     useAppStore.setState((state) => ({
       settings: state.settings
         ? { ...state.settings, activeRuntimeEnvironmentId: 'web-runtime-1' }
-        : ({ activeRuntimeEnvironmentId: 'web-runtime-1' } as unknown as typeof state.settings),
-      worktreesByRepo: {
-        'repo-1': [
-          {
-            id: 'wt-1',
-            repoId: 'repo-1',
-            hostId: 'local',
-            runtimeOwnerEnvironmentId: 'web-runtime-1'
-          }
-        ] as never
-      }
+        : ({ activeRuntimeEnvironmentId: 'web-runtime-1' } as unknown as typeof state.settings)
     }))
     useAppStore.setState({
       tabsByWorktree: {},

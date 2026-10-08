@@ -4,7 +4,6 @@ import {
   type CrashReportBreadcrumbData,
   type CrashReportDetailValue
 } from '../../shared/crash-reporting'
-import type { ExpectedTeardownScope } from './process-gone-classification'
 
 type ProcessMetricLike = {
   pid?: unknown
@@ -125,22 +124,19 @@ export function buildSuppressedProcessGoneBreadcrumbData({
   processType,
   reason,
   exitCode,
-  expectedTeardown,
   details
 }: {
   source: 'renderer' | 'child'
   processType: string
   reason: string
   exitCode: number | null
-  expectedTeardown: ExpectedTeardownScope
   details: Record<string, unknown>
 }): CrashReportBreadcrumbData {
   const breadcrumb: CrashReportBreadcrumbData = {
     source,
     processType,
     reason,
-    exitCode,
-    expectedTeardown
+    exitCode
   }
   const name = safeString(details.name)
   if (name) {

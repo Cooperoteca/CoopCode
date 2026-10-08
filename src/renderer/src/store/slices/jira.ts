@@ -4,7 +4,6 @@
 import type { StateCreator } from 'zustand'
 import type { AppState } from '../types'
 import type {
-  JiraAuthType,
   JiraConnectionStatus,
   JiraIssue,
   JiraIssueFilter,
@@ -164,7 +163,6 @@ export type JiraSlice = {
     siteUrl: string
     email: string
     apiToken: string
-    authType?: JiraAuthType
   }) => Promise<{ ok: true; viewer: JiraViewer } | { ok: false; error: string }>
   testJiraConnection: (
     siteId?: string | null

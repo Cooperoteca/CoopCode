@@ -1,3 +1,7 @@
+/* eslint-disable max-lines -- Why: this file covers every branch of the
+shortcut policy (letter chords, zoom variants, alt/shift gating, history
+navigation, new-workspace tab routing). Splitting across files would
+fragment the test of a single pure function. */
 import { describe, expect, it } from 'vitest'
 import {
   isRecentTabSwitcherCommitRelease,

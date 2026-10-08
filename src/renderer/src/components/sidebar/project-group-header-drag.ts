@@ -67,8 +67,7 @@ export function useProjectGroupHeaderDrag({
         containerTop: containerRect.top,
         scrollTop: container.scrollTop,
         rects: session.headerRects,
-        sidebarProjectGroupHeaderIds: session.sidebarProjectGroupHeaderIds,
-        contentBottom: container.scrollHeight
+        sidebarProjectGroupHeaderIds: session.sidebarProjectGroupHeaderIds
       })
     },
     []

@@ -87,11 +87,7 @@ export function useSourceControlSubmoduleStatus(
         }
         setSubmoduleStatusByKey((prev) => ({
           ...prev,
-          [expansionKey]: {
-            status: 'loaded',
-            entries: result.entries,
-            ...(result.didHitLimit ? { didHitLimit: true } : {})
-          }
+          [expansionKey]: { status: 'loaded', entries: result.entries }
         }))
       } catch (error) {
         if (generationRef.current !== generation) {

@@ -37,7 +37,6 @@ import { AgentIcon } from '@/lib/agent-catalog'
 import type { KeybindingOverrides } from '../../../../shared/keybindings'
 import { translate } from '@/i18n/i18n'
 import { isMacPlatform, nativeChatToggleShortcutLabel } from '../native-chat/native-chat-shortcut'
-import { AgentSessionContinuationMenuItem } from './AgentSessionContinuationMenuItem'
 
 type TerminalContextMenuProps = {
   open: boolean
@@ -56,8 +55,6 @@ type TerminalContextMenuProps = {
   onEqualizePaneSizes: () => void
   onClosePane: () => void
   onClearScreen: () => void
-  canContinueAgentSessionInNewSession: boolean
-  onContinueAgentSessionInNewSession: () => void
   onForkAgentSession: () => void
   canToggleNativeChat: boolean
   isNativeChatView: boolean
@@ -93,8 +90,6 @@ export default function TerminalContextMenu({
   onEqualizePaneSizes,
   onClosePane,
   onClearScreen,
-  canContinueAgentSessionInNewSession,
-  onContinueAgentSessionInNewSession,
   onForkAgentSession,
   canToggleNativeChat,
   isNativeChatView,
@@ -268,9 +263,6 @@ export default function TerminalContextMenu({
             </DropdownMenuItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        {canContinueAgentSessionInNewSession ? (
-          <AgentSessionContinuationMenuItem onSelect={onContinueAgentSessionInNewSession} />
-        ) : null}
         <DropdownMenuItem onSelect={onForkAgentSession}>
           <GitFork />
           {translate(

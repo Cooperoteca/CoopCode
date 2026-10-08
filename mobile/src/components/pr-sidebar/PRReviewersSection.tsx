@@ -5,7 +5,6 @@ import { colors } from '../../theme/mobile-theme'
 import type { GitHubWorkItemDetails } from '../../../../src/shared/types'
 import type { RpcClient } from '../../transport/rpc-client'
 import type { MobilePrActions } from '../../session/use-mobile-pr-actions'
-import { isPrSidebarDetailsPlaceholder } from '../../session/mobile-pr-sidebar-state'
 import { getPRReviewerRows } from './pr-checks-presentation'
 import { ReviewerPickerDrawer } from './ReviewerPickerDrawer'
 import { PRSection } from './PRSection'
@@ -21,17 +20,8 @@ type Props = {
 // Requested reviewers + their latest review status, with a picker to request /
 // remove (optimistic add/remove via the actions hook).
 export function PRReviewersSection({ details, actions, client, worktreeId }: Props) {
-  // details === null means phase 2 (work-item payload) is still in flight — same
-  // signal Comments uses. Do not treat that as "no reviewers" or the section goes
-  // blank while checks (phase 1) already paint. A synthetic placeholder means
-  // phase 2 failed (no body/comments/reviews landed).
-  const loadingDetails = details === null
-  const detailsFailed = details != null && isPrSidebarDetailsPlaceholder(details)
   const authoritativeRows = useMemo(
-    () =>
-      details?.item && !isPrSidebarDetailsPlaceholder(details)
-        ? getPRReviewerRows(details.item)
-        : [],
+    () => (details?.item ? getPRReviewerRows(details.item) : []),
     [details]
   )
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -56,27 +46,21 @@ export function PRReviewersSection({ details, actions, client, worktreeId }: Pro
     return author ? [author, ...logins] : logins
   }, [authoritativeRows, details])
 
-  const addButton = (
-    <Pressable
-      style={styles.iconButton}
-      onPress={() => setPickerOpen(true)}
-      accessibilityRole="button"
-      accessibilityLabel="Add or remove reviewers"
-    >
-      <UserPlus size={16} color={colors.textSecondary} strokeWidth={2.2} />
-    </Pressable>
-  )
-
   return (
-    <PRSection title="Reviewers" trailing={addButton}>
-      {loadingDetails ? (
-        <View style={styles.reviewersStatus}>
-          <ActivityIndicator color={colors.textSecondary} />
-          <Text style={styles.emptyText}>Loading reviewers…</Text>
-        </View>
-      ) : detailsFailed ? (
-        <Text style={styles.emptyText}>Could not load reviewers. Tap refresh to try again.</Text>
-      ) : rows.length === 0 ? (
+    <PRSection
+      title="Reviewers"
+      trailing={
+        <Pressable
+          style={styles.iconButton}
+          onPress={() => setPickerOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Add or remove reviewers"
+        >
+          <UserPlus size={16} color={colors.textSecondary} strokeWidth={2.2} />
+        </Pressable>
+      }
+    >
+      {rows.length === 0 ? (
         <Text style={styles.emptyText}>No reviewers requested</Text>
       ) : (
         rows.map((row) => {

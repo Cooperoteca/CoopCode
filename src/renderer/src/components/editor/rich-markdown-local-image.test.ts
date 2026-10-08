@@ -3,7 +3,6 @@
 import { Editor } from '@tiptap/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRichMarkdownExtensions } from './rich-markdown-extensions'
-import { createRichMarkdownEditorCodec } from './rich-markdown-source-transport'
 import { resetLocalImageSrcStateForTests } from './useLocalImageSrc'
 import { setRichMarkdownImageResolverContext } from './rich-markdown-image-context'
 
@@ -41,7 +40,7 @@ describe('rich markdown local images', () => {
     document.body.appendChild(host)
     const editor = new Editor({
       element: host,
-      extensions: createRichMarkdownExtensions({ codec: createRichMarkdownEditorCodec() }),
+      extensions: createRichMarkdownExtensions(),
       content: '![](diagram.png)',
       contentType: 'markdown'
     })

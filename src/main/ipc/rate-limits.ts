@@ -1,20 +1,15 @@
 import { ipcMain } from 'electron'
 import type { RateLimitService } from '../rate-limits/service'
 import type { RateLimitRuntimeTarget } from '../../shared/rate-limit-types'
-import type { CodexAccountService } from '../codex-accounts/service'
 
-export function registerRateLimitHandlers(
-  rateLimits: RateLimitService,
-  codexAccounts: CodexAccountService
-): void {
+export function registerRateLimitHandlers(rateLimits: RateLimitService): void {
   ipcMain.handle('rateLimits:get', () => rateLimits.getState())
   ipcMain.handle('rateLimits:refresh', () => rateLimits.refresh())
   ipcMain.handle('rateLimits:refreshCodexForTarget', (_event, target: RateLimitRuntimeTarget) =>
     rateLimits.refreshCodexForTarget(target)
   )
-  // Why: managed desktop resets must share the mobile mutation queue and durable ledger.
   ipcMain.handle('rateLimits:consumeCodexResetCredit', () =>
-    codexAccounts.consumeCurrentRateLimitResetCredit()
+    rateLimits.consumeCodexRateLimitResetCredit()
   )
   ipcMain.handle('rateLimits:refreshClaudeForTarget', (_event, target: RateLimitRuntimeTarget) =>
     rateLimits.refreshClaudeForTarget(target)
@@ -29,5 +24,4 @@ export function registerRateLimitHandlers(
     rateLimits.fetchInactiveCodexAccountsOnOpen()
   )
   ipcMain.handle('rateLimits:refreshMiniMax', () => rateLimits.refresh())
-  ipcMain.handle('rateLimits:refreshGrok', () => rateLimits.refreshGrok())
 }

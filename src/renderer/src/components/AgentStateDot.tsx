@@ -1,7 +1,6 @@
 import React from 'react'
-import { CircleCheck, MessageCircleQuestion } from 'lucide-react'
+import { CircleCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { AgentWorkingSpinner } from '@/components/AgentWorkingSpinner'
 
 // Why: shared state-indicator primitive so the dashboard and the sidebar's
 // agent hover share a single state vocabulary. Most states render as a dot;
@@ -19,9 +18,6 @@ export type AgentDotState =
   | 'blocked'
   | 'waiting'
   | 'interrupted'
-  // Why: AI Vault subagent rows report a transcript-derived failure, which is
-  // an outcome (like 'done'), not a live attention state like 'blocked'.
-  | 'failed'
   | 'done'
   | 'idle'
   // Why: the sidebar's title-based status flow (StatusIndicator/WorktreeCard)
@@ -31,7 +27,6 @@ export type AgentDotState =
   // worktree-level permission dot.
   | 'permission'
 
-/** Return the accessible label shared by every visual agent-state marker. */
 export function agentStateLabel(state: AgentDotState): string {
   switch (state) {
     case 'working':
@@ -42,8 +37,6 @@ export function agentStateLabel(state: AgentDotState): string {
       return 'Waiting for input'
     case 'interrupted':
       return 'Interrupted'
-    case 'failed':
-      return 'Failed'
     case 'done':
       return 'Done'
     case 'idle':
@@ -59,7 +52,6 @@ type Props = {
   className?: string
 }
 
-/** Render the compact state glyph used by agent rows and terminal tabs. */
 export const AgentStateDot = React.memo(function AgentStateDot({
   state,
   size = 'sm',
@@ -75,7 +67,14 @@ export const AgentStateDot = React.memo(function AgentStateDot({
         className={cn('inline-flex shrink-0 items-center justify-center', box, className)}
         aria-label={agentStateLabel(state)}
       >
-        <AgentWorkingSpinner className={inner} />
+        <span
+          className={cn(
+            // Why: match the sidebar worktree spinner's stepped cadence so
+            // long-running visible agents do not keep a full-frame-rate loop.
+            'block rounded-full border-2 border-yellow-500 border-t-transparent [animation:spin_1s_steps(12,end)_infinite]',
+            inner
+          )}
+        />
       </span>
     )
   }
@@ -95,17 +94,6 @@ export const AgentStateDot = React.memo(function AgentStateDot({
     )
   }
 
-  if (state === 'permission' || state === 'waiting') {
-    return (
-      <span
-        className={cn('inline-flex shrink-0 items-center justify-center', box, className)}
-        aria-label={agentStateLabel(state)}
-      >
-        <MessageCircleQuestion className={cn('text-amber-500', icon)} aria-hidden="true" />
-      </span>
-    )
-  }
-
   return (
     <span
       className={cn('inline-flex shrink-0 items-center justify-center', box, className)}
@@ -115,9 +103,11 @@ export const AgentStateDot = React.memo(function AgentStateDot({
         className={cn(
           'block rounded-full',
           inner,
-          state === 'blocked' || state === 'interrupted' || state === 'failed'
-            ? 'bg-red-500'
-            : 'bg-neutral-500/40'
+          state === 'permission' || state === 'waiting'
+            ? 'bg-amber-500'
+            : state === 'blocked' || state === 'interrupted'
+              ? 'bg-red-500'
+              : 'bg-neutral-500/40'
         )}
       />
     </span>

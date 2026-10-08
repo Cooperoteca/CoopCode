@@ -99,16 +99,6 @@ export function getRemoteRuntimeSharedControlDiagnostics(
   return sharedControlConnections.get(environmentId)?.connection.getDiagnostics() ?? null
 }
 
-export function reconnectRemoteRuntimeSharedControlConnection(environmentId: string): void {
-  sharedControlConnections.get(environmentId)?.connection.reconnectNow()
-}
-
-export function retryRemoteRuntimeSharedControlConnectionsNow(): void {
-  for (const { connection } of sharedControlConnections.values()) {
-    connection.retryNow()
-  }
-}
-
 function getSharedControlConnection(
   environmentId: string,
   pairing: PairingOffer

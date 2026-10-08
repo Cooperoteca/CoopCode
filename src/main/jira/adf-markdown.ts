@@ -1,24 +1,8 @@
-import { escapeMarkdownLinkDestination } from './adf-media-destination'
-
 type JiraAdfRecord = Record<string, unknown>
 
 type MarkdownBlock = {
   kind: 'block' | 'list'
   text: string
-}
-
-export type JiraAdfMediaAttrs = {
-  id?: string
-  url?: string
-  alt?: string
-  type?: string
-}
-
-/** Returns markdown for a media node (usually `![alt](src)`), or null to fall back. */
-export type JiraAdfMediaResolver = (attrs: JiraAdfMediaAttrs) => string | null
-
-export type AdfToMarkdownOptions = {
-  resolveMedia?: JiraAdfMediaResolver
 }
 
 function asRecord(value: unknown): JiraAdfRecord {
@@ -57,72 +41,7 @@ function headingLevel(value: unknown): number {
   return Math.min(Math.max(positiveInteger(value, 1), 1), 6)
 }
 
-export function escapeMarkdownAlt(text: string): string {
-  return text.replace(/[[\]]/g, '')
-}
-
-function mediaAttrsFromRecord(record: JiraAdfRecord): JiraAdfMediaAttrs {
-  const attrs = asRecord(record.attrs)
-  return {
-    id: asString(attrs.id) || undefined,
-    url: asString(attrs.url) || undefined,
-    alt: asString(attrs.alt) || asString(attrs.name) || undefined,
-    type: asString(attrs.type) || undefined
-  }
-}
-
-export function unresolvedMediaPlaceholder(attrs: JiraAdfMediaAttrs): string {
-  const label = escapeMarkdownAlt(attrs.alt?.trim() || 'Image')
-  // Why: keep a visible marker when media cannot be downloaded so screenshots
-  // are not silently dropped from the issue body.
-  return `*[${label}]*`
-}
-
-/** Collect media attrs in document order (read-only; separate from adfToMarkdownText). */
-export function collectAdfMediaAttrs(value: unknown): JiraAdfMediaAttrs[] {
-  const collected: JiraAdfMediaAttrs[] = []
-
-  const walk = (node: unknown): void => {
-    if (!node || typeof node !== 'object') {
-      return
-    }
-    if (Array.isArray(node)) {
-      for (const child of node) {
-        walk(child)
-      }
-      return
-    }
-    const record = node as JiraAdfRecord
-    if (record.type === 'media' || record.type === 'mediaInline') {
-      collected.push(mediaAttrsFromRecord(record))
-    }
-    walk(record.content)
-  }
-
-  walk(value)
-  return collected
-}
-
-function renderMediaMarkdown(
-  record: JiraAdfRecord,
-  options: AdfToMarkdownOptions | undefined
-): string {
-  const attrs = mediaAttrsFromRecord(record)
-  const resolved = options?.resolveMedia?.(attrs)
-  if (resolved) {
-    return resolved
-  }
-  if (attrs.url && /^https?:\/\//i.test(attrs.url)) {
-    const safeUrl = escapeMarkdownLinkDestination(attrs.url)
-    if (!safeUrl) {
-      return unresolvedMediaPlaceholder(attrs)
-    }
-    return `![${escapeMarkdownAlt(attrs.alt?.trim() || 'Image')}](${safeUrl})`
-  }
-  return unresolvedMediaPlaceholder(attrs)
-}
-
-function renderInline(node: unknown, options?: AdfToMarkdownOptions): string {
+function renderInline(node: unknown): string {
   if (!node) {
     return ''
   }
@@ -130,7 +49,7 @@ function renderInline(node: unknown, options?: AdfToMarkdownOptions): string {
     return node
   }
   if (Array.isArray(node)) {
-    return node.map((child) => renderInline(child, options)).join('')
+    return node.map(renderInline).join('')
   }
   if (typeof node !== 'object') {
     return ''
@@ -143,11 +62,6 @@ function renderInline(node: unknown, options?: AdfToMarkdownOptions): string {
   if (record.type === 'hardBreak') {
     return '\n'
   }
-  // Why: Jira pastes screenshots as media/mediaInline ADF nodes; without this
-  // branch they collapse to empty strings and disappear from the UI.
-  if (record.type === 'media' || record.type === 'mediaInline') {
-    return renderMediaMarkdown(record, options)
-  }
 
   const attrs = asRecord(record.attrs)
   const fallbackText = asString(attrs.text) || asString(attrs.shortName) || asString(attrs.url)
@@ -155,7 +69,7 @@ function renderInline(node: unknown, options?: AdfToMarkdownOptions): string {
     return fallbackText
   }
 
-  return renderInline(record.content, options)
+  return renderInline(record.content)
 }
 
 function joinBlocks(blocks: MarkdownBlock[]): string {
@@ -165,14 +79,14 @@ function joinBlocks(blocks: MarkdownBlock[]): string {
     .join('\n\n')
 }
 
-function renderBlocks(content: unknown, options?: AdfToMarkdownOptions): MarkdownBlock[] {
+function renderBlocks(content: unknown): MarkdownBlock[] {
   return asArray(content)
-    .map((node) => renderBlock(node, options))
+    .map(renderBlock)
     .filter((block) => block.text.length > 0)
 }
 
-function renderListItem(node: unknown, prefix: string, options?: AdfToMarkdownOptions): string {
-  const blocks = renderBlocks(asRecord(node).content, options)
+function renderListItem(node: unknown, prefix: string): string {
+  const blocks = renderBlocks(asRecord(node).content)
   if (blocks.length === 0) {
     return prefix.trimEnd()
   }
@@ -200,24 +114,20 @@ function renderListItem(node: unknown, prefix: string, options?: AdfToMarkdownOp
   return lines.join('\n')
 }
 
-function renderList(
-  record: JiraAdfRecord,
-  ordered: boolean,
-  options?: AdfToMarkdownOptions
-): string {
+function renderList(record: JiraAdfRecord, ordered: boolean): string {
   const start = ordered ? positiveInteger(asRecord(record.attrs).order, 1) : 1
   return asArray(record.content)
-    .map((item, index) => renderListItem(item, ordered ? `${start + index}. ` : '- ', options))
+    .map((item, index) => renderListItem(item, ordered ? `${start + index}. ` : '- '))
     .join('\n')
 }
 
-function renderCodeBlock(record: JiraAdfRecord, options?: AdfToMarkdownOptions): MarkdownBlock {
-  const text = renderInline(record.content, options).replace(/\n$/, '')
+function renderCodeBlock(record: JiraAdfRecord): MarkdownBlock {
+  const text = renderInline(record.content).replace(/\n$/, '')
   return { kind: 'block', text: ['```', text, '```'].join('\n') }
 }
 
-function renderBlockquote(record: JiraAdfRecord, options?: AdfToMarkdownOptions): MarkdownBlock {
-  const text = joinBlocks(renderBlocks(record.content, options))
+function renderBlockquote(record: JiraAdfRecord): MarkdownBlock {
+  const text = joinBlocks(renderBlocks(record.content))
   return {
     kind: 'block',
     text: text
@@ -227,12 +137,12 @@ function renderBlockquote(record: JiraAdfRecord, options?: AdfToMarkdownOptions)
   }
 }
 
-function renderBlock(node: unknown, options?: AdfToMarkdownOptions): MarkdownBlock {
+function renderBlock(node: unknown): MarkdownBlock {
   if (typeof node === 'string') {
     return { kind: 'block', text: node }
   }
   if (Array.isArray(node)) {
-    return { kind: 'block', text: joinBlocks(renderBlocks(node, options)) }
+    return { kind: 'block', text: joinBlocks(renderBlocks(node)) }
   }
   if (!node || typeof node !== 'object') {
     return { kind: 'block', text: '' }
@@ -241,54 +151,41 @@ function renderBlock(node: unknown, options?: AdfToMarkdownOptions): MarkdownBlo
   const record = node as JiraAdfRecord
   const type = asString(record.type)
   if (type === 'doc') {
-    return { kind: 'block', text: joinBlocks(renderBlocks(record.content, options)) }
+    return { kind: 'block', text: joinBlocks(renderBlocks(record.content)) }
   }
   if (type === 'paragraph') {
-    return { kind: 'block', text: renderInline(record.content, options) }
+    return { kind: 'block', text: renderInline(record.content) }
   }
   if (type === 'heading') {
     const prefix = '#'.repeat(headingLevel(asRecord(record.attrs).level))
-    return {
-      kind: 'block',
-      text: `${prefix} ${renderInline(record.content, options).trim()}`.trim()
-    }
+    return { kind: 'block', text: `${prefix} ${renderInline(record.content).trim()}`.trim() }
   }
   if (type === 'bulletList') {
     // Why: Orca renders Jira bodies as Markdown, so ADF list containers need
     // concrete list markers instead of newline-only flattened text.
-    return { kind: 'list', text: renderList(record, false, options) }
+    return { kind: 'list', text: renderList(record, false) }
   }
   if (type === 'orderedList') {
-    return { kind: 'list', text: renderList(record, true, options) }
+    return { kind: 'list', text: renderList(record, true) }
   }
   if (type === 'listItem') {
-    return { kind: 'list', text: renderListItem(record, '- ', options) }
+    return { kind: 'list', text: renderListItem(record, '- ') }
   }
   if (type === 'codeBlock') {
-    return renderCodeBlock(record, options)
+    return renderCodeBlock(record)
   }
   if (type === 'blockquote') {
-    return renderBlockquote(record, options)
+    return renderBlockquote(record)
   }
   if (type === 'rule') {
     return { kind: 'block', text: '---' }
   }
-  if (type === 'mediaSingle' || type === 'mediaGroup') {
-    const mediaMarkdown = joinBlocks(renderBlocks(record.content, options))
-    return { kind: 'block', text: mediaMarkdown }
-  }
-  if (type === 'media' || type === 'mediaInline') {
-    return { kind: 'block', text: renderMediaMarkdown(record, options) }
-  }
 
-  return {
-    kind: 'block',
-    text: joinBlocks(renderBlocks(record.content, options)) || renderInline(record, options)
-  }
+  return { kind: 'block', text: joinBlocks(renderBlocks(record.content)) || renderInline(record) }
 }
 
-export function adfToMarkdownText(value: unknown, options?: AdfToMarkdownOptions): string {
-  return renderBlock(value, options)
+export function adfToMarkdownText(value: unknown): string {
+  return renderBlock(value)
     .text.replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()

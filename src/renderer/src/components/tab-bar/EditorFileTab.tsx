@@ -37,14 +37,10 @@ export default function EditorFileTab({
   isActive,
   isPinned,
   hasTabsToRight,
-  hasTabsToLeft,
-  tabCount,
   statusByRelativePath,
   onActivate,
   onClose,
-  onCloseOthers,
   onCloseToRight,
-  onCloseToLeft,
   onCloseAll,
   onMakePermanent,
   onTogglePin,
@@ -56,14 +52,10 @@ export default function EditorFileTab({
   isActive: boolean
   isPinned: boolean
   hasTabsToRight: boolean
-  hasTabsToLeft: boolean
-  tabCount: number
   statusByRelativePath: Map<string, GitFileStatus>
   onActivate: () => void
   onClose: () => void
-  onCloseOthers: () => void
   onCloseToRight: () => void
-  onCloseToLeft: () => void
   onCloseAll: () => void
   onMakePermanent?: () => void
   onTogglePin: () => void
@@ -88,11 +80,6 @@ export default function EditorFileTab({
   const isConflictReview = file.mode === 'conflict-review'
   const isCheckDetails = file.mode === 'check-details'
   const isMarkdownPreviewTab = file.mode === 'markdown-preview'
-  // Why: only deleted/renamed mean the file is gone from its path, which is
-  // what strikethrough conveys. 'changed' keeps a normal label — its surface
-  // is the changed-on-disk banner inside the editor.
-  const isMissingFileMutation =
-    file.externalMutation === 'deleted' || file.externalMutation === 'renamed'
   const resolvedLanguage =
     file.mode === 'diff'
       ? detectLanguage(file.relativePath)
@@ -117,10 +104,8 @@ export default function EditorFileTab({
   // user's intent. This flag suppresses the trailing blur-commit.
   const renameCancelledRef = useRef(false)
   // Only on-disk edit tabs are renameable. Diff, conflict-review, and
-  // combined/virtual views don't point at a single concrete file we can safely
-  // rename. Read-only tabs (AI Vault View Log) also stay unrenameable — rename
-  // would rewrite the agent-owned artifact's backing path.
-  const canRename = file.mode === 'edit' && !file.diffSource && !file.conflict && !file.readOnly
+  // combined/virtual views don't point at a single concrete file we can safely rename.
+  const canRename = file.mode === 'edit' && !file.diffSource && !file.conflict
 
   const openRenameInput = (): void => {
     if (!canRename) {
@@ -323,7 +308,7 @@ export default function EditorFileTab({
           />
         ) : (
           <span
-            className={`${TAB_LABEL_WIDTH_CLASSES}${file.isPreview ? ' italic' : ''}${isMissingFileMutation ? ' line-through' : ''}`}
+            className={`${TAB_LABEL_WIDTH_CLASSES}${file.isPreview ? ' italic' : ''}${file.externalMutation ? ' line-through' : ''}`}
             style={tabStatusColor ? { color: tabStatusColor } : undefined}
             onDoubleClick={(e) => {
               if (file.isPreview && onMakePermanent) {
@@ -344,12 +329,12 @@ export default function EditorFileTab({
             {tabLabel}
           </span>
         )}
-        {isMissingFileMutation && !isRenaming && (
+        {file.externalMutation && !isRenaming && (
           <span className="shrink-0 text-[10px] leading-none font-semibold tracking-wide text-muted-foreground">
             {file.externalMutation}
           </span>
         )}
-        {tabStatus && !isRenaming && !isMissingFileMutation && (
+        {tabStatus && !isRenaming && !file.externalMutation && (
           <span
             className="shrink-0 text-[10px] leading-none font-semibold tracking-wide"
             style={{ color: tabStatusColor }}
@@ -412,8 +397,6 @@ export default function EditorFileTab({
         isPinned={isPinned}
         isRenaming={isRenaming}
         hasTabsToRight={hasTabsToRight}
-        hasTabsToLeft={hasTabsToLeft}
-        tabCount={tabCount}
         canRename={canRename}
         canShowMarkdownPreview={canShowMarkdownPreview}
         resolvedLanguage={resolvedLanguage}
@@ -424,10 +407,8 @@ export default function EditorFileTab({
         onOpenRenameInput={openRenameInput}
         onTogglePin={onTogglePin}
         onClose={onClose}
-        onCloseOthers={onCloseOthers}
         onCloseAll={onCloseAll}
         onCloseToRight={onCloseToRight}
-        onCloseToLeft={onCloseToLeft}
         onOpenMarkdownPreview={openMarkdownPreview}
       />
     </>

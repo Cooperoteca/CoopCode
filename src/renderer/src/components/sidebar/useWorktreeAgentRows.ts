@@ -16,10 +16,6 @@ import {
   selectRetainedAgentEntriesForWorktree,
   selectTerminalLayoutsForWorktree
 } from './worktree-agent-row-selectors'
-import {
-  createWorktreeAgentFreshnessSelector,
-  EMPTY_WORKTREE_AGENT_FRESHNESS_SIGNATURE
-} from './worktree-agent-freshness-selector'
 
 export { buildWorktreeAgentRows } from './worktree-agent-rows'
 export {
@@ -40,10 +36,6 @@ export {
  * selector work on high-frequency agent status pings.
  */
 export function useWorktreeAgentRows(worktreeId: string, active = true): DashboardAgentRow[] {
-  const selectAgentFreshness = useMemo(
-    () => createWorktreeAgentFreshnessSelector(worktreeId),
-    [worktreeId]
-  )
   const tabs = useAppStore((s) => (active ? s.tabsByWorktree[worktreeId] : undefined))
   // Why: narrow the subscriptions to only THIS worktree's entries via
   // useShallow. Subscribing to the whole agentStatusByPaneKey map would make
@@ -74,16 +66,19 @@ export function useWorktreeAgentRows(worktreeId: string, active = true): Dashboa
   const runtimeAgentOrchestrationByPaneKey = useAppStore(
     useShallow((s) => (active ? selectRuntimeAgentOrchestrationForWorktree(s, worktreeId) : {}))
   )
-  const agentFreshnessSignature = useAppStore((s) =>
-    active ? selectAgentFreshness(s) : EMPTY_WORKTREE_AGENT_FRESHNESS_SIGNATURE
-  )
+  // Why: agentStatusEpoch is included in the dependency array (but not in the
+  // computation itself) so the memo recomputes when freshness boundaries
+  // expire, even if no new PTY data arrives — same rationale as
+  // useDashboardData.
+  const agentStatusEpoch = useAppStore((s) => (active ? s.agentStatusEpoch : 0))
 
   return useMemo<DashboardAgentRow[]>(() => {
     if (!active) {
       return []
     }
-    // Why: Date.now() is read inside the memo so stale-decay recalculates when
-    // this worktree's freshness signature changes, even without new PTY data.
+    // Why: Date.now() is read inside the memo (not as a dep) so stale-decay
+    // recalculates whenever agentStatusEpoch ticks — same pattern as
+    // useDashboardData.
     const now = Date.now()
     const entries =
       migrationUnsupported.length > 0
@@ -118,6 +113,6 @@ export function useWorktreeAgentRows(worktreeId: string, active = true): Dashboa
     ptyIdsByTabId,
     terminalLayoutsByTabId,
     runtimeAgentOrchestrationByPaneKey,
-    agentFreshnessSignature
+    agentStatusEpoch
   ])
 }

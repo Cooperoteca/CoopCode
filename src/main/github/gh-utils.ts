@@ -1,38 +1,34 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { gitExecFileAsync, ghExecFileAsync } from '../git/runner'
-// Pure error-parsing helpers come from the lightweight module (not `runner`) so
-// tests that mock `../git/runner` still resolve the real implementations.
-import { extractExecError, parseRetryAfterMs } from '../git/exec-error'
+import { gitExecFileAsync, ghExecFileAsync, extractExecError } from '../git/runner'
 
 // Why: legacy generic execFile wrapper - only used by callers that don't need
 // WSL-aware routing. Repo-scoped callers should use the runner exports below.
 export const execFileAsync = promisify(execFile)
-export { ghExecFileAsync, gitExecFileAsync, extractExecError, parseRetryAfterMs }
+export { ghExecFileAsync, gitExecFileAsync, extractExecError }
 export { classifyGhError, classifyListIssuesError } from './gh-error-classification'
 export {
   _getOwnerRepoCacheSize,
   _resetOwnerRepoCache,
+  getIssueOwnerRepo,
+  getOwnerRepo,
   getOwnerRepoForRemote,
   getRemoteUrlForRepo,
   ghRepoExecOptions,
   githubRepoContext,
   parseGitHubOwnerRepo,
-  parseGitHubRemoteIdentity
+  parseGitHubRemoteIdentity,
+  resolveIssueSource,
+  resolvePRRepositoryCandidates
 } from './github-repository-identity'
 export type {
   GitHubRemoteIdentity,
   GitHubRepoContext,
   LocalGitExecOptions,
-  OwnerRepo
+  OwnerRepo,
+  PRRepositoryCandidates,
+  ResolvedIssueSource
 } from './github-repository-identity'
-export {
-  getIssueOwnerRepo,
-  getOwnerRepo,
-  resolveIssueSource,
-  resolvePRRepositoryCandidates
-} from './github-owner-repo-selection'
-export type { PRRepositoryCandidates, ResolvedIssueSource } from './github-owner-repo-selection'
 
 const MAX_CONCURRENT = 4
 let running = 0

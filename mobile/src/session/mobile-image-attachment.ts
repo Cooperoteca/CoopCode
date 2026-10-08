@@ -4,7 +4,6 @@ import {
   saveMobileClipboardImageAsTempFile
 } from './mobile-clipboard-image'
 import type { MobileImageSource, PickedMobileImage } from './mobile-image-source-picker'
-import { isTerminalSendRpcAccepted } from '../terminal/terminal-send-rpc-response'
 
 export type AttachMobileImageDeps = {
   readonly client: Pick<RpcClient, 'sendRequest'>
@@ -51,11 +50,11 @@ export async function attachMobileImageToTerminal(
   if (beforeTerminalSend && !(await beforeTerminalSend(terminal))) {
     return false
   }
-  const response = await client.sendRequest('terminal.send', {
+  await client.sendRequest('terminal.send', {
     terminal,
     text: payload,
     enter: false,
     ...(deviceToken ? { client: { id: deviceToken, type: 'mobile' as const } } : {})
   })
-  return isTerminalSendRpcAccepted(response)
+  return true
 }

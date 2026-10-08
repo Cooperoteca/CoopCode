@@ -19,11 +19,7 @@ const IMAGE_ATTACHMENT_AGENTS: ReadonlySet<AgentType> = new Set<AgentType>([
   'gemini',
   'cursor',
   'copilot',
-  'droid',
-  // Why: Grok CLI pastes images via bracketed path / image chips (see xAI
-  // terminal docs + pager paste.rs). Keep it on the same attachment path as
-  // Claude/Codex rather than treating path paste as unsupported text.
-  'grok'
+  'droid'
 ])
 
 export function getAgentImageHandling(agent: AgentType): AgentImageHandling {
@@ -54,6 +50,6 @@ export function isNativeChatImageAttachmentPath(path: string): boolean {
  *  Those names are noise in the UI, so the composer shows a friendly label
  *  instead of the basename. */
 export function isNativeChatPastedImagePath(path: string): boolean {
-  const base = path.split(/[\\/]/).findLast(Boolean) ?? path
+  const base = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
   return /^orca-paste-.+\.png$/i.test(base)
 }

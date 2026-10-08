@@ -7,7 +7,6 @@ import { buildRelayCommandEnv } from './relay-command-env'
 import { isPwshAvailable } from '../main/pwsh'
 import { isWslAvailable, listWslDistros } from '../main/wsl'
 import { isGitBashAvailable } from '../main/git-bash'
-import { buildPosixCommandPathLookupScript } from '../shared/posix-command-path-lookup'
 
 const execFileAsync = promisify(execFile)
 
@@ -21,15 +20,6 @@ type RelayCommandLookupOptions = {
   platform?: NodeJS.Platform
   env?: NodeJS.ProcessEnv
   accountLoginShell?: string | null
-}
-
-type AgentDetectionRuntime = NodeJS.Platform | 'wsl'
-
-type AgentDetectionCommand = {
-  id: string
-  cmd: string
-  requiredCommands?: readonly string[]
-  unsupportedRuntimes?: readonly AgentDetectionRuntime[]
 }
 
 const SUPPORTED_POSIX_SHELLS = new Set(['sh', 'dash', 'bash', 'zsh', 'fish'])
@@ -55,42 +45,19 @@ export class PreflightHandler {
   // on the relay side. This keeps the relay bundle minimal and makes the protocol
   // self-describing — the relay doesn't need to know the agent catalog.
   private async detectAgents(params: Record<string, unknown>): Promise<{ agents: string[] }> {
-    const commands = params.commands as AgentDetectionCommand[]
+    const commands = params.commands as { id: string; cmd: string }[]
     if (!Array.isArray(commands)) {
       return { agents: [] }
     }
-    const probeCommands = [
-      ...new Set(
-        commands
-          .filter((command) => !isDetectionUnsupportedInRuntime(command, process.platform))
-          .flatMap((command) => [command.cmd, ...(command.requiredCommands ?? [])])
-      )
-    ]
 
     const results = await Promise.all(
-      probeCommands.map(async (cmd) => ({
-        cmd,
+      commands.map(async ({ id, cmd }) => ({
+        id,
         installed: await this.isCommandOnPath(cmd)
       }))
     )
-    const foundCommands = new Set(
-      results.filter((result) => result.installed).map(({ cmd }) => cmd)
-    )
 
-    return {
-      agents: [
-        ...new Set(
-          commands
-            .filter(
-              (command) =>
-                !isDetectionUnsupportedInRuntime(command, process.platform) &&
-                foundCommands.has(command.cmd) &&
-                (command.requiredCommands ?? []).every((required) => foundCommands.has(required))
-            )
-            .map(({ id }) => id)
-        )
-      ]
-    }
+    return { agents: [...new Set(results.filter((r) => r.installed).map((r) => r.id))] }
   }
 
   private async detectWindowsTerminalCapabilities(): Promise<{
@@ -122,13 +89,6 @@ export class PreflightHandler {
   private async isCommandOnPath(command: string): Promise<boolean> {
     return isCommandOnPathForRelay(command)
   }
-}
-
-function isDetectionUnsupportedInRuntime(
-  command: AgentDetectionCommand,
-  runtime: AgentDetectionRuntime
-): boolean {
-  return command.unsupportedRuntimes?.includes(runtime) === true
 }
 
 export function buildCommandLookupSpec(
@@ -220,10 +180,9 @@ function buildPosixCommandLookupSpec(command: string, shell: string): CommandLoo
 }
 
 function buildShCommandLookupScript(command: string): string {
-  // Why: login shells may define aliases or functions that mask the PATH executable.
+  const quotedCommand = shellQuote(command)
   return [
-    buildPosixCommandPathLookupScript({ kind: 'literal', value: command }),
-    'if [ -n "$resolved" ]; then',
+    `if resolved=$(command -v ${quotedCommand} 2>/dev/null); then`,
     `printf '${AGENT_PATH_PREFIX}%s\\n' "$resolved"`,
     'fi'
   ].join('\n')

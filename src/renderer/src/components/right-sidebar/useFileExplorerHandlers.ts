@@ -1,17 +1,11 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback } from 'react'
 import type React from 'react'
 import type { RefObject } from 'react'
 import { detectLanguage } from '@/lib/language-detect'
 import { toast } from 'sonner'
 import type { TreeNode } from './file-explorer-types'
 import { FILE_EXPLORER_DRAGGABLE_SELECTOR } from './file-explorer-drag-scroll-marker'
-import { DIR_TOGGLE_DOUBLE_CLICK_MS } from './file-explorer-dir-toggle-timing'
-import type { DirToggleTiming } from './file-explorer-dir-toggle-timing'
 import { translate } from '@/i18n/i18n'
-import {
-  getFileExplorerOwnerUnresolvedMessage,
-  requireMatchingFileExplorerOperationRoute
-} from './file-explorer-operation-owner'
 
 type UseFileExplorerHandlersParams = {
   activeWorktreeId: string | null
@@ -25,11 +19,7 @@ type UseFileExplorerHandlersParams = {
       mode: 'edit'
       runtimeEnvironmentId?: string | null
     },
-    options?: {
-      preview?: boolean
-      suppressActiveRuntimeFallback?: boolean
-      focusEditor?: boolean
-    }
+    options?: { preview?: boolean; suppressActiveRuntimeFallback?: boolean }
   ) => void
   makePreviewFilePermanent: (filePath: string) => void
   toggleDir: (worktreeId: string, dirPath: string) => void
@@ -46,10 +36,9 @@ type UseFileExplorerHandlersParams = {
 }
 
 type UseFileExplorerHandlersReturn = {
-  handleClick: (node: TreeNode, dirToggle?: DirToggleTiming) => void
+  handleClick: (node: TreeNode) => void
   handleDoubleClick: (node: TreeNode) => void
   handleWheelCapture: (e: React.WheelEvent<HTMLDivElement>) => void
-  cancelPendingDirToggle: () => void
 }
 
 type OpenFileParams = Parameters<UseFileExplorerHandlersParams['openFile']>[0]
@@ -70,6 +59,7 @@ export async function activateFileExplorerNode(args: {
   const {
     node,
     activeWorktreeId,
+    runtimeEnvironmentId,
     openFile,
     toggleDir,
     canToggleDirectories = true,
@@ -125,31 +115,20 @@ export async function activateFileExplorerNode(args: {
       return
     }
   }
-  let fileRuntimeEnvironmentId: string | null
-  try {
-    const route = requireMatchingFileExplorerOperationRoute(activeWorktreeId, node.operationOwner)
-    fileRuntimeEnvironmentId = route.settings.activeRuntimeEnvironmentId?.trim() || null
-  } catch {
-    toast.error(getFileExplorerOwnerUnresolvedMessage())
-    return
-  }
   openFile(
     {
       filePath: node.path,
       relativePath: node.relativePath,
       worktreeId: activeWorktreeId,
-      runtimeEnvironmentId: fileRuntimeEnvironmentId ?? undefined,
+      runtimeEnvironmentId: runtimeEnvironmentId ?? undefined,
       language: detectLanguage(node.name),
       mode: 'edit'
     },
     {
       preview: true,
-      // Why: activating an Explorer file is a focus handoff even if the rich
-      // editor finishes mounting after the row receives browser focus.
-      focusEditor: true,
       // Why: explicit local opens must not inherit the active runtime, so we
       // encode "no runtime owner" via the fallback-suppression option.
-      suppressActiveRuntimeFallback: fileRuntimeEnvironmentId === null
+      suppressActiveRuntimeFallback: runtimeEnvironmentId === null
     }
   )
 }
@@ -167,64 +146,14 @@ export function useFileExplorerHandlers({
   setSelectedPath,
   scrollRef
 }: UseFileExplorerHandlersParams): UseFileExplorerHandlersReturn {
-  const pendingDirToggle = useRef<{
-    timer: ReturnType<typeof setTimeout>
-    dirPath: string
-    run: () => void
-  } | null>(null)
-
-  const cancelPendingDirToggle = useCallback((): void => {
-    if (pendingDirToggle.current === null) {
-      return
-    }
-    clearTimeout(pendingDirToggle.current.timer)
-    pendingDirToggle.current = null
-  }, [])
-
-  // Why: only the row that armed the deferral can retract it (its own second
-  // click becomes a rename). Any other gesture leaves that click's intent
-  // standing, so run it now instead of dropping the folder the user opened.
-  const settlePendingDirToggle = useCallback((retractingDirPath: string | null): void => {
-    const pending = pendingDirToggle.current
-    if (pending === null) {
-      return
-    }
-    clearTimeout(pending.timer)
-    pendingDirToggle.current = null
-    if (pending.dirPath !== retractingDirPath) {
-      pending.run()
-    }
-  }, [])
-
-  useEffect(() => cancelPendingDirToggle, [cancelPendingDirToggle])
-
   const handleClick = useCallback(
-    (node: TreeNode, dirToggle: DirToggleTiming = 'immediate') => {
-      settlePendingDirToggle(node.path)
-      if (dirToggle === 'skip' && node.isDirectory) {
-        // Why: the rename about to start owns this gesture; selection still applies.
-        setSelectedPath(node.path)
-        return
-      }
+    (node: TreeNode) => {
       void activateFileExplorerNode({
         node,
         activeWorktreeId,
         runtimeEnvironmentId,
         openFile,
-        toggleDir:
-          dirToggle === 'deferred'
-            ? (worktreeId, dirPath) => {
-                const run = (): void => toggleDir(worktreeId, dirPath)
-                pendingDirToggle.current = {
-                  dirPath,
-                  run,
-                  timer: setTimeout(() => {
-                    pendingDirToggle.current = null
-                    run()
-                  }, DIR_TOGGLE_DOUBLE_CLICK_MS)
-                }
-              }
-            : toggleDir,
+        toggleDir,
         canToggleDirectories,
         loadDir,
         statPath,
@@ -236,7 +165,6 @@ export function useFileExplorerHandlers({
       activeWorktreeId,
       runtimeEnvironmentId,
       canToggleDirectories,
-      settlePendingDirToggle,
       loadDir,
       markPathAsDirectory,
       openFile,
@@ -275,5 +203,5 @@ export function useFileExplorerHandlers({
     [scrollRef]
   )
 
-  return { handleClick, handleDoubleClick, handleWheelCapture, cancelPendingDirToggle }
+  return { handleClick, handleDoubleClick, handleWheelCapture }
 }

@@ -56,7 +56,8 @@ export function TerminalPane({
   const isWindows = isWindowsUserAgent()
   const showWindowsHostSettings = isWindowsTerminalHost ?? isWindows
   const isMac = isMacUserAgent()
-  const windowsShell = settings.terminalWindowsShell ?? 'powershell.exe'
+  const rawWindowsShell = settings.terminalWindowsShell ?? 'powershell.exe'
+  const windowsShell = rawWindowsShell === 'wsl.exe' ? 'powershell.exe' : rawWindowsShell
   const showWindowsPowerShellImplementation =
     showWindowsHostSettings && windowsShell === 'powershell.exe'
 
@@ -78,12 +79,13 @@ export function TerminalPane({
       />
     ) : null,
     matchesSettingsSearch(searchQuery, getTerminalPaneInteractionSearchEntries()) ||
-    matchesSettingsSearch(searchQuery, getTerminalRightClickToPasteSearchEntry()) ? (
+    (isWindows && matchesSettingsSearch(searchQuery, getTerminalRightClickToPasteSearchEntry())) ? (
       <TerminalInteractionSection
         key="pane-interaction"
         settings={settings}
         updateSettings={updateSettings}
         searchQuery={searchQuery}
+        isWindows={isWindows}
       />
     ) : null,
     matchesSettingsSearch(searchQuery, getTerminalSetupScriptSearchEntries()) ? (

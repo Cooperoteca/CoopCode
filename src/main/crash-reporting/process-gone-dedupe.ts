@@ -6,19 +6,10 @@ type ProcessGoneDedupeOptions = {
   maxKeys?: number
 }
 
-export type ProcessGoneDedupeClaim = {
-  readonly key: string
-}
-
-type ProcessGoneDedupeEntry = {
-  readonly recordedAt: number
-  readonly claim: ProcessGoneDedupeClaim
-}
-
 export class ProcessGoneDedupe {
   private readonly windowMs: number
   private readonly maxKeys: number
-  private readonly recentKeys = new Map<string, ProcessGoneDedupeEntry>()
+  private readonly recentKeys = new Map<string, number>()
 
   constructor(options: ProcessGoneDedupeOptions = {}) {
     this.windowMs = options.windowMs ?? DEFAULT_PROCESS_GONE_DEDUPE_WINDOW_MS
@@ -26,33 +17,19 @@ export class ProcessGoneDedupe {
   }
 
   shouldRecord(key: string, now = Date.now()): boolean {
-    return this.tryClaim(key, now) !== null
-  }
-
-  tryClaim(key: string, now = Date.now()): ProcessGoneDedupeClaim | null {
     this.prune(now)
 
     const previous = this.recentKeys.get(key)
-    if (previous && now - previous.recordedAt < this.windowMs) {
-      return null
+    if (previous !== undefined && now - previous < this.windowMs) {
+      return false
     }
 
-    const claim = { key }
     // Why: process-gone tuples come from Electron and can vary by exit code;
     // keep the short dedupe window without retaining stale tuples forever.
     this.recentKeys.delete(key)
-    this.recentKeys.set(key, { recordedAt: now, claim })
+    this.recentKeys.set(key, now)
     this.prune(now)
-    return claim
-  }
-
-  release(claim: ProcessGoneDedupeClaim): void {
-    const current = this.recentKeys.get(claim.key)
-    // Why: an old failed write must not erase a newer claim for the same
-    // renderer after the dedupe window expires or bounded entries are evicted.
-    if (current?.claim === claim) {
-      this.recentKeys.delete(claim.key)
-    }
+    return true
   }
 
   get size(): number {
@@ -60,8 +37,8 @@ export class ProcessGoneDedupe {
   }
 
   private prune(now: number): void {
-    for (const [key, entry] of this.recentKeys) {
-      if (now - entry.recordedAt >= this.windowMs) {
+    for (const [key, recordedAt] of this.recentKeys) {
+      if (now - recordedAt >= this.windowMs) {
         this.recentKeys.delete(key)
       }
     }

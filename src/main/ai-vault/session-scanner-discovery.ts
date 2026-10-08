@@ -11,12 +11,10 @@ export async function discoverFiles(args: {
   issues: AiVaultScanIssue[]
   extensions: string[]
   filePredicate?: (path: string) => boolean
-  directoryPredicate?: (name: string, depth: number) => boolean
 }): Promise<SessionFileDiscovery> {
   const paths = await walkSessionFiles(args.rootDir, args.agent, args.issues, {
     extensions: new Set(args.extensions),
-    filePredicate: args.filePredicate,
-    directoryPredicate: args.directoryPredicate
+    filePredicate: args.filePredicate
   })
   const files: FileWithMtime[] = []
   for (const path of paths) {
@@ -25,11 +23,7 @@ export async function discoverFiles(args: {
       files.push({
         path,
         mtimeMs: fileStat.mtimeMs,
-        modifiedAt: fileStat.mtime.toISOString(),
-        sizeBytes: fileStat.size,
-        dev: fileStat.dev,
-        ino: fileStat.ino,
-        nlink: fileStat.nlink
+        modifiedAt: fileStat.mtime.toISOString()
       })
     } catch (err) {
       args.issues.push({ agent: args.agent, path, message: errorMessage(err) })
@@ -73,11 +67,7 @@ export async function walkSessionFiles(
   options: {
     extensions: Set<string>
     filePredicate?: (path: string) => boolean
-    // Return false to skip descending into a directory; depth 0 is a child of
-    // rootDir, so pruned subtrees are never stat'd or parsed.
-    directoryPredicate?: (name: string, depth: number) => boolean
-  },
-  depth = 0
+  }
 ): Promise<string[]> {
   let entries
   try {
@@ -90,11 +80,7 @@ export async function walkSessionFiles(
   for (const entry of entries) {
     const fullPath = join(dirPath, entry.name)
     if (entry.isDirectory()) {
-      // Skip whole subtrees an agent never wants (e.g. subagent transcripts),
-      // avoiding the readdir cost of descending into them.
-      if (options.directoryPredicate?.(entry.name, depth) ?? true) {
-        files.push(...(await walkSessionFiles(fullPath, agent, issues, options, depth + 1)))
-      }
+      files.push(...(await walkSessionFiles(fullPath, agent, issues, options)))
       continue
     }
     if (

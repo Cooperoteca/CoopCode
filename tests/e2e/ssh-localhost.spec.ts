@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Localhost SSH E2E covers setup, remote PTY, hook relay, and interrupt inference in one expensive app boot. */
 import os from 'node:os'
 
 import type { Page } from '@stablyai/playwright-test'
@@ -170,7 +171,7 @@ test.describe('Localhost SSH', () => {
         })
 
         try {
-          const { target: createdTarget, repoReadoptions } = await window.api.ssh.addTarget({
+          const createdTarget = await window.api.ssh.addTarget({
             target: {
               ...target,
               // Why: local-only E2E should not leave a long-lived relay process
@@ -178,7 +179,6 @@ test.describe('Localhost SSH', () => {
               relayGracePeriodSeconds: 1
             }
           })
-          store.getState().recordSshRepoReadoptions(repoReadoptions)
 
           let state
           try {

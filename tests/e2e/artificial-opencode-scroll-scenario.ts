@@ -12,8 +12,7 @@ import {
   getResponsiveScrollPath,
   type ScrollAttemptMeasurement
 } from './artificial-opencode-scroll-measurement'
-import { runNodeScriptInTerminal } from './helpers/run-node-script-in-terminal'
-import { waitForTerminalOutput } from './helpers/terminal'
+import { sendToTerminal, waitForTerminalOutput } from './helpers/terminal'
 
 export { getResponsiveScrollPath }
 
@@ -51,16 +50,8 @@ export async function seedActiveTerminalScrollback(
     `for (let i = 0; i < 420; i++) console.log('OPENCODE_SCROLL_${runId}_' + i)`,
     `console.log('${marker}')`
   ].join(';')
-  // Why: delivered via a temp file — `node -e` quoting is not PowerShell-safe (#8521).
-  const staged = await runNodeScriptInTerminal(page, ptyId, script, {
-    prefix: 'orca-opencode-scroll-seed'
-  })
-  try {
-    await waitForTerminalOutput(page, marker, 10_000)
-  } finally {
-    // Why: the ready marker proves node already loaded the script.
-    staged.cleanup()
-  }
+  await sendToTerminal(page, ptyId, `node -e ${JSON.stringify(script)}\r`)
+  await waitForTerminalOutput(page, marker, 10_000)
   await scrollActiveTerminalToBottom(page)
 }
 
@@ -110,29 +101,17 @@ export async function measureActiveTerminalWheelScroll(page: Page): Promise<Scro
   }
 
   const eventLoop = await page.evaluateHandle((sampleMs) => {
-    // Why: on shared two-worker CI shards a single OS-scheduler starvation can
-    // spike one tick's drift without any real event-loop regression. Report the
-    // second-worst drift so a lone spike is tolerated, while sustained blocking
-    // (two or more over-budget ticks — the actual regression) still trips the
-    // gate. A plain Math.max makes this a CPU lottery on loaded runners.
-    let worstDriftMs = 0
-    let secondWorstDriftMs = 0
+    let maxTimerDriftMs = 0
     let lastTick = performance.now()
     const timer = window.setInterval(() => {
       const now = performance.now()
-      const driftMs = now - lastTick - sampleMs
-      if (driftMs > worstDriftMs) {
-        secondWorstDriftMs = worstDriftMs
-        worstDriftMs = driftMs
-      } else if (driftMs > secondWorstDriftMs) {
-        secondWorstDriftMs = driftMs
-      }
+      maxTimerDriftMs = Math.max(maxTimerDriftMs, now - lastTick - sampleMs)
       lastTick = now
     }, sampleMs)
     return {
       stop: () => {
         window.clearInterval(timer)
-        return secondWorstDriftMs
+        return maxTimerDriftMs
       }
     }
   }, TIMER_SAMPLE_MS)

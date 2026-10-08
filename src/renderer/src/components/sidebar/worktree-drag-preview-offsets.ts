@@ -58,28 +58,20 @@ function getPreviewLayoutDraggedIds(
   return firstVisibleDraggedId ? [firstVisibleDraggedId] : draggedIds.slice(0, 1)
 }
 
-export type WorktreeDragPreviewLayout = {
-  offsets: Map<string, number>
-  // Top of the slot the dragged card lands in, in the same coordinate space as
-  // `rects`. Null when the drop is a no-op. The drop indicator draws here so the
-  // line marks the gap the offsets actually open.
-  placeholderTop: number | null
-}
-
 export function buildWorktreeDragPreviewOffsets(args: {
   groupIds: readonly string[]
   draggedIds: readonly string[]
   draggingWorktreeId?: string | null
   dropIndex: number
   rects: readonly WorktreeDragPreviewRect[]
-}): WorktreeDragPreviewLayout {
+}): Map<string, number> {
   const committedNextIds = moveWorktreeIdsWithinGroup(
     args.groupIds,
     args.draggedIds,
     args.dropIndex
   )
   if (arraysEqual(committedNextIds, args.groupIds)) {
-    return { offsets: new Map(), placeholderTop: null }
+    return new Map()
   }
 
   // Why: dragging a large multi-select batch should advertise the insertion
@@ -91,7 +83,7 @@ export function buildWorktreeDragPreviewOffsets(args: {
   )
   const nextIds = moveWorktreeIdsWithinGroup(args.groupIds, layoutDraggedIds, args.dropIndex)
   if (arraysEqual(nextIds, args.groupIds)) {
-    return { offsets: new Map(), placeholderTop: null }
+    return new Map()
   }
 
   const draggedSet = new Set(layoutDraggedIds)
@@ -150,8 +142,5 @@ export function buildWorktreeDragPreviewOffsets(args: {
       offsets.set(rect.worktreeId, offset)
     }
   }
-  return {
-    offsets,
-    placeholderTop: targetTopById.get(layoutDraggedIds[0] ?? '') ?? null
-  }
+  return offsets
 }

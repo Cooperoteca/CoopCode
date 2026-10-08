@@ -174,12 +174,7 @@ async function sendPromptWithGuardedPasteAndEnter(
   const initialAgentStatus = await getTerminalAgentSendReadiness(runtimeTarget, terminalHandle, {
     allowLegacyFallback: options.allowLegacyFallback
   })
-  // Why: the readiness probe and write guard can observe different transient
-  // title/process snapshots; the guard owns the bounded no-agent recheck.
-  if (
-    initialAgentStatus.status !== 'sendable' &&
-    !(initialAgentStatus.status === 'no-agent' && initialAgentStatus.supportsGuardedSend)
-  ) {
+  if (initialAgentStatus.status !== 'sendable') {
     return { status: initialAgentStatus.status }
   }
 
@@ -221,10 +216,7 @@ async function sendPromptWithGuardedPasteAndEnter(
     const submitAgentStatus = await getTerminalAgentSendReadiness(runtimeTarget, terminalHandle, {
       allowLegacyFallback: options.allowLegacyFallback
     })
-    if (
-      submitAgentStatus.status !== 'sendable' &&
-      !(submitAgentStatus.status === 'no-agent' && submitAgentStatus.supportsGuardedSend)
-    ) {
+    if (submitAgentStatus.status !== 'sendable') {
       return { status: 'partial-submit-failed' }
     }
   } catch (error) {

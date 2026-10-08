@@ -4,7 +4,6 @@ import {
   refreshBranchCleanupTargetRefs,
   type GitBranchCleanupExec
 } from './git-branch-cleanup'
-import { GitCapabilityCache } from './git-capability-cache'
 
 function baseProofResponses(
   responses: Partial<Record<string, string | Error>> = {}
@@ -95,12 +94,7 @@ describe('branchHasNoUnmergedChangesOnAnyTarget', () => {
     const runGit = baseProofResponses()
 
     await expect(
-      branchHasNoUnmergedChangesOnAnyTarget(
-        runGit,
-        'feature/test',
-        ['refs/remotes/origin/main'],
-        new GitCapabilityCache()
-      )
+      branchHasNoUnmergedChangesOnAnyTarget(runGit, 'feature/test', ['refs/remotes/origin/main'])
     ).resolves.toBe(true)
 
     expect(runGit).toHaveBeenCalledWith(['patch-id', '--stable'], { stdin: 'branch-diff' })
@@ -112,12 +106,7 @@ describe('branchHasNoUnmergedChangesOnAnyTarget', () => {
     const runGit = baseProofResponses({ squashPatchId: 'other-patch squash\n' })
 
     await expect(
-      branchHasNoUnmergedChangesOnAnyTarget(
-        runGit,
-        'feature/test',
-        ['refs/remotes/origin/main'],
-        new GitCapabilityCache()
-      )
+      branchHasNoUnmergedChangesOnAnyTarget(runGit, 'feature/test', ['refs/remotes/origin/main'])
     ).resolves.toBe(false)
   })
 
@@ -127,12 +116,7 @@ describe('branchHasNoUnmergedChangesOnAnyTarget', () => {
     })
 
     await expect(
-      branchHasNoUnmergedChangesOnAnyTarget(
-        runGit,
-        'feature/test',
-        ['refs/remotes/origin/main'],
-        new GitCapabilityCache()
-      )
+      branchHasNoUnmergedChangesOnAnyTarget(runGit, 'feature/test', ['refs/remotes/origin/main'])
     ).resolves.toBe(false)
   })
 
@@ -143,12 +127,7 @@ describe('branchHasNoUnmergedChangesOnAnyTarget', () => {
     })
 
     await expect(
-      branchHasNoUnmergedChangesOnAnyTarget(
-        runGit,
-        'feature/test',
-        ['refs/remotes/origin/main'],
-        new GitCapabilityCache()
-      )
+      branchHasNoUnmergedChangesOnAnyTarget(runGit, 'feature/test', ['refs/remotes/origin/main'])
     ).resolves.toBe(false)
 
     expect(runGit).not.toHaveBeenCalledWith(['show', '--format=', 'commit-0'])
@@ -158,40 +137,7 @@ describe('branchHasNoUnmergedChangesOnAnyTarget', () => {
     const runGit = baseProofResponses({ branchPatchId: new Error('patch-id failed') })
 
     await expect(
-      branchHasNoUnmergedChangesOnAnyTarget(
-        runGit,
-        'feature/test',
-        ['refs/remotes/origin/main'],
-        new GitCapabilityCache()
-      )
+      branchHasNoUnmergedChangesOnAnyTarget(runGit, 'feature/test', ['refs/remotes/origin/main'])
     ).resolves.toBe(false)
-  })
-
-  it('does not repeat a rejected merge-tree --write-tree proof on old Git', async () => {
-    const unsupported = Object.assign(new Error('unknown option'), {
-      stderr: 'fatal: unknown rev --write-tree'
-    })
-    const runGit = baseProofResponses({
-      'merge-tree --write-tree target refs/heads/feature/test': unsupported,
-      'rev-list --right-only --merges --count target...refs/heads/feature/test': '0\n',
-      'cherry -v target refs/heads/feature/test': '+ branch-only commit\n'
-    })
-    const capabilities = new GitCapabilityCache()
-
-    await branchHasNoUnmergedChangesOnAnyTarget(
-      runGit,
-      'feature/test',
-      ['refs/remotes/origin/main'],
-      capabilities
-    )
-    await branchHasNoUnmergedChangesOnAnyTarget(
-      runGit,
-      'feature/test',
-      ['refs/remotes/origin/main'],
-      capabilities
-    )
-
-    const mergeTreeCalls = vi.mocked(runGit).mock.calls.filter(([args]) => args[0] === 'merge-tree')
-    expect(mergeTreeCalls).toHaveLength(1)
   })
 })

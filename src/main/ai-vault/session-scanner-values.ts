@@ -1,9 +1,6 @@
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { asRecord } from './session-scanner-record-value'
-
-export { asRecord }
 
 export function timestampMs(value: unknown): number {
   if (typeof value === 'string') {
@@ -26,6 +23,12 @@ export function parseJsonObject(line: string): Record<string, unknown> | null {
   } catch {
     return null
   }
+}
+
+export function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 export function extractString(value: unknown): string | null {
@@ -123,15 +126,10 @@ export function findOpenCodeStorageRoot(filePath: string): string | null {
   return dirname(sessionRoot)
 }
 
-// Pi and OMP (a Pi fork) both store transcripts under
-// <home>/<agentHomeDirName>/agent/sessions; accept any prefix of that path.
-export function normalizeAgentSessionsDir(
-  rawValue: string,
-  agentHomeDirName: '.pi' | '.omp'
-): string {
+export function normalizePiSessionsDir(rawValue: string): string {
   const trimmed = rawValue.trim()
   if (!trimmed) {
-    return join(homedir(), agentHomeDirName, 'agent', 'sessions')
+    return join(homedir(), '.pi', 'agent', 'sessions')
   }
   const normalized = trimmed.replace(/[\\/]+$/, '')
   const leaf = basename(normalized)
@@ -141,7 +139,7 @@ export function normalizeAgentSessionsDir(
   if (leaf === 'agent') {
     return join(normalized, 'sessions')
   }
-  if (leaf === agentHomeDirName) {
+  if (leaf === '.pi') {
     return join(normalized, 'agent', 'sessions')
   }
   return normalized
@@ -156,7 +154,6 @@ export function errorMessage(err: unknown): string {
 }
 
 export {
-  addCodexUsage,
   claudeUsageTotal,
   copilotModelMetricsTotal,
   normalizeCodexUsage,

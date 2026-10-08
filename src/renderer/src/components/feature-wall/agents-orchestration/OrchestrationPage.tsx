@@ -292,10 +292,7 @@ export function OrchestrationPage(props: {
       <div className="relative flex min-w-0 flex-col gap-1.5">
         <WorkspaceCard
           variant="coordinator"
-          name={translate(
-            'auto.components.feature.wall.agents.orchestration.OrchestrationPage.coordinatorName',
-            'redesign auth flow'
-          )}
+          name="redesign auth flow"
           dataCard="coord"
           rows={[
             <AgentRow
@@ -354,10 +351,7 @@ export function OrchestrationPage(props: {
             <div className="feature-wall-child-card-shell">
               <WorkspaceCard
                 variant="default"
-                name={translate(
-                  'auto.components.feature.wall.agents.orchestration.OrchestrationPage.childPr1Name',
-                  'PR 1/2: migrate users.sql'
-                )}
+                name="PR 1/2: migrate users.sql"
                 dataCard="child"
                 childPadding
                 rows={[
@@ -382,10 +376,7 @@ export function OrchestrationPage(props: {
             <div className="feature-wall-child-card-shell">
               <WorkspaceCard
                 variant="default"
-                name={translate(
-                  'auto.components.feature.wall.agents.orchestration.OrchestrationPage.childPr2Name',
-                  'PR 2/2: withSession middleware'
-                )}
+                name="PR 2/2: withSession middleware"
                 dataCard="child-claude"
                 childPadding
                 rows={[

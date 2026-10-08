@@ -1,9 +1,5 @@
 import type { ExecutionHostId } from '../../../../shared/execution-host'
-import type {
-  AutomationWorkspaceProvenance,
-  CliWorkspaceProvenance,
-  IssueInfo
-} from '../../../../shared/types'
+import type { AutomationWorkspaceProvenance, IssueInfo } from '../../../../shared/types'
 import type { WorktreeCardPrDisplay } from './worktree-card-pr-display'
 import type { WorktreeCardDetailsHoverControl } from './worktree-card-details-hover-state'
 
@@ -31,7 +27,6 @@ export type WorktreeCardMetaBadgesProps = {
   review: WorktreeCardPrDisplay | null
   comment: string | null
   automationProvenance?: AutomationWorkspaceProvenance | null
-  cliProvenance?: CliWorkspaceProvenance | null
 }
 
 export type WorktreeCardMetaBadgesRootProps = WorktreeCardMetaBadgesProps &

@@ -25,7 +25,7 @@ describe('pickMobileImage', () => {
       })
     })
 
-    expect(result).toEqual({ base64: 'AAAA', uri: 'file:///x.jpg' })
+    expect(result).toEqual({ base64: 'AAAA' })
   })
 
   it('throws when photo library permission is denied', async () => {
@@ -59,10 +59,7 @@ describe('pickMobileImage', () => {
       })
     })
 
-    expect(result).toEqual({
-      base64: Buffer.from(bytes).toString('base64'),
-      uri: 'file:///doc.png'
-    })
+    expect(result).toEqual({ base64: Buffer.from(bytes).toString('base64') })
     fetchSpy.mockRestore()
   })
 

@@ -19,7 +19,6 @@ import {
   listCommitMessageAgentCapabilities
 } from '../../../../shared/commit-message-agent-spec'
 import type { ResolvedSourceControlAiGenerationParams } from '../../../../shared/source-control-ai'
-import { formatLinkedIssueTemplateValue } from '../../../../shared/source-control-ai-action-variables'
 import type { SourceControlTextActionId } from '../../../../shared/source-control-ai-actions'
 import type { SourceControlAiWriteTarget } from '../../../../shared/source-control-ai-recipe-save'
 import type { GlobalSettings, Repo, TuiAgent } from '../../../../shared/types'
@@ -47,8 +46,6 @@ type SourceControlTextGenerationDialogFormProps = {
   repo: Pick<Repo, 'id' | 'sourceControlAi'> | null
   baseParams: ResolvedSourceControlAiGenerationParams | null
   basePromptPreview?: string
-  /** Omitted by workspace-less callers (Settings dry-run); `null` means "linked to nothing". */
-  linkedIssue?: number | null
   saveTargets: SourceControlTextGenerationSaveTarget[]
   onGenerate: (params: ResolvedSourceControlAiGenerationParams) => void
   onOpenChange: (open: boolean) => void
@@ -83,7 +80,6 @@ export function SourceControlTextGenerationDialogForm({
   repo,
   baseParams,
   basePromptPreview,
-  linkedIssue,
   saveTargets,
   onGenerate,
   onOpenChange,
@@ -118,18 +114,6 @@ export function SourceControlTextGenerationDialogForm({
     settings,
     customAgentCommand: baseParams?.customAgentCommand
   })
-  // Why: chip previews only. The plan below stays synthetic so a workspace-empty
-  // `{linkedIssue}` cannot disable Save/Generate for a repo- or global-scoped recipe.
-  const variablePreviews = useMemo(() => {
-    const previews: Record<string, string> = {}
-    if (basePromptPreview) {
-      previews.basePrompt = basePromptPreview
-    }
-    if (linkedIssue !== undefined) {
-      previews.linkedIssue = formatLinkedIssueTemplateValue(linkedIssue)
-    }
-    return Object.keys(previews).length > 0 ? previews : undefined
-  }, [basePromptPreview, linkedIssue])
   const paramsPlanResult = params ? planSourceControlTextGeneration(actionId, params) : null
   const canRunGeneration = Boolean(params && paramsPlanResult?.ok)
   const saving = savingTargetKey !== null
@@ -303,7 +287,7 @@ export function SourceControlTextGenerationDialogForm({
           />
           <SourceControlActionVariableChips
             actionId={actionId}
-            variablePreviews={variablePreviews}
+            variablePreviews={basePromptPreview ? { basePrompt: basePromptPreview } : undefined}
             onInsert={(variable) => {
               const separator =
                 commandTemplate.endsWith('\n') || commandTemplate.length === 0 ? '' : ' '

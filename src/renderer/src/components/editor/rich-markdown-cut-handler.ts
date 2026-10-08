@@ -1,10 +1,7 @@
+import { DOMSerializer } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
-import { writeRichMarkdownSliceToClipboard } from './rich-markdown-clipboard-write'
 import { cutVisualLine, getVisualLineRange } from './rich-markdown-visual-line'
-import { createRichMarkdownVisibleTextMap } from './rich-markdown-visible-text-map'
-import { inspectRichMarkdownSourceOwningSlice } from './rich-markdown-source-owning-slice'
-import { showRichMarkdownSourceOwningCutLimitError } from './rich-markdown-source-owning-cut-feedback'
 
 function deleteBlockAndRestoreSelection(view: EditorView, from: number, to: number): void {
   let tr = view.state.tr.delete(from, to)
@@ -27,12 +24,6 @@ function deleteBlockAndRestoreSelection(view: EditorView, from: number, to: numb
 export function handleRichMarkdownCut(view: EditorView, event: ClipboardEvent): boolean {
   const { selection } = view.state
   if (!selection.empty) {
-    const status = inspectRichMarkdownSourceOwningSlice(selection.content())
-    if (status.containsSourceOwningNode && !status.canPreserve) {
-      event.preventDefault()
-      showRichMarkdownSourceOwningCutLimitError()
-      return true
-    }
     return false
   }
 
@@ -63,9 +54,7 @@ export function handleRichMarkdownCut(view: EditorView, event: ClipboardEvent): 
   }
 
   const cutNode = $from.node(cutDepth)
-  const contentFrom = $from.start(cutDepth)
-  const contentTo = $from.end(cutDepth)
-  const text = createRichMarkdownVisibleTextMap(view.state.doc, contentFrom, contentTo).text
+  const text = cutNode.textContent
 
   // Why: for paragraphs that word-wrap across multiple visual lines, cut
   // only the visual line the cursor is on rather than the entire paragraph.
@@ -96,10 +85,15 @@ export function handleRichMarkdownCut(view: EditorView, event: ClipboardEvent): 
   }
   event.preventDefault()
 
-  const slice = view.state.doc.slice($from.before(cutDepth), $from.after(cutDepth))
-  if (!writeRichMarkdownSliceToClipboard(event.clipboardData, view, slice, text)) {
-    return true
-  }
+  // Why: writing both text/html and text/plain preserves inline formatting
+  // (bold, italic, links) on round-trip cut-then-paste, while still giving
+  // a plain-text fallback for external targets.
+  const serializer = DOMSerializer.fromSchema(view.state.schema)
+  const fragment = serializer.serializeFragment(cutNode.content)
+  const div = document.createElement('div')
+  div.appendChild(fragment)
+  event.clipboardData.setData('text/html', div.innerHTML)
+  event.clipboardData.setData('text/plain', text)
 
   deleteBlockAndRestoreSelection(view, $from.before(cutDepth), $from.after(cutDepth))
 

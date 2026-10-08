@@ -1,7 +1,7 @@
 import React from 'react'
 import { Pin } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import type { Repo, WorkspaceStatus, Worktree } from '../../../../shared/types'
+import type { Repo, Worktree } from '../../../../shared/types'
 import WorktreeCard from './WorktreeCard'
 import { translate } from '@/i18n/i18n'
 
@@ -18,7 +18,6 @@ type WorkspaceKanbanCardProps = {
     event: React.MouseEvent<HTMLElement>,
     worktree: Worktree
   ) => readonly Worktree[]
-  onAssignWorkspaceStatus?: (worktreeIds: readonly string[], status: WorkspaceStatus) => void
 }
 
 function WorkspaceKanbanCard({
@@ -30,8 +29,7 @@ function WorkspaceKanbanCard({
   nativeDragEnabled = true,
   onActivate,
   onSelectionGesture,
-  onContextMenuSelect,
-  onAssignWorkspaceStatus
+  onContextMenuSelect
 }: WorkspaceKanbanCardProps): React.JSX.Element {
   const contextWorktrees =
     isSelected && selectedWorktrees && selectedWorktrees.length > 0 ? selectedWorktrees : undefined
@@ -63,7 +61,6 @@ function WorkspaceKanbanCard({
         onActivate={onActivate}
         onSelectionGesture={onSelectionGesture}
         onContextMenuSelect={(event) => onContextMenuSelect(event, worktree)}
-        onAssignWorkspaceStatus={onAssignWorkspaceStatus}
       />
     </div>
   )

@@ -92,7 +92,6 @@ const baseStyles = StyleSheet.create({
   },
   countRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: spacing.md,
     marginTop: spacing.sm
   },
@@ -100,63 +99,31 @@ const baseStyles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: typography.metaSize
   },
-  // Separate line under counts — keeps Abort inside the card on narrow phones.
   conflictRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-    alignSelf: 'flex-start',
-    maxWidth: '100%'
+    gap: spacing.sm
   },
   conflictText: {
     color: colors.statusAmber,
     fontSize: typography.metaSize,
     textTransform: 'capitalize'
   },
-  // Match bulk-action hit target so Abort reads as a real control, not a chip.
   abortButton: {
-    minHeight: 32,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
     borderRadius: radii.button,
     borderWidth: 1,
-    borderColor: colors.statusAmber,
-    backgroundColor: colors.bgRaised,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0
+    borderColor: colors.statusAmber
   },
   abortPressed: {
-    opacity: 0.75
-  },
-  abortButtonDisabled: {
-    opacity: 0.45
+    backgroundColor: colors.bgRaised
   },
   abortText: {
     color: colors.statusAmber,
-    fontSize: typography.bodySize,
+    fontSize: typography.metaSize,
     fontWeight: '600',
     textTransform: 'capitalize'
-  },
-  reconnectBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.lg,
-    marginBottom: -spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.button,
-    backgroundColor: colors.bgRaised,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.statusAmber
-  },
-  reconnectBannerText: {
-    color: colors.textPrimary,
-    fontSize: typography.metaSize
   },
   actionError: {
     marginTop: spacing.sm,

@@ -34,16 +34,12 @@ export function deriveMobilePrBranchContext(
 // Loads repo eligibility independently from branch/SHA. The header PR icon only
 // needs the cheap GitHub probe; the panel can keep loading branch context after
 // the entry point is already stable in the top bar.
-//
-// `includeBranchIdentity: false` skips git.status + branchCompare — use when the
-// caller only gates a PR entry on hosted-repo eligibility (session dock icon).
 export function useMobilePrBranchContext(input: {
   client: RpcClient | null
   connState: ConnectionState
   worktreeId: string
-  includeBranchIdentity?: boolean
 }): MobilePrBranchContext {
-  const { client, connState, worktreeId, includeBranchIdentity = true } = input
+  const { client, connState, worktreeId } = input
   const [context, setContext] = useState<MobilePrBranchContext>({
     branch: null,
     headSha: null,
@@ -64,7 +60,7 @@ export function useMobilePrBranchContext(input: {
         status: null,
         isGithubRepo: false,
         repoLoaded: false,
-        loaded: !includeBranchIdentity
+        loaded: false
       })
       return
     }
@@ -74,8 +70,7 @@ export function useMobilePrBranchContext(input: {
       status: null,
       isGithubRepo: false,
       repoLoaded: false,
-      // Repo-only mode is "loaded" for branch fields immediately (they stay null).
-      loaded: !includeBranchIdentity
+      loaded: false
     })
 
     void loadMobilePrRepoContext(client, worktreeId)
@@ -99,12 +94,6 @@ export function useMobilePrBranchContext(input: {
           }))
         }
       })
-
-    if (!includeBranchIdentity) {
-      return () => {
-        cancelled = true
-      }
-    }
 
     void loadMobilePrBranchIdentity(client, worktreeId)
       .then((next) => {
@@ -132,7 +121,7 @@ export function useMobilePrBranchContext(input: {
     return () => {
       cancelled = true
     }
-  }, [ready, client, worktreeId, includeBranchIdentity])
+  }, [ready, client, worktreeId])
 
   return context
 }

@@ -10,7 +10,6 @@ import type { GlobalSettings, StatusBarItem } from '../../../../shared/types'
 
 const mocks = vi.hoisted(() => ({
   state: {
-    appPlatform: 'linux' as NodeJS.Platform,
     availableStatusBarToggles: [] as {
       description: string
       id: StatusBarItem
@@ -21,12 +20,8 @@ const mocks = vi.hoisted(() => ({
     settingsSearchQuery: 'automations',
     statusBarItems: [],
     toggleStatusBarItem: vi.fn(),
-    usagePercentageDisplay: 'used' as 'used' | 'remaining',
-    setUsagePercentageDisplay: vi.fn(),
     recordFeatureInteraction: vi.fn(),
-    setWorktreeCardMode: vi.fn(),
-    appearanceAccordionDeepLink: null as 'interface' | 'terminal' | 'window' | null,
-    clearAppearanceAccordionDeepLink: vi.fn()
+    setWorktreeCardMode: vi.fn()
   }
 }))
 
@@ -134,10 +129,7 @@ function createWarpThemesStub() {
 
 async function renderAppearancePane(
   settings: GlobalSettings,
-  updateSettings: (updates: Partial<GlobalSettings>) => void = vi.fn(),
-  options: {
-    onRequestFontSuggestions?: () => void
-  } = {}
+  updateSettings: (updates: Partial<GlobalSettings>) => void = vi.fn()
 ): Promise<HTMLDivElement> {
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -154,7 +146,6 @@ async function renderAppearancePane(
             applyTheme={vi.fn()}
             fontSuggestions={[]}
             terminalFontSuggestions={[]}
-            onRequestFontSuggestions={options.onRequestFontSuggestions}
             systemPrefersDark={false}
             ghostty={createGhosttyStub() as never}
             warpThemes={createWarpThemesStub() as never}
@@ -165,42 +156,6 @@ async function renderAppearancePane(
   })
 
   return container
-}
-
-async function rerenderAppearancePane(
-  settings: GlobalSettings = getDefaultSettings('/tmp')
-): Promise<void> {
-  const root = mountedRoots.at(-1)
-  if (!root) {
-    throw new Error('expected a mounted AppearancePane root')
-  }
-  await act(async () => {
-    root.render(
-      <I18nextProvider i18n={i18n}>
-        <TooltipProvider>
-          <AppearancePane
-            settings={settings}
-            updateSettings={vi.fn()}
-            applyTheme={vi.fn()}
-            fontSuggestions={[]}
-            terminalFontSuggestions={[]}
-            systemPrefersDark={false}
-            ghostty={createGhosttyStub() as never}
-            warpThemes={createWarpThemesStub() as never}
-          />
-        </TooltipProvider>
-      </I18nextProvider>
-    )
-  })
-}
-
-function appearanceSectionToggle(
-  container: HTMLElement,
-  sectionId: 'interface' | 'terminal' | 'window'
-): HTMLButtonElement | undefined {
-  return Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')).find(
-    (button) => button.getAttribute('aria-controls') === `appearance-section-${sectionId}`
-  )
 }
 
 describe('AppearancePane', () => {
@@ -216,17 +171,11 @@ describe('AppearancePane', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.state.availableStatusBarToggles = []
-    mocks.state.appPlatform = 'linux'
     mocks.state.settingsSearchQuery = 'automations'
-    mocks.state.appearanceAccordionDeepLink = null
-    mocks.state.usagePercentageDisplay = 'used'
     // UIZoomControl reads window.api.ui on mount; the inline-expansion pane can
     // render the full Interface section, so provide a minimal renderer bridge
     // without clobbering happy-dom's window.location.
     ;(window as unknown as { api: unknown }).api = {
-      platform: {
-        get: () => ({ platform: mocks.state.appPlatform })
-      },
       ui: {
         getZoomLevel: () => 0,
         onTerminalZoom: () => () => {},
@@ -237,38 +186,6 @@ describe('AppearancePane', () => {
 
   afterEach(() => {
     delete (window as unknown as { api?: unknown }).api
-  })
-
-  it('shows language as a primary interface control without opening Advanced', async () => {
-    mocks.state.settingsSearchQuery = ''
-    const container = await renderAppearancePane(getDefaultSettings('/tmp'))
-    const languageTrigger = container.querySelector<HTMLButtonElement>(
-      '[data-slot="select-trigger"][aria-label="Language"]'
-    )
-    const advancedTrigger = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')
-    ).find((button) => button.textContent?.includes('Advanced'))
-
-    expect(languageTrigger).not.toBeNull()
-    expect(advancedTrigger).toBeDefined()
-    expect(advancedTrigger?.getAttribute('aria-expanded')).toBe('false')
-    expect(
-      container.querySelector('button[role="switch"][aria-label="Titlebar App Name"]')
-    ).toBeNull()
-  })
-
-  it('keeps Advanced closed when searching for language', async () => {
-    mocks.state.settingsSearchQuery = 'language'
-    const container = await renderAppearancePane(getDefaultSettings('/tmp'))
-    const languageTrigger = container.querySelector<HTMLButtonElement>(
-      '[data-slot="select-trigger"][aria-label="Language"]'
-    )
-
-    expect(languageTrigger).not.toBeNull()
-    expect(container.textContent).not.toContain('Advanced')
-    expect(
-      container.querySelector('button[role="switch"][aria-label="Titlebar App Name"]')
-    ).toBeNull()
   })
 
   it('renders the language dropdown with system, english, chinese, korean, japanese, and spanish options', async () => {
@@ -289,7 +206,6 @@ describe('AppearancePane', () => {
 
     expect(languageTrigger).not.toBeNull()
     expect(chineseOption).not.toBeNull()
-    expect(container.textContent).not.toContain('Advanced')
     expect(container.textContent).toContain('System')
     expect(container.textContent).toContain('English')
     expect(container.textContent).toContain('中文（简体）')
@@ -302,30 +218,6 @@ describe('AppearancePane', () => {
     })
 
     expect(updateSettings).toHaveBeenCalledWith({ uiLanguage: 'zh' })
-  })
-
-  it('includes the selected language in the collapsed Interface summary', async () => {
-    mocks.state.settingsSearchQuery = ''
-    const settings = {
-      ...getDefaultSettings('/tmp'),
-      uiLanguage: 'zh' as const,
-      theme: 'dark' as const,
-      appFontFamily: 'Inter'
-    }
-    const container = await renderAppearancePane(settings)
-    const interfaceToggle = Array.from(
-      container.querySelectorAll<HTMLButtonElement>(
-        'button[aria-controls="appearance-section-interface"]'
-      )
-    )[0]
-    expect(interfaceToggle).toBeDefined()
-    await act(async () => {
-      interfaceToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-
-    expect(interfaceToggle?.getAttribute('aria-expanded')).toBe('false')
-    // Summary is only rendered on the collapsed toggle (children stay mounted but hidden).
-    expect(interfaceToggle?.textContent).toContain('Dark · 中文（简体） · Inter')
   })
 
   it('updates the left sidebar appearance from sidebar settings', async () => {
@@ -404,25 +296,6 @@ describe('AppearancePane', () => {
     expect(container.textContent).not.toContain('Code & Markdown')
   })
 
-  it('requests installed font suggestions only after the IDE font picker is used', async () => {
-    mocks.state.settingsSearchQuery = ''
-    const requestFontSuggestions = vi.fn()
-    const container = await renderAppearancePane(getDefaultSettings('/tmp'), vi.fn(), {
-      onRequestFontSuggestions: requestFontSuggestions
-    })
-
-    expect(requestFontSuggestions).not.toHaveBeenCalled()
-
-    const input = container.querySelector<HTMLInputElement>('input[role="combobox"]')
-    expect(input).not.toBeNull()
-
-    await act(async () => {
-      input?.focus()
-    })
-
-    expect(requestFontSuggestions).toHaveBeenCalledOnce()
-  })
-
   it('keeps the app icon control at the bottom of the pane, after the section rows', async () => {
     mocks.state.settingsSearchQuery = ''
     const container = await renderAppearancePane(getDefaultSettings('/tmp'))
@@ -458,23 +331,6 @@ describe('AppearancePane', () => {
     ).not.toBeNull()
   })
 
-  it('shows and updates the menu bar icon preference only on desktop macOS', async () => {
-    mocks.state.appPlatform = 'darwin'
-    mocks.state.settingsSearchQuery = 'menu bar'
-    const updateSettings = vi.fn()
-    const container = await renderAppearancePane(getDefaultSettings('/tmp'), updateSettings)
-    const toggle = container.querySelector<HTMLButtonElement>(
-      'button[role="switch"][aria-label="Show Menu Bar Icon"]'
-    )
-
-    expect(toggle).not.toBeNull()
-    expect(container.textContent).not.toContain('Minimize to Tray on Close')
-    await act(async () => {
-      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    expect(updateSettings).toHaveBeenCalledWith({ showMenuBarIcon: false })
-  })
-
   it('keeps description-only search matches visible after helper text is hidden', async () => {
     mocks.state.settingsSearchQuery = 'app window'
     const container = await renderAppearancePane(getDefaultSettings('/tmp'))
@@ -508,23 +364,6 @@ describe('AppearancePane', () => {
     expect(container.querySelector('button[role="switch"][aria-label="Ports"]')).not.toBeNull()
   })
 
-  it('updates the usage percentage display from the latest status bar settings section', async () => {
-    mocks.state.settingsSearchQuery = 'remaining'
-    const container = await renderAppearancePane(getDefaultSettings('/tmp'))
-    const remainingButton = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('button[role="radio"]')
-    ).find((button) => button.textContent === 'Remaining')
-
-    expect(container.textContent).toContain('Usage percentages')
-    expect(remainingButton).toBeDefined()
-
-    await act(async () => {
-      remainingButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-
-    expect(mocks.state.setUsagePercentageDisplay).toHaveBeenCalledWith('remaining')
-  })
-
   it('records MiniMax status bar toggles as usage tracking interactions', async () => {
     mocks.state.availableStatusBarToggles = [
       {
@@ -550,32 +389,7 @@ describe('AppearancePane', () => {
     expect(mocks.state.toggleStatusBarItem).toHaveBeenCalledWith('minimax')
   })
 
-  it('records Antigravity status bar toggles as usage tracking interactions', async () => {
-    mocks.state.availableStatusBarToggles = [
-      {
-        id: 'antigravity',
-        title: 'Antigravity Usage',
-        description: 'Show Antigravity subscription usage in the status bar.',
-        toggleDescription: 'Show Antigravity subscription usage for the active workspace.',
-        keywords: ['status bar', 'antigravity', 'usage']
-      }
-    ]
-    mocks.state.settingsSearchQuery = 'antigravity'
-    const container = await renderAppearancePane(getDefaultSettings('/tmp'))
-    const antigravitySwitch = container.querySelector<HTMLButtonElement>(
-      'button[role="switch"][aria-label="Antigravity Usage"]'
-    )
-
-    expect(antigravitySwitch).not.toBeNull()
-    await act(async () => {
-      antigravitySwitch?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-
-    expect(mocks.state.recordFeatureInteraction).toHaveBeenCalledWith('usage-tracking')
-    expect(mocks.state.toggleStatusBarItem).toHaveBeenCalledWith('antigravity')
-  })
-
-  it('expands Interface, Terminal, and Window & Sidebar by default', async () => {
+  it('collapses sibling sections so only the Interface section is expanded by default', async () => {
     mocks.state.settingsSearchQuery = ''
     const container = await renderAppearancePane(getDefaultSettings('/tmp'))
 
@@ -583,80 +397,7 @@ describe('AppearancePane', () => {
       container.querySelectorAll<HTMLButtonElement>('button[aria-expanded="true"]')
     ).filter((button) => button.getAttribute('aria-controls')?.startsWith('appearance-section-'))
 
-    expect(expanded).toHaveLength(3)
-    expect(expanded.map((button) => button.textContent).join(' ')).toContain('Interface')
-    expect(expanded.map((button) => button.textContent).join(' ')).toContain('Terminal')
-    expect(expanded.map((button) => button.textContent).join(' ')).toContain('Window & Sidebar')
-  })
-
-  it('lets each appearance section collapse independently', async () => {
-    mocks.state.settingsSearchQuery = ''
-    const container = await renderAppearancePane(getDefaultSettings('/tmp'))
-
-    const terminalToggle = appearanceSectionToggle(container, 'terminal')
-
-    expect(terminalToggle?.getAttribute('aria-expanded')).toBe('true')
-
-    await act(async () => {
-      terminalToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-
-    expect(terminalToggle?.getAttribute('aria-expanded')).toBe('false')
-
-    const stillExpanded = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('button[aria-expanded="true"]')
-    ).filter((button) => button.getAttribute('aria-controls')?.startsWith('appearance-section-'))
-
-    expect(stillExpanded).toHaveLength(2)
-    expect(stillExpanded.map((button) => button.textContent).join(' ')).toContain('Interface')
-    expect(stillExpanded.map((button) => button.textContent).join(' ')).toContain(
-      'Window & Sidebar'
-    )
-  })
-
-  it('re-opens a collapsed section for appearance deep links without collapsing siblings', async () => {
-    mocks.state.settingsSearchQuery = ''
-    mocks.state.appearanceAccordionDeepLink = null
-    const container = await renderAppearancePane(getDefaultSettings('/tmp'))
-
-    const windowToggle = appearanceSectionToggle(container, 'window')
-    const terminalToggle = appearanceSectionToggle(container, 'terminal')
-    expect(windowToggle?.getAttribute('aria-expanded')).toBe('true')
-
-    await act(async () => {
-      windowToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    expect(windowToggle?.getAttribute('aria-expanded')).toBe('false')
-    expect(terminalToggle?.getAttribute('aria-expanded')).toBe('true')
-
-    mocks.state.appearanceAccordionDeepLink = 'window'
-    await rerenderAppearancePane()
-
-    expect(appearanceSectionToggle(container, 'window')?.getAttribute('aria-expanded')).toBe('true')
-    expect(appearanceSectionToggle(container, 'terminal')?.getAttribute('aria-expanded')).toBe(
-      'true'
-    )
-    expect(mocks.state.clearAppearanceAccordionDeepLink).toHaveBeenCalled()
-  })
-
-  it('disables section toggles while searching so clearing search does not surprise-collapse', async () => {
-    mocks.state.settingsSearchQuery = 'terminal'
-    const container = await renderAppearancePane(getDefaultSettings('/tmp'))
-
-    const terminalToggle = appearanceSectionToggle(container, 'terminal')
-    expect(terminalToggle?.disabled).toBe(true)
-    expect(terminalToggle?.getAttribute('aria-expanded')).toBe('true')
-
-    await act(async () => {
-      terminalToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    expect(terminalToggle?.getAttribute('aria-expanded')).toBe('true')
-
-    mocks.state.settingsSearchQuery = ''
-    await rerenderAppearancePane()
-
-    const afterClear = appearanceSectionToggle(container, 'terminal')
-    expect(afterClear?.disabled).toBe(false)
-    expect(afterClear?.getAttribute('aria-expanded')).toBe('true')
+    expect(expanded).toHaveLength(1)
+    expect(expanded[0]?.textContent).toContain('Interface')
   })
 })

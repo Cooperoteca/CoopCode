@@ -12,8 +12,6 @@ import {
 export type RuntimeTerminalProcessInspection = {
   foregroundProcess: string | null
   hasChildProcesses: boolean
-  // Why: callers must not treat a stale remote handle as authoritative idle evidence.
-  unavailable?: true
 }
 
 const REMOTE_PTY_ID_PREFIX = 'remote:'
@@ -36,7 +34,6 @@ function isTerminalGoneError(error: unknown): boolean {
         ? String((error as { code?: unknown }).code)
         : ''
   return (
-    code === 'no_connected_pty' ||
     code === 'terminal_handle_stale' ||
     code === 'terminal_exited' ||
     code === 'terminal_gone' ||
@@ -77,7 +74,11 @@ export async function inspectRuntimeTerminalProcess(
     : getActiveRuntimeTarget(settings)
   const terminal = getRemoteRuntimeTerminalHandle(ptyId)
   if (target.kind !== 'environment' || !terminal) {
-    return window.api.pty.inspectProcess(ptyId)
+    const [foregroundProcess, hasChildProcesses] = await Promise.all([
+      window.api.pty.getForegroundProcess(ptyId),
+      window.api.pty.hasChildProcesses(ptyId)
+    ])
+    return { foregroundProcess, hasChildProcesses }
   }
 
   try {
@@ -90,7 +91,7 @@ export async function inspectRuntimeTerminalProcess(
     return result.process
   } catch (error) {
     if (isTerminalGoneError(error)) {
-      return { foregroundProcess: null, hasChildProcesses: false, unavailable: true }
+      return { foregroundProcess: null, hasChildProcesses: false }
     }
     throw error
   }

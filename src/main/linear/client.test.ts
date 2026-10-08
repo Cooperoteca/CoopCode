@@ -102,13 +102,9 @@ async function loadClientModule(options: SafeStorageMockOptions = {}) {
     return { ...actual, homedir: () => tempHome }
   })
   class AuthenticationLinearError extends Error {}
-  // Why: client.ts loads @linear/sdk lazily via ./linear-sdk (createRequire) to
-  // keep it off the startup parse path; mock the loader, not the raw module.
-  vi.doMock('./linear-sdk', () => ({
-    loadLinearSdk: () => ({
-      AuthenticationLinearError,
-      LinearClient: linearClientMock
-    })
+  vi.doMock('@linear/sdk', () => ({
+    AuthenticationLinearError,
+    LinearClient: linearClientMock
   }))
 
   return import('./client')

@@ -2,18 +2,10 @@
    selection, per-agent controls, and runtime location together so settings
    reconciliation stays visible in one file. */
 import { useId, useMemo, useState } from 'react'
-import {
-  AlertTriangle,
-  Check,
-  ChevronDown,
-  ExternalLink,
-  Info,
-  RefreshCw,
-  Terminal
-} from 'lucide-react'
+import { Check, ChevronDown, ExternalLink, Info, RefreshCw, Terminal } from 'lucide-react'
 import type { GlobalSettings, TuiAgent } from '../../../../shared/types'
 import { getAgentCatalog, AgentIcon } from '@/lib/agent-catalog'
-import { useDetectedAgents, type AgentDetectionTarget } from '@/hooks/useDetectedAgents'
+import { useDetectedAgents } from '@/hooks/useDetectedAgents'
 import { useAppStore } from '@/store'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
@@ -21,11 +13,6 @@ import { cn } from '@/lib/utils'
 import { AgentAwakeSetting } from './AgentAwakeSetting'
 import { AgentCacheTimerSection } from './AgentCacheTimerSection'
 import { AgentRuntimeSetting } from './AgentRuntimeSetting'
-import {
-  AgentSessionSourceHomeInput,
-  buildCodexSessionSourceHomeControl,
-  type AgentSessionSourceHomeControl
-} from './codex-session-source-home-control'
 import {
   getAgentGeneratedTabTitlesDescription,
   getAgentGeneratedTabTitlesTitle
@@ -94,8 +81,6 @@ type AgentRowProps = {
   onSaveOverride: (value: string) => void
   onSaveArgs: (value: string) => void
   onSaveEnv: (value: Record<string, string>) => void
-  /** Codex-only: current runtime scope label + persisted history-source override. */
-  sessionSourceHome?: AgentSessionSourceHomeControl
 }
 
 type AgentCommandOverrideInputProps = {
@@ -292,44 +277,42 @@ function AgentCommandOverrideInput({
   }
 
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs text-muted-foreground">
+    <div className="flex items-center gap-2">
+      <span className="shrink-0 text-xs text-muted-foreground">
         {translate('auto.components.settings.AgentsPane.2e45ca29b6', 'Command')}
       </span>
-      <div className="flex items-center gap-2">
-        <Input
-          value={cmdDraft}
-          onChange={(e) => setCmdDraft(e.target.value)}
-          onBlur={commitCmd}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              commitCmd()
-              e.currentTarget.blur()
-            }
-            if (e.key === 'Escape') {
-              setCmdDraft(draftSeed)
-              e.currentTarget.blur()
-            }
+      <Input
+        value={cmdDraft}
+        onChange={(e) => setCmdDraft(e.target.value)}
+        onBlur={commitCmd}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            commitCmd()
+            e.currentTarget.blur()
+          }
+          if (e.key === 'Escape') {
+            setCmdDraft(draftSeed)
+            e.currentTarget.blur()
+          }
+        }}
+        placeholder={defaultCmd}
+        spellCheck={false}
+        className="h-7 flex-1 font-mono text-xs"
+      />
+      {cmdOverride && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={() => {
+            onSaveOverride('')
+            setCmdDraft(defaultCmd)
           }}
-          placeholder={defaultCmd}
-          spellCheck={false}
-          className="h-7 flex-1 font-mono text-xs"
-        />
-        {cmdOverride && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            onClick={() => {
-              onSaveOverride('')
-              setCmdDraft(defaultCmd)
-            }}
-            className="h-7 shrink-0 text-xs text-muted-foreground hover:text-foreground"
-          >
-            {translate('auto.components.settings.AgentsPane.5200dac9da', 'Reset')}
-          </Button>
-        )}
-      </div>
+          className="h-7 shrink-0 text-xs text-muted-foreground hover:text-foreground"
+        >
+          {translate('auto.components.settings.AgentsPane.5200dac9da', 'Reset')}
+        </Button>
+      )}
     </div>
   )
 }
@@ -347,47 +330,45 @@ function AgentDefaultArgsInput({
   }
 
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs text-muted-foreground">
+    <div className="flex items-center gap-2">
+      <span className="shrink-0 text-xs text-muted-foreground">
         {translate('auto.components.settings.AgentsPane.cfb3f35775', 'Arguments')}
       </span>
-      <div className="flex items-center gap-2">
-        <Input
-          value={argsDraft}
-          onChange={(e) => setArgsDraft(e.target.value)}
-          onBlur={commitArgs}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              commitArgs()
-              e.currentTarget.blur()
-            }
-            if (e.key === 'Escape') {
-              setArgsDraft(draftSeed)
-              e.currentTarget.blur()
-            }
-          }}
-          placeholder={
-            defaultArgs ||
-            translate('auto.components.settings.AgentsPane.6f99bf5dd0', 'No default arguments')
+      <Input
+        value={argsDraft}
+        onChange={(e) => setArgsDraft(e.target.value)}
+        onBlur={commitArgs}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            commitArgs()
+            e.currentTarget.blur()
           }
-          spellCheck={false}
-          className="h-7 flex-1 font-mono text-xs"
-        />
-        {argsOverride !== defaultArgs && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            onClick={() => {
-              onSaveArgs(defaultArgs)
-              setArgsDraft(defaultArgs)
-            }}
-            className="h-7 shrink-0 text-xs text-muted-foreground hover:text-foreground"
-          >
-            {translate('auto.components.settings.AgentsPane.5200dac9da', 'Reset')}
-          </Button>
-        )}
-      </div>
+          if (e.key === 'Escape') {
+            setArgsDraft(draftSeed)
+            e.currentTarget.blur()
+          }
+        }}
+        placeholder={
+          defaultArgs ||
+          translate('auto.components.settings.AgentsPane.6f99bf5dd0', 'No default arguments')
+        }
+        spellCheck={false}
+        className="h-7 flex-1 font-mono text-xs"
+      />
+      {argsOverride !== defaultArgs && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={() => {
+            onSaveArgs(defaultArgs)
+            setArgsDraft(defaultArgs)
+          }}
+          className="h-7 shrink-0 text-xs text-muted-foreground hover:text-foreground"
+        >
+          {translate('auto.components.settings.AgentsPane.5200dac9da', 'Reset')}
+        </Button>
+      )}
     </div>
   )
 }
@@ -413,11 +394,11 @@ function AgentDefaultEnvInput({
   }
 
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs text-muted-foreground">
-        {translate('auto.components.settings.AgentsPane.8fbe1f37c1', 'Environment')}
-      </span>
+    <div>
       <div className="flex items-center gap-2">
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {translate('auto.components.settings.AgentsPane.8fbe1f37c1', 'Environment')}
+        </span>
         <Input
           value={envDraft}
           onChange={(e) => {
@@ -495,8 +476,7 @@ function AgentRow({
   onSetEnabled,
   onSaveOverride,
   onSaveArgs,
-  onSaveEnv,
-  sessionSourceHome
+  onSaveEnv
 }: AgentRowProps): React.JSX.Element {
   const envSummary = stringifyAgentDefaultEnvDraft(envOverride)
   const defaultEnvSummary = stringifyAgentDefaultEnvDraft(defaultEnv)
@@ -514,6 +494,15 @@ function AgentRow({
         <div className="min-w-0 flex-1 sm:min-w-[12rem]">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium leading-none">{label}</span>
+            {isDetected ? (
+              <SettingsBadge tone="accent">
+                {translate('auto.components.settings.AgentsPane.c8794e622e', 'Detected')}
+              </SettingsBadge>
+            ) : (
+              <SettingsBadge tone="muted">
+                {translate('auto.components.settings.AgentsPane.df123171d1', 'Not installed')}
+              </SettingsBadge>
+            )}
             {!isEnabled && (
               <SettingsBadge tone="muted">
                 {translate('auto.components.settings.AgentsPane.8dc0192e48', 'Disabled')}
@@ -534,7 +523,7 @@ function AgentRow({
           </div>
         </div>
 
-        <div className="ml-auto grid shrink-0 grid-cols-[max-content_6.5rem_1.75rem_1.75rem] items-center gap-1.5">
+        <div className="ml-auto grid shrink-0 grid-cols-[max-content_6.5rem_1.75rem_1.75rem_1.75rem] items-center gap-1.5">
           <AgentAvailabilityControl
             label={label}
             isEnabled={isEnabled}
@@ -559,6 +548,28 @@ function AgentRow({
                 {isDefault
                   ? translate('auto.components.settings.AgentsPane.24e032fa34', 'Default')
                   : translate('auto.components.settings.AgentsPane.959b67385b', 'Set default')}
+              </Button>
+            )}
+          </div>
+
+          <div className="flex size-7 items-center justify-center">
+            {isDetected && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setCmdOpen((prev) => !prev)}
+                title={translate(
+                  'auto.components.settings.AgentsPane.db9e9e5887',
+                  'Customize command'
+                )}
+                aria-expanded={cmdOpen}
+                className={cn(
+                  'size-7 text-muted-foreground hover:text-foreground',
+                  (cmdOpen || cmdOverride) && 'text-foreground'
+                )}
+              >
+                <Terminal className="size-3.5" />
               </Button>
             )}
           </div>
@@ -633,17 +644,7 @@ function AgentRow({
               />
             </div>
           )}
-          {sessionSourceHome && (
-            <div className="mt-2">
-              <AgentSessionSourceHomeInput
-                key={`${agentId}:${sessionSourceHome.runtimeLabel}:${sessionSourceHome.value}`}
-                runtimeLabel={sessionSourceHome.runtimeLabel}
-                value={sessionSourceHome.value}
-                onSave={sessionSourceHome.onSave}
-              />
-            </div>
-          )}
-          <p className="mt-2 text-[11px] text-muted-foreground">
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
             {translate(
               'auto.components.settings.AgentsPane.f9f127d664',
               'Override the binary path or name, and edit the default launch arguments or environment for this agent.'
@@ -687,36 +688,12 @@ export function AgentsPane({
   wslDistros,
   wslCapabilitiesLoading
 }: AgentsPaneProps): React.JSX.Element {
-  // Why: the Active Server routes agent launches and provider checks through
-  // that server, so this pane must list what THAT host can launch — detecting
-  // on the client showed a Windows machine's agents while paired to a Linux
-  // server (the enable/disable/default toggles below stay client settings).
-  const activeServerEnvironmentId = settings.activeRuntimeEnvironmentId?.trim() || null
-  const agentDetectionTarget = useMemo<AgentDetectionTarget>(
-    () =>
-      activeServerEnvironmentId
-        ? { kind: 'runtime', environmentId: activeServerEnvironmentId }
-        : { kind: 'local' },
-    [activeServerEnvironmentId]
-  )
-  const {
-    detectedIds: detectedList,
-    detectionFailed,
-    isRefreshing,
-    refresh: refreshTargetAgents
-  } = useDetectedAgents(agentDetectionTarget)
-  const refreshLocalAgents = useAppStore((s) => s.refreshDetectedAgents)
-  const activeServerName = useAppStore((s) =>
-    activeServerEnvironmentId
-      ? (s.runtimeEnvironments.find((environment) => environment.id === activeServerEnvironmentId)
-          ?.name ?? null)
-      : null
-  )
-  // Why: refresh re-spawns the target host's login shell to re-capture PATH
-  // (preflight:refreshAgents). This handles the "installed a new CLI, Orca
-  // doesn't see it yet" case without a restart.
+  const { detectedIds: detectedList, isRefreshing, refresh } = useDetectedAgents()
+  // Why: refresh re-spawns the user's login shell to re-capture PATH
+  // (preflight:refreshAgents on the main side). This handles the
+  // "installed a new CLI, Orca doesn't see it yet" case without a restart.
   const handleRefresh = (): void => {
-    void refreshTargetAgents()
+    void refresh()
   }
   const detectedIds = useMemo<Set<string> | null>(
     () => (detectedList ? new Set(detectedList) : null),
@@ -854,9 +831,7 @@ export function AgentsPane({
       <AgentRuntimeSetting
         settings={settings}
         updateSettings={updateSettings}
-        // Why: this control changes the client-local Windows/WSL runtime even
-        // while the Installed list is scoped to an active remote server.
-        refresh={refreshLocalAgents}
+        refresh={refresh}
         wslSupportedPlatform={wslSupportedPlatform}
         wslAvailable={wslAvailable}
         wslDistros={wslDistros}
@@ -883,13 +858,6 @@ export function AgentsPane({
                   {detectedAgents.length}{' '}
                   {translate('auto.components.settings.AgentsPane.ed3e110e61', 'detected')}
                 </SettingsBadge>
-                {activeServerName ? (
-                  <SettingsBadge tone="muted">
-                    {translate('auto.components.settings.AgentsPane.03e1a5081a', 'on {{value0}}', {
-                      value0: activeServerName
-                    })}
-                  </SettingsBadge>
-                ) : null}
               </span>
             }
             action={
@@ -899,17 +867,10 @@ export function AgentsPane({
                 size="xs"
                 onClick={handleRefresh}
                 disabled={isRefreshing}
-                title={
-                  activeServerEnvironmentId
-                    ? translate(
-                        'auto.components.settings.AgentsPane.25a41a9aad',
-                        'Re-detect agents installed on the active server'
-                      )
-                    : translate(
-                        'auto.components.settings.AgentsPane.13647f9f80',
-                        'Re-read your shell PATH and re-detect installed agents'
-                      )
-                }
+                title={translate(
+                  'auto.components.settings.AgentsPane.13647f9f80',
+                  'Re-read your shell PATH and re-detect installed agents'
+                )}
                 className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
               >
                 <RefreshCw className={cn('size-3', isRefreshing && 'animate-spin')} />
@@ -941,11 +902,6 @@ export function AgentsPane({
                 onSaveOverride={(v) => saveOverride(agent.id, v)}
                 onSaveArgs={(v) => saveAgentArgs(agent.id, v)}
                 onSaveEnv={(v) => saveAgentEnv(agent.id, v)}
-                sessionSourceHome={
-                  agent.id === 'codex'
-                    ? buildCodexSessionSourceHomeControl(settings, updateSettings)
-                    : undefined
-                }
               />
             ))}
           </div>
@@ -996,34 +952,12 @@ export function AgentsPane({
         </section>
       )}
 
-      {detectedIds === null && !detectionFailed && (
+      {detectedIds === null && (
         <div className="flex items-center justify-center rounded-md border border-dashed border-border/50 py-6 text-sm text-muted-foreground">
           {translate(
             'auto.components.settings.AgentsPane.d83834f5e6',
             'Detecting installed agents…'
           )}
-        </div>
-      )}
-
-      {detectionFailed && (
-        <div className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-          <span className="flex min-w-0 items-start gap-2">
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-            {translate(
-              'auto.components.settings.AgentsPane.remoteDetectionFailed',
-              'Couldn’t detect installed agents. Check the host connection and try again.'
-            )}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            onClick={handleRefresh}
-            className="h-6 shrink-0 gap-1.5 px-2 text-destructive hover:text-destructive"
-          >
-            <RefreshCw className="size-3" />
-            {translate('auto.components.settings.AgentsPane.retryDetection', 'Retry')}
-          </Button>
         </div>
       )}
     </div>

@@ -4,13 +4,6 @@ import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { asRecord, extractString } from './session-scanner-values'
-import {
-  KimiSessionIndexCache,
-  KIMI_WORK_DIR_CACHE_MAX_INDEX_PATHS,
-  KIMI_WORK_DIR_CACHE_TTL_MS
-} from './session-scanner-kimi-index-cache'
-
-export { KIMI_WORK_DIR_CACHE_MAX_INDEX_PATHS, KIMI_WORK_DIR_CACHE_TTL_MS }
 
 // Why: Kimi Code stores sessions under <KIMI_CODE_HOME>/sessions/, mirroring the
 // CLI's own `KIMI_CODE_HOME ?? ~/.kimi-code` resolution (see kimi-fetcher.ts).
@@ -62,41 +55,38 @@ export function kimiPrimaryAgentWirePath(
   return join(dirname(statePath), 'agents', primaryId, 'wire.jsonl')
 }
 
+type WorkDirCacheEntry = {
+  mtimeMs: number
+  map: Promise<Map<string, string>>
+}
+
 // Why: every session under one Kimi home shares a single session_index.jsonl.
-// Re-reading it once per session would be O(n^2); memoize by path + file
-// identity so a scan reads the index at most once. Bound and expire entries
-// because host/WSL/runtime roots can change during one main-process lifetime.
-const workDirCacheByIndexPath = new KimiSessionIndexCache()
+// Re-reading it once per session would be O(n^2); memoize by path + mtime so a
+// scan reads the index at most once and the cache self-invalidates when Kimi
+// appends a new session (mtime bump).
+const workDirCacheByIndexPath = new Map<string, WorkDirCacheEntry>()
 
 export function clearKimiSessionIndexCache(): void {
   workDirCacheByIndexPath.clear()
 }
 
-export function hasKimiSessionIndexCacheEntryForTests(indexPath: string): boolean {
-  return workDirCacheByIndexPath.has(indexPath)
-}
-
 export async function readKimiWorkDirBySessionId(indexPath: string): Promise<Map<string, string>> {
-  const generation = workDirCacheByIndexPath.beginRead()
-  let identity: Awaited<ReturnType<typeof stat>>
+  let mtimeMs: number
   try {
-    identity = await stat(indexPath)
+    mtimeMs = (await stat(indexPath)).mtimeMs
   } catch {
     // Missing index (e.g. user deleted it): sessions still list, just without cwd.
-    workDirCacheByIndexPath.delete(indexPath, generation)
     return new Map()
   }
 
-  return workDirCacheByIndexPath.get(
-    indexPath,
-    {
-      changeTimeMs: identity.ctimeMs,
-      mtimeMs: identity.mtimeMs,
-      sizeBytes: identity.size
-    },
-    generation,
-    () => parseKimiSessionIndex(indexPath)
-  )
+  const cached = workDirCacheByIndexPath.get(indexPath)
+  if (cached && cached.mtimeMs === mtimeMs) {
+    return cached.map
+  }
+
+  const map = parseKimiSessionIndex(indexPath)
+  workDirCacheByIndexPath.set(indexPath, { mtimeMs, map })
+  return map
 }
 
 async function parseKimiSessionIndex(indexPath: string): Promise<Map<string, string>> {

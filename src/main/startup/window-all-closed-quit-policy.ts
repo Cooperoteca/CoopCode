@@ -3,7 +3,7 @@ export function shouldQuitWhenAllWindowsClosed(options: {
   isQuitting: boolean
   isServeMode: boolean
 }): boolean {
-  if (options.isServeMode && !options.isQuitting) {
+  if (options.isServeMode) {
     return false
   }
   return options.platform !== 'darwin' || options.isQuitting

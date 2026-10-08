@@ -104,18 +104,8 @@ export function useMobileSourceControlLoaders(params: Params): MobileSourceContr
           return false
         }
         if (!baseRef) {
-          // Why: wiping a prior ready compare to idle makes Changes say "No
-          // Changes" even when commits still exist (e.g. after abort-merge refresh).
-          setBranchCompareState((prev) => {
-            if (options?.preserveReadyOnFailure && prev.kind === 'ready') {
-              return prev
-            }
-            return {
-              kind: 'error',
-              message: 'Unable to resolve the base branch for comparison.'
-            }
-          })
-          return false
+          setBranchCompareState({ kind: 'idle' })
+          return true
         }
         const response = await client.sendRequest('git.branchCompare', {
           worktree: `id:${worktreeId}`,
@@ -126,12 +116,7 @@ export function useMobileSourceControlLoaders(params: Params): MobileSourceContr
         }
         if (!response.ok) {
           if (isMobileGitUnavailable(response.error?.code, response.error?.message)) {
-            setBranchCompareState((prev) => {
-              if (options?.preserveReadyOnFailure && prev.kind === 'ready') {
-                return prev
-              }
-              return { kind: 'idle' }
-            })
+            setBranchCompareState({ kind: 'idle' })
             return false
           }
           throw new Error(response.error?.message || 'Unable to load committed changes')

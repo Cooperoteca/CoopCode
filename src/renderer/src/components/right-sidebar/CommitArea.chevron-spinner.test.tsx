@@ -33,12 +33,11 @@ function baseProps(overrides: Partial<PrimaryActionInputs> = {}) {
     commitMessage: 'feat: add commit area',
     commitError: null as string | null,
     commitFailureRecoveryPrompt: null as string | null,
-    pushRecovery: null,
     remoteActionError: null as string | null,
     isCommitting: inputs.isCommitting,
     isFixingCommitFailureWithAI: false,
-    isFixingPushFailureWithAI: false,
     sourceControlAiActionsVisible: true,
+    aiEnabled: false,
     aiAgentConfigured: false,
     isGenerating: false,
     generateError: null as string | null,
@@ -53,16 +52,13 @@ function baseProps(overrides: Partial<PrimaryActionInputs> = {}) {
     onGenerate: vi.fn(),
     onCancelGenerate: vi.fn(),
     onFixCommitFailureWithAI: vi.fn(),
-    onFixPushFailureWithAI: vi.fn(),
     onPrimaryAction: vi.fn(),
     onDropdownAction: vi.fn() as (kind: DropdownActionKind) => void
   }
 }
 
 function buttons(markup: string): string[] {
-  return [...markup.matchAll(/<button\b[\s\S]*?<\/button>/g)]
-    .map((match) => match[0])
-    .filter((entry) => !entry.includes('aria-label="Generate commit message with AI"'))
+  return [...markup.matchAll(/<button\b[\s\S]*?<\/button>/g)].map((match) => match[0])
 }
 
 function renderButtons(props: ReturnType<typeof baseProps>): string[] {

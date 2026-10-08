@@ -6,30 +6,27 @@ type SlugProjectDialogState = {
   origin: {
     owner: string
     repo: string
-    host?: string
   }
 }
 
 type RepoNotInOrcaDialogState = {
   owner: string
   repo: string
-  host?: string
 }
 
 type RepoMatch = {
   id: string
 }
 
-type LookupSlug = (slug: string, host?: string) => readonly RepoMatch[]
+type LookupSlug = (slug: string) => readonly RepoMatch[]
 
 function shouldCloseFallbackDialog(args: {
   lookupSlug: LookupSlug
   selectedRepoIds: ReadonlySet<string>
   owner: string
   repo: string
-  host?: string
 }): boolean {
-  const matches = args.lookupSlug(`${args.owner}/${args.repo}`, args.host)
+  const matches = args.lookupSlug(`${args.owner}/${args.repo}`)
   const selectedMatchCount = matches.filter((match) => args.selectedRepoIds.has(match.id)).length
   const unselectedMatchCount = matches.length - selectedMatchCount
   return selectedMatchCount > 0 || unselectedMatchCount > 0
@@ -70,8 +67,7 @@ export function resolveMissingRepoProjectDialogState<
         lookupSlug,
         selectedRepoIds,
         owner: slugDialog.origin.owner,
-        repo: slugDialog.origin.repo,
-        host: slugDialog.origin.host
+        repo: slugDialog.origin.repo
       })
         ? null
         : slugDialog,
@@ -81,8 +77,7 @@ export function resolveMissingRepoProjectDialogState<
         lookupSlug,
         selectedRepoIds,
         owner: repoNotInOrca.owner,
-        repo: repoNotInOrca.repo,
-        host: repoNotInOrca.host
+        repo: repoNotInOrca.repo
       })
         ? null
         : repoNotInOrca

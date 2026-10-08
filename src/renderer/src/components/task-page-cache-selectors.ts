@@ -37,7 +37,6 @@ type WorkItemsCache = Record<string, CacheEntry<GitHubWorkItem[]>>
 type LinearIssueCache = Record<string, CacheEntry<LinearIssue>>
 type LinearSearchCache = Record<string, CacheEntry<LinearIssue[]>>
 type LinearListCache = Record<string, CacheEntry<LinearCollectionResult<LinearIssue>>>
-export type TaskPageWorkItemPages = readonly (GitHubWorkItem[] | null)[]
 
 export function deriveTaskPageGitHubWorkItemsFetchOptions(
   forcedFetch: boolean,
@@ -79,48 +78,14 @@ export function buildTaskPageRepoSourceState(
   })
 }
 
-export type TaskPageUnresolvedSourceRepo = {
-  repoId: string
-  sourceKey: string
-  label: string
-}
-
-/**
- * Select the fetched repos that resolved neither an issue nor a PR GitHub source.
- *
- * Why: since #9660 an unresolvable source returns an empty null-source envelope
- * instead of an unscoped search. That empty is otherwise indistinguishable from a
- * genuine zero-result query, so surface these repos to the user. The three states
- * are told apart purely by `sources`: present-but-both-null = unresolved (this
- * function), a non-null side = resolved (genuine zero), `null` = not yet fetched.
- */
-export function selectTaskPageUnresolvedSourceRepos(
-  repos: readonly { id: string; displayName?: string; path: string }[],
-  sourceState: readonly TaskPageRepoSourceState[]
-): TaskPageUnresolvedSourceRepo[] {
-  const stateByRepoId = new Map(sourceState.map((state) => [state.repoId, state]))
-  const unresolved: TaskPageUnresolvedSourceRepo[] = []
-  for (const repo of repos) {
-    const state = stateByRepoId.get(repo.id)
-    if (state?.sources && !state.sources.issues && !state.sources.prs && !state.error) {
-      unresolved.push({
-        repoId: repo.id,
-        sourceKey: state.sourceKey,
-        label: repo.displayName ?? repo.path
-      })
-    }
-  }
-  return unresolved
-}
-
 function taskPageWorkItemCacheKey(item: GitHubWorkItem): string {
   return `${item.repoId}\u0000${item.id}`
 }
 
 export function reconcileTaskPagePagesWithWorkItemsCache(
-  pages: TaskPageWorkItemPages,
+  pages: readonly GitHubWorkItem[][],
   entries: readonly (CacheEntry<GitHubWorkItem[]> | undefined)[]
-): (GitHubWorkItem[] | null)[] {
+): GitHubWorkItem[][] {
   const cachedItems = new Map<string, GitHubWorkItem>()
   for (const entry of entries) {
     for (const item of entry?.data ?? []) {
@@ -130,9 +95,6 @@ export function reconcileTaskPagePagesWithWorkItemsCache(
 
   let changed = false
   const nextPages = pages.map((page) => {
-    if (!page) {
-      return null
-    }
     let pageChanged = false
     const nextPage = page.map((item) => {
       const cached = cachedItems.get(taskPageWorkItemCacheKey(item))
@@ -146,7 +108,7 @@ export function reconcileTaskPagePagesWithWorkItemsCache(
     return pageChanged ? nextPage : page
   })
 
-  return changed ? nextPages : (pages as (GitHubWorkItem[] | null)[])
+  return changed ? nextPages : (pages as GitHubWorkItem[][])
 }
 
 function taskPageWorkItemKey(item: GitHubWorkItem): string {
@@ -259,16 +221,16 @@ export function shouldResetTaskPagePaginationAfterLandingRefresh(
 }
 
 export function reconcileTaskPagePagesAfterLandingRefresh(
-  pages: TaskPageWorkItemPages,
+  pages: readonly GitHubWorkItem[][],
   refreshedItems: readonly GitHubWorkItem[]
-): (GitHubWorkItem[] | null)[] {
+): GitHubWorkItem[][] {
   const firstPage = pages[0] ?? []
   if (shouldResetTaskPagePaginationAfterLandingRefresh(firstPage, refreshedItems)) {
     return [[...refreshedItems]]
   }
   const nextFirstPage = reconcileTaskPageItemsAfterLandingRefresh(firstPage, refreshedItems)
   if (nextFirstPage === firstPage) {
-    return pages as (GitHubWorkItem[] | null)[]
+    return pages as GitHubWorkItem[][]
   }
   return [nextFirstPage, ...pages.slice(1)]
 }

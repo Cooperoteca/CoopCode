@@ -14,7 +14,6 @@ import type {
   JiraMutationResult,
   JiraPriority,
   JiraProject,
-  JiraProjectStatusOrder,
   JiraSite,
   JiraSiteSelection,
   JiraStatus,
@@ -23,7 +22,6 @@ import type {
 } from '../../shared/types'
 import {
   acquire,
-  apiBasePath,
   clearToken,
   getClients,
   isAuthError,
@@ -31,23 +29,7 @@ import {
   release,
   type JiraClientForSite
 } from './client'
-import {
-  adfToMarkdownText,
-  collectAdfMediaAttrs,
-  textToAdf,
-  type AdfToMarkdownOptions,
-  type JiraAdfMediaAttrs
-} from './adf-markdown'
-import {
-  extractAttachmentContentIdsFromHtml,
-  selectPreferredAttachmentIds,
-  warnIfMediaResolutionIncomplete
-} from './attachment-discovery'
-import {
-  createMediaMarkdownResolver,
-  loadIssueImageAttachments,
-  type MediaResolutionStats
-} from './attachment-images'
+import { adfToMarkdownText, textToAdf } from './adf-markdown'
 
 const ISSUE_FIELDS = [
   'summary',
@@ -62,10 +44,6 @@ const ISSUE_FIELDS = [
   'created',
   'updated'
 ]
-
-// Why: detail reads need attachment metadata so inline ADF media can be resolved
-// to downloadable image content; list/search omit this for payload size.
-const ISSUE_DETAIL_FIELDS = [...ISSUE_FIELDS, 'attachment']
 
 type JiraRecord = Record<string, unknown>
 
@@ -130,13 +108,6 @@ function asRecord(value: unknown): JiraRecord {
 
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
-}
-
-function asIdentifier(value: unknown): string {
-  if (typeof value === 'string') {
-    return value
-  }
-  return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
 }
 
 function asStringArray(value: unknown): string[] {
@@ -212,8 +183,7 @@ function avatarUrl(value: unknown): string | undefined {
 
 function mapUser(value: unknown): JiraUser | undefined {
   const user = asRecord(value)
-  // Server/DC users have no accountId; name (login) and key are its stable ids.
-  const accountId = asString(user.accountId) || asString(user.name) || asString(user.key)
+  const accountId = asString(user.accountId)
   if (!accountId) {
     return undefined
   }
@@ -329,16 +299,7 @@ function issueUrl(site: JiraSite, key: string): string {
   return `${site.siteUrl}/browse/${encodeURIComponent(key)}`
 }
 
-// REST v2 (Server/DC) bodies are plain text; v3 (Cloud) requires ADF documents.
-function toBodyText(site: JiraSite, text: string): unknown {
-  return site.authType === 'server' ? text : textToAdf(text)
-}
-
-export function mapJiraIssue(
-  site: JiraSite,
-  raw: JiraRecord,
-  adfOptions?: AdfToMarkdownOptions
-): JiraIssue {
+export function mapJiraIssue(site: JiraSite, raw: JiraRecord): JiraIssue {
   const fields = asRecord(raw.fields)
   const key = asString(raw.key)
   return {
@@ -347,7 +308,7 @@ export function mapJiraIssue(
     siteId: site.id,
     siteName: site.displayName,
     title: asString(fields.summary, key || 'Untitled issue'),
-    description: adfToMarkdownText(fields.description, adfOptions),
+    description: adfToMarkdownText(fields.description),
     url: issueUrl(site, key),
     project: mapProject(fields.project, site),
     issueType: mapIssueType(fields.issuetype),
@@ -359,97 +320,6 @@ export function mapJiraIssue(
     createdAt: asString(fields.created, new Date().toISOString()),
     updatedAt: asString(fields.updated, new Date().toISOString())
   }
-}
-
-type MediaRequest = {
-  attachmentField: unknown
-  preferredIds: string[]
-  needCount: number
-  fallbackRan: boolean
-  issueKey: string
-}
-
-/** Pooled: HTML/ADF selection only — no binary downloads. */
-function collectIssueMediaRequest(raw: JiraRecord): MediaRequest | undefined {
-  const fields = asRecord(raw.fields)
-  const renderedFields = asRecord(raw.renderedFields)
-  const htmlIds = extractAttachmentContentIdsFromHtml(
-    asString(renderedFields.description) || undefined
-  )
-  const mediaAttrs = collectAdfMediaAttrs(fields.description)
-  const selection = selectPreferredAttachmentIds({
-    renderedHtmlIds: htmlIds,
-    attachmentField: fields.attachment,
-    mediaAttrs
-  })
-  if (selection.needCount === 0 && selection.preferredIds.length === 0) {
-    return undefined
-  }
-  return {
-    attachmentField: fields.attachment,
-    preferredIds: selection.preferredIds,
-    needCount: selection.needCount,
-    fallbackRan: selection.fallbackRan,
-    issueKey: asString(raw.key)
-  }
-}
-
-type PreparedMedia = {
-  options: AdfToMarkdownOptions
-  stats: MediaResolutionStats
-  request: MediaRequest
-}
-
-/** Unpooled: binary downloads + resolver (outside the Jira API semaphore). */
-async function prepareMediaResolver(
-  client: JiraClientForSite,
-  request: MediaRequest
-): Promise<PreparedMedia | undefined> {
-  if (request.preferredIds.length === 0) {
-    warnIfMediaResolutionIncomplete({
-      siteId: client.site.id,
-      issueKey: request.issueKey,
-      needCount: request.needCount,
-      preferredIdCount: 0,
-      resolvedCount: 0,
-      fallbackRan: request.fallbackRan
-    })
-    return undefined
-  }
-  const images = await loadIssueImageAttachments(
-    client,
-    request.attachmentField,
-    request.preferredIds
-  )
-  if (images.length === 0) {
-    warnIfMediaResolutionIncomplete({
-      siteId: client.site.id,
-      issueKey: request.issueKey,
-      needCount: request.needCount,
-      preferredIdCount: request.preferredIds.length,
-      resolvedCount: 0,
-      fallbackRan: request.fallbackRan
-    })
-    return undefined
-  }
-  const stats: MediaResolutionStats = { attachmentResolvedCount: 0 }
-  const resolveMedia = createMediaMarkdownResolver(images, request.preferredIds, stats)
-  return {
-    options: { resolveMedia },
-    stats,
-    request
-  }
-}
-
-function flushMediaResolutionWarn(client: JiraClientForSite, prepared: PreparedMedia): void {
-  warnIfMediaResolutionIncomplete({
-    siteId: client.site.id,
-    issueKey: prepared.request.issueKey,
-    needCount: prepared.request.needCount,
-    preferredIdCount: prepared.request.preferredIds.length,
-    resolvedCount: prepared.stats.attachmentResolvedCount,
-    fallbackRan: prepared.request.fallbackRan
-  })
 }
 
 function sortAndLimitIssues(issues: JiraIssue[], limit: number): JiraIssue[] {
@@ -476,12 +346,7 @@ async function searchIssuesForClient(
   jql: string,
   limit: number
 ): Promise<JiraIssue[]> {
-  // Server/DC only has the classic /search resource; /search/jql is Cloud-only.
-  const searchPath =
-    entry.site.authType === 'server'
-      ? `${apiBasePath(entry.site)}/search`
-      : '/rest/api/3/search/jql'
-  const result = await jiraRequest<JiraSearchResponse>(entry, searchPath, {
+  const result = await jiraRequest<JiraSearchResponse>(entry, '/rest/api/3/search/jql', {
     method: 'POST',
     body: JSON.stringify({
       jql,
@@ -552,22 +417,15 @@ export async function getIssue(
 ): Promise<JiraIssue | null> {
   const entries = getClients(siteId)
   for (const entry of entries) {
-    let mediaRequest: MediaRequest | undefined
-    let issue: JiraRecord | undefined
-    let held = false
+    await acquire()
     try {
-      await acquire()
-      held = true
-      const params = new URLSearchParams({
-        fields: ISSUE_DETAIL_FIELDS.join(','),
-        expand: 'renderedFields'
-      })
-      issue = await jiraRequest<JiraRecord>(
+      const issue = await jiraRequest<JiraRecord>(
         entry,
-        `${apiBasePath(entry.site)}/issue/${encodeURIComponent(key)}?${params.toString()}`
+        `/rest/api/3/issue/${encodeURIComponent(key)}?fields=${encodeURIComponent(
+          ISSUE_FIELDS.join(',')
+        )}`
       )
-      // Why: keep only JSON under the pool; binary downloads fan out after release.
-      mediaRequest = collectIssueMediaRequest(issue)
+      return mapJiraIssue(entry.site, issue)
     } catch (error) {
       if (isAuthError(error)) {
         clearToken(entry.site.id)
@@ -577,27 +435,8 @@ export async function getIssue(
       } else {
         console.warn('[jira] getIssue failed:', error)
       }
-      continue
     } finally {
-      if (held) {
-        held = false
-        release()
-      }
-    }
-
-    try {
-      if (!issue) {
-        continue
-      }
-      const prepared = mediaRequest ? await prepareMediaResolver(entry, mediaRequest) : undefined
-      const mapped = mapJiraIssue(entry.site, issue, prepared?.options)
-      if (prepared) {
-        flushMediaResolutionWarn(entry, prepared)
-      }
-      return mapped
-    } catch (error) {
-      console.warn('[jira] getIssue media load failed:', error)
-      return mapJiraIssue(entry.site, issue)
+      release()
     }
   }
   return null
@@ -621,7 +460,7 @@ export async function createIssue(args: JiraCreateIssueArgs): Promise<JiraCreate
       summary: title
     }
     if (args.description?.trim()) {
-      fields.description = toBodyText(entry.site, args.description.trim())
+      fields.description = textToAdf(args.description.trim())
     }
     for (const [fieldKey, value] of Object.entries(args.customFields ?? {})) {
       if (!fieldKey || value === undefined || value === null || value === '') {
@@ -631,7 +470,7 @@ export async function createIssue(args: JiraCreateIssueArgs): Promise<JiraCreate
     }
     const created = await jiraRequest<{ id: string; key: string; self: string }>(
       entry,
-      `${apiBasePath(entry.site)}/issue`,
+      '/rest/api/3/issue',
       {
         method: 'POST',
         body: JSON.stringify({ fields })
@@ -670,27 +509,20 @@ export async function updateIssue(
     if (updates.priorityId !== undefined) {
       fields.priority = updates.priorityId ? { id: updates.priorityId } : null
     }
-    const issueBase = `${apiBasePath(entry.site)}/issue/${encodeURIComponent(key)}`
     if (Object.keys(fields).length > 0) {
-      await jiraRequest(entry, issueBase, {
+      await jiraRequest(entry, `/rest/api/3/issue/${encodeURIComponent(key)}`, {
         method: 'PUT',
         body: JSON.stringify({ fields })
       })
     }
     if (updates.assigneeAccountId !== undefined) {
-      // Server/DC identifies assignees by username (`name`), not accountId;
-      // mapUser stores the Server username in the accountId slot.
-      const assigneeBody =
-        entry.site.authType === 'server'
-          ? { name: updates.assigneeAccountId }
-          : { accountId: updates.assigneeAccountId }
-      await jiraRequest(entry, `${issueBase}/assignee`, {
+      await jiraRequest(entry, `/rest/api/3/issue/${encodeURIComponent(key)}/assignee`, {
         method: 'PUT',
-        body: JSON.stringify(assigneeBody)
+        body: JSON.stringify({ accountId: updates.assigneeAccountId })
       })
     }
     if (updates.transitionId) {
-      await jiraRequest(entry, `${issueBase}/transitions`, {
+      await jiraRequest(entry, `/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, {
         method: 'POST',
         body: JSON.stringify({ transition: { id: updates.transitionId } })
       })
@@ -720,10 +552,10 @@ export async function addIssueComment(
   try {
     const comment = await jiraRequest<{ id: string }>(
       entry,
-      `${apiBasePath(entry.site)}/issue/${encodeURIComponent(key)}/comment`,
+      `/rest/api/3/issue/${encodeURIComponent(key)}/comment`,
       {
         method: 'POST',
-        body: JSON.stringify({ body: toBodyText(entry.site, body) })
+        body: JSON.stringify({ body: textToAdf(body) })
       }
     )
     return { ok: true, id: comment.id }
@@ -738,76 +570,13 @@ export async function addIssueComment(
   }
 }
 
-function mapComment(raw: JiraRecord, adfOptions?: AdfToMarkdownOptions): JiraComment {
+function mapComment(raw: JiraRecord): JiraComment {
   return {
     id: asString(raw.id),
-    body: adfToMarkdownText(raw.body, adfOptions),
+    body: adfToMarkdownText(raw.body),
     createdAt: asString(raw.created, new Date().toISOString()),
     updatedAt: asString(raw.updated) || undefined,
     user: mapUser(raw.author)
-  }
-}
-
-/**
- * Pooled comment media collect: attachment metadata JSON stays under the semaphore.
- * Residual: Server/DC comment bodies are wiki markup, not ADF — this only fixes
- * the lookup path; wiki `!filename!` is not rendered as media.
- */
-async function collectCommentMediaRequest(
-  client: JiraClientForSite,
-  key: string,
-  comments: JiraRecord[]
-): Promise<MediaRequest | undefined> {
-  const htmlIds: string[] = []
-  const seen = new Set<string>()
-  const mediaAttrs: JiraAdfMediaAttrs[] = []
-  for (const comment of comments) {
-    for (const id of extractAttachmentContentIdsFromHtml(asString(comment.renderedBody))) {
-      if (!seen.has(id)) {
-        seen.add(id)
-        htmlIds.push(id)
-      }
-    }
-    mediaAttrs.push(...collectAdfMediaAttrs(comment.body))
-  }
-
-  const needingCount = mediaAttrs.filter(
-    (attrs) => !(attrs.url && /^https?:\/\//i.test(attrs.url))
-  ).length
-  // Why: selectPreferredAttachmentIds yields nothing without attachment-needing media, so
-  // HTML ids alone can never produce a download — skip the extra metadata request entirely.
-  if (needingCount === 0) {
-    return undefined
-  }
-
-  // Why: comment media usually references issue-level attachments; pull them once
-  // for the whole thread. Use apiBasePath so Server/DC does not 404 on /rest/api/3.
-  let attachmentField: unknown
-  try {
-    const issue = await jiraRequest<JiraRecord>(
-      client,
-      `${apiBasePath(client.site)}/issue/${encodeURIComponent(key)}?fields=attachment`
-    )
-    attachmentField = asRecord(issue.fields).attachment
-  } catch (error) {
-    console.warn('[jira] comment attachment lookup failed:', error)
-    return undefined
-  }
-
-  const selection = selectPreferredAttachmentIds({
-    renderedHtmlIds: htmlIds,
-    attachmentField,
-    mediaAttrs
-  })
-  if (selection.needCount === 0 && selection.preferredIds.length === 0) {
-    return undefined
-  }
-  return {
-    attachmentField,
-    preferredIds: selection.preferredIds,
-    needCount: selection.needCount,
-    fallbackRan: selection.fallbackRan,
-    issueKey: key
   }
 }
 
@@ -819,23 +588,17 @@ export async function getIssueComments(
   if (!entry) {
     return []
   }
-
-  let comments: JiraRecord[] = []
-  let mediaRequest: MediaRequest | undefined
-  let held = false
+  await acquire()
   try {
-    await acquire()
-    held = true
-    comments = await fetchPagedRecords(entry, 'comments', (startAt, maxResults) => {
+    const comments = await fetchPagedRecords(entry, 'comments', (startAt, maxResults) => {
       const params = new URLSearchParams({
         maxResults: String(maxResults),
         orderBy: 'created',
-        startAt: String(startAt),
-        expand: 'renderedBody'
+        startAt: String(startAt)
       })
-      return `${apiBasePath(entry.site)}/issue/${encodeURIComponent(key)}/comment?${params.toString()}`
+      return `/rest/api/3/issue/${encodeURIComponent(key)}/comment?${params.toString()}`
     })
-    mediaRequest = await collectCommentMediaRequest(entry, key, comments)
+    return comments.map(mapComment)
   } catch (error) {
     if (isAuthError(error)) {
       clearToken(entry.site.id)
@@ -844,22 +607,7 @@ export async function getIssueComments(
     console.warn('[jira] getIssueComments failed:', error)
     return []
   } finally {
-    if (held) {
-      held = false
-      release()
-    }
-  }
-
-  try {
-    const prepared = mediaRequest ? await prepareMediaResolver(entry, mediaRequest) : undefined
-    const mapped = comments.map((comment) => mapComment(comment, prepared?.options))
-    if (prepared) {
-      flushMediaResolutionWarn(entry, prepared)
-    }
-    return mapped
-  } catch (error) {
-    console.warn('[jira] getIssueComments media load failed:', error)
-    return comments.map((comment) => mapComment(comment))
+    release()
   }
 }
 
@@ -872,18 +620,13 @@ export async function listProjects(siteId?: JiraSiteSelection | null): Promise<J
     entries.map(async (entry) => {
       await acquire()
       try {
-        // Server/DC has no /project/search resource; /project returns the
-        // full list as a plain (unpaged) array.
-        const projects =
-          entry.site.authType === 'server'
-            ? await jiraRequest<JiraRecord[]>(entry, `${apiBasePath(entry.site)}/project`)
-            : await fetchPagedRecords(entry, 'values', (startAt, maxResults) => {
-                const params = new URLSearchParams({
-                  maxResults: String(maxResults),
-                  startAt: String(startAt)
-                })
-                return `/rest/api/3/project/search?${params.toString()}`
-              })
+        const projects = await fetchPagedRecords(entry, 'values', (startAt, maxResults) => {
+          const params = new URLSearchParams({
+            maxResults: String(maxResults),
+            startAt: String(startAt)
+          })
+          return `/rest/api/3/project/search?${params.toString()}`
+        })
         return projects.map((project) => mapProject(project, entry.site))
       } catch (error) {
         if (isAuthError(error)) {
@@ -918,8 +661,7 @@ export async function listIssueTypes(
         maxResults: String(maxResults),
         startAt: String(startAt)
       })
-      // Per-project createmeta paths exist on Server/DC from Jira 8.4 onward.
-      return `${apiBasePath(entry.site)}/issue/createmeta/${encodeURIComponent(
+      return `/rest/api/3/issue/createmeta/${encodeURIComponent(
         projectIdOrKey
       )}/issuetypes?${params.toString()}`
     })
@@ -957,7 +699,7 @@ export async function listCreateFields(
       })
       const response = await jiraRequest<JiraPagedResponse<JiraRecord>>(
         entry,
-        `${apiBasePath(entry.site)}/issue/createmeta/${encodeURIComponent(
+        `/rest/api/3/issue/createmeta/${encodeURIComponent(
           projectIdOrKey
         )}/issuetypes/${encodeURIComponent(issueTypeId)}?${params.toString()}`
       )
@@ -992,7 +734,7 @@ export async function listPriorities(siteId?: string | null): Promise<JiraPriori
   }
   await acquire()
   try {
-    const response = await jiraRequest<JiraRecord[]>(entry, `${apiBasePath(entry.site)}/priority`)
+    const response = await jiraRequest<JiraRecord[]>(entry, '/rest/api/3/priority')
     return response.map(mapPriority).filter((priority): priority is JiraPriority => !!priority)
   } catch (error) {
     if (isAuthError(error)) {
@@ -1015,17 +757,15 @@ export async function listAssignableUsers(
   if (!entry) {
     return []
   }
-  const isServer = entry.site.authType === 'server'
   const params = new URLSearchParams({ issueKey: key, maxResults: '50' })
   if (query?.trim()) {
-    // Server/DC filters assignable users by `username`; `query` is Cloud-only.
-    params.set(isServer ? 'username' : 'query', query.trim())
+    params.set('query', query.trim())
   }
   await acquire()
   try {
     const response = await jiraRequest<JiraRecord[]>(
       entry,
-      `${apiBasePath(entry.site)}/user/assignable/search?${params.toString()}`
+      `/rest/api/3/user/assignable/search?${params.toString()}`
     )
     return response.map(mapUser).filter((user): user is JiraUser => !!user)
   } catch (error) {
@@ -1052,7 +792,7 @@ export async function listTransitions(
   try {
     const response = await jiraRequest<{ transitions?: JiraRecord[] }>(
       entry,
-      `${apiBasePath(entry.site)}/issue/${encodeURIComponent(key)}/transitions`
+      `/rest/api/3/issue/${encodeURIComponent(key)}/transitions`
     )
     return (response.transitions ?? []).map((transition) => ({
       id: asString(transition.id),
@@ -1066,80 +806,6 @@ export async function listTransitions(
     }
     console.warn('[jira] listTransitions failed:', error)
     return []
-  } finally {
-    release()
-  }
-}
-
-export async function getProjectStatusOrder(
-  projectKey: string,
-  siteId?: string | null
-): Promise<JiraProjectStatusOrder> {
-  // Why: an omitted site can resolve to the persisted "all" selection; board
-  // metadata is only truthful when exactly one Jira connection owns the project.
-  const entries = getClients(siteId)
-  const entry = entries.length === 1 ? entries[0] : undefined
-  if (!entry) {
-    return { statusIdsByColumn: [] }
-  }
-  await acquire()
-  try {
-    // Why: without an explicit board picker there is no truthful way to choose
-    // among multiple project boards, so ambiguous projects keep alphabetical order.
-    const params = new URLSearchParams({ projectKeyOrId: projectKey, maxResults: '2' })
-    const boardsResponse = await jiraRequest<JiraPagedResponse<JiraRecord>>(
-      entry,
-      `/rest/agile/1.0/board?${params.toString()}`
-    )
-    const boards = boardsResponse.values ?? []
-    const boardCount = asFiniteNumber(boardsResponse.total)
-    const singleBoardIsProven =
-      boards.length === 1 &&
-      boardsResponse.isLast !== false &&
-      (boardCount === 1 || (boardCount === null && boardsResponse.isLast === true))
-    const boardId = singleBoardIsProven ? asIdentifier(asRecord(boards[0]).id) : ''
-    if (!boardId) {
-      return { statusIdsByColumn: [] }
-    }
-
-    const configResponse = await jiraRequest<unknown>(
-      entry,
-      `/rest/agile/1.0/board/${encodeURIComponent(boardId)}/configuration`
-    )
-    const columns = asRecord(asRecord(configResponse).columnConfig).columns
-    if (!Array.isArray(columns)) {
-      return { statusIdsByColumn: [] }
-    }
-
-    // Why: issues already carry status names and IDs, so returning board IDs
-    // avoids a second metadata request and keeps duplicate names unambiguous.
-    const seenStatusIds = new Set<string>()
-    const statusIdsByColumn: string[][] = []
-    for (const column of columns) {
-      const statuses = asRecord(column).statuses
-      if (!Array.isArray(statuses)) {
-        continue
-      }
-      const columnStatusIds: string[] = []
-      for (const status of statuses) {
-        const statusId = asIdentifier(asRecord(status).id)
-        if (statusId && !seenStatusIds.has(statusId)) {
-          seenStatusIds.add(statusId)
-          columnStatusIds.push(statusId)
-        }
-      }
-      if (columnStatusIds.length > 0) {
-        statusIdsByColumn.push(columnStatusIds)
-      }
-    }
-    return { statusIdsByColumn }
-  } catch (error) {
-    if (isAuthError(error)) {
-      clearToken(entry.site.id)
-      throw error
-    }
-    console.warn('[jira] getProjectStatusOrder failed:', error)
-    return { statusIdsByColumn: [] }
   } finally {
     release()
   }

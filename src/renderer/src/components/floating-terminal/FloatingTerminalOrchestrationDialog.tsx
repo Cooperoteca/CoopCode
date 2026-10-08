@@ -8,7 +8,6 @@ import {
 } from '@/components/ui/dialog'
 import { AgentSkillSetupPanel } from '@/components/settings/AgentSkillSetupPanel'
 import { IntegrationStatusPill } from '@/components/integration-status-pill'
-import { SkillFreshnessStatusPill } from '@/components/skills/SkillFreshnessStatusPill'
 import { ORCHESTRATION_SKILL_NAME } from '@/lib/agent-feature-install-commands'
 import {
   AGENT_SKILL_CLI_PREREQUISITE_NOTICE,
@@ -95,19 +94,12 @@ export function FloatingTerminalOrchestrationDialog({
                 )}
               </IntegrationStatusPill>
             ) : orchestrationSkillDetected ? (
-              // Why: the modal owns the status pill, so it must carry the same
-              // freshness signal — and route to the same review dialog — as the
-              // settings card for this skill; WSL falls back to presence-only.
-              activeSkillRuntime.agentRuntime?.runtime === 'wsl' ? (
-                <IntegrationStatusPill tone="connected">
-                  {translate(
-                    'auto.components.floating.terminal.FloatingTerminalOrchestrationDialog.630c0ac8c8',
-                    'Installed'
-                  )}
-                </IntegrationStatusPill>
-              ) : (
-                <SkillFreshnessStatusPill skillName={ORCHESTRATION_SKILL_NAME} />
-              )
+              <IntegrationStatusPill tone="connected">
+                {translate(
+                  'auto.components.floating.terminal.FloatingTerminalOrchestrationDialog.630c0ac8c8',
+                  'Installed'
+                )}
+              </IntegrationStatusPill>
             ) : (
               <IntegrationStatusPill tone="attention">
                 {translate(

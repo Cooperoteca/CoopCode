@@ -202,21 +202,4 @@ describe('getFileExplorerWatchRuntimeEnvironmentId', () => {
       )
     ).toBeNull()
   })
-
-  it('disables a cached watch when its listing owner no longer matches', () => {
-    expect(
-      getFileExplorerWatchRuntimeEnvironmentId(
-        makeState({
-          activeRuntimeEnvironmentId: 'focused-runtime',
-          executionHostId: 'runtime:owner-runtime'
-        }),
-        'wt-1',
-        {
-          kind: 'runtime',
-          environmentId: 'old-owner-runtime',
-          executionHostId: 'runtime:old-owner-runtime'
-        }
-      )
-    ).toBeUndefined()
-  })
 })

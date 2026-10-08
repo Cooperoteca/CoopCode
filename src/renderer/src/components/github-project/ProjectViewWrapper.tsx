@@ -1,5 +1,7 @@
 /* eslint-disable max-lines -- Why: top-level Project-mode container coordinates picker, view selection, query overrides, fetch lifecycle, and toolbar interactions; splitting these would fragment shared state. */
-// Top-level Project-mode container; interaction states per the design doc.
+// Why: top-level container for Project mode. Handles the picker, header,
+// filter label, count pill, Open-in-GitHub, and all Interaction States
+// documented in the design doc.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ExternalLink,
@@ -61,10 +63,6 @@ import {
 } from './project-visible-table-cache'
 import { translate } from '@/i18n/i18n'
 import { buildTaskSourceContextFromRepo } from '../../../../shared/task-source-context'
-import {
-  githubProjectHost,
-  githubProjectIdentityKey
-} from '../../../../shared/github-project-identity'
 
 type Props = {
   selectedRepoIds: ReadonlySet<string>
@@ -74,12 +72,7 @@ const ORCA_FEATURE_REQUEST_URL = 'https://github.com/stablyai/orca/issues/new'
 
 function listProjectViewsForRuntime(
   settings: Parameters<typeof getActiveRuntimeTarget>[0],
-  args: {
-    owner: string
-    ownerType: 'organization' | 'user'
-    projectNumber: number
-    host?: string
-  }
+  args: { owner: string; ownerType: 'organization' | 'user'; projectNumber: number }
 ): Promise<ListProjectViewsResult> {
   const target = getActiveRuntimeTarget(settings)
   return target.kind === 'environment'
@@ -92,43 +85,6 @@ function listProjectViewsForRuntime(
 function getProjectViewSourceScope(settings: Parameters<typeof getActiveRuntimeTarget>[0]): string {
   const target = getActiveRuntimeTarget(settings)
   return target.kind === 'environment' ? `runtime:${target.environmentId}` : 'local'
-}
-
-export function buildProjectWorkItem(
-  row: GitHubProjectRow,
-  repoId: string,
-  host?: string
-): GitHubWorkItem | null {
-  if (row.itemType !== 'ISSUE' && row.itemType !== 'PULL_REQUEST') {
-    return null
-  }
-  if (row.content.number == null || !row.content.url) {
-    return null
-  }
-  const [owner, repo] = row.content.repository?.split('/') ?? []
-  // Why: Project rows can reach mutation controls before detail hydration, so
-  // preserve their host-bearing repository identity on the initial item.
-  const prRepo = owner && repo ? { owner, repo, host: githubProjectHost(host) } : undefined
-  return {
-    id: `${row.itemType === 'PULL_REQUEST' ? 'pr' : 'issue'}:${row.content.number}`,
-    type: row.itemType === 'PULL_REQUEST' ? 'pr' : 'issue',
-    number: row.content.number,
-    title: row.content.title,
-    state:
-      row.content.state === 'MERGED'
-        ? 'merged'
-        : row.content.state === 'CLOSED'
-          ? 'closed'
-          : row.content.isDraft
-            ? 'draft'
-            : 'open',
-    url: row.content.url,
-    labels: row.content.labels.map((label) => label.name),
-    updatedAt: row.updatedAt,
-    author: null,
-    repoId,
-    prRepo
-  }
 }
 
 export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JSX.Element {
@@ -160,12 +116,22 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
   const [parentDroppedToasted, setParentDroppedToasted] = useState<ReadonlySet<string>>(
     () => new Set()
   )
-  // Why: cache view list per project so the tab strip doesn't flicker/refetch on re-render; keyed `ownerType:owner:number`.
+  // Why: cache the project's view list per active project so the tab strip
+  // renders without flicker on re-renders and survives view switches without
+  // refetching. Keyed by `ownerType:owner:number`.
   const [viewListByProject, setViewListByProject] = useState<
     Record<string, GitHubProjectViewSummary[]>
   >({})
 
-  // Why: ephemeral per-(project,view) search override, never persisted (design doc §"Out of scope"); `undefined` = use the view's filter as-is.
+  // Why: ephemeral search override, scoped to (project, view). Mirrors GitHub
+  // Projects' search box — pre-populated from `selectedView.filter`, applied
+  // on Enter/blur, cleared with the X button. The override is NEVER persisted
+  // to settings or to GitHub (per design doc §"Out of scope" line 36); a tab
+  // switch or refresh resets to the view's stored filter. Keyed by
+  // `ownerType:owner:number:viewId`. `undefined` (entry missing) means
+  // "use the view's filter as-is" so the cache key collapses to the
+  // unfiltered cache entry. The transient input string lives inside
+  // `ProjectSearchInput` so typing does not re-render the table.
   const [appliedQueryByView, setAppliedQueryByView] = useState<Record<string, string>>({})
 
   const doFetch = useCallback(
@@ -180,7 +146,6 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
             owner: selection.owner,
             ownerType: selection.ownerType,
             projectNumber: selection.projectNumber,
-            host: githubProjectHost(selection.host),
             ...(selection.viewId ? { viewId: selection.viewId } : {}),
             ...(queryOverride !== undefined ? { queryOverride } : {})
           },
@@ -193,7 +158,8 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
           setError({ error: res.error, totalCount: res.totalCount })
         }
       } finally {
-        // Why: an older overlapping fetch finishing first must not clear a newer refresh's loading indicator.
+        // Why: a manual refresh can overlap with a tab/search fetch; an older
+        // request finishing first must not clear the newer refresh indicator.
         if (mountedRef.current && fetchRunIdRef.current === runId) {
           setLoading(false)
         }
@@ -214,7 +180,7 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
     if (!activeProject) {
       return
     }
-    const key = githubProjectIdentityKey(activeProject)
+    const key = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
     const viewId = lastViewByProject[key]?.viewId
     if (!viewId) {
       return
@@ -227,8 +193,7 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
       activeProject.number,
       viewId,
       queryOverride,
-      projectViewSourceScope,
-      activeProject.host
+      projectViewSourceScope
     )
     if (projectViewCache[cacheKey]?.data) {
       return
@@ -238,7 +203,6 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
         owner: activeProject.owner,
         ownerType: activeProject.ownerType,
         projectNumber: activeProject.number,
-        host: githubProjectHost(activeProject.host),
         viewId
       },
       false,
@@ -253,12 +217,14 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
     projectViewSourceScope
   ])
 
-  // Load the view list once per project per session (small, rarely changes) so the tab strip can render.
+  // Load the project's view list whenever the active project changes so the
+  // tab strip can render. The list is small and rarely changes — fetched once
+  // per project per session is fine.
   useEffect(() => {
     if (!activeProject) {
       return
     }
-    const projectKey = `${projectViewSourceScope}:${githubProjectIdentityKey(activeProject)}`
+    const projectKey = `${projectViewSourceScope}:${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
     if (viewListByProject[projectKey]) {
       return
     }
@@ -266,8 +232,7 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
     void listProjectViewsForRuntime(settings, {
       owner: activeProject.owner,
       ownerType: activeProject.ownerType,
-      projectNumber: activeProject.number,
-      host: githubProjectHost(activeProject.host)
+      projectNumber: activeProject.number
     })
       .then((res) => {
         if (cancelled) {
@@ -283,7 +248,8 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
         if (cancelled) {
           return
         }
-        // Why: swallow the IPC rejection (else unhandled/dev-tools red); fall back to the empty-tabs UI.
+        // Why: an IPC rejection here would surface as an unhandled rejection
+        // and dev-tools red — log and fall back to the empty-tabs UI.
         console.warn('[project-view] listProjectViews threw:', err)
       })
     return () => {
@@ -296,12 +262,16 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
       if (!activeProject) {
         return
       }
-      const projectKey = githubProjectIdentityKey(activeProject)
+      const projectKey = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
       const current = lastViewByProject[projectKey]?.viewId
       if (current === viewId) {
         return
       }
-      // Why: read freshest settings via getState() so a concurrent pin/recent mutation isn't clobbered on write.
+      // Persist the new view selection so reloads & the picker stay in sync.
+      // Why: read the freshest settings via getState() rather than the closure-
+      // captured `settings` — between callback creation and invocation another
+      // mutation (pin/recent update from elsewhere) may have landed, and the
+      // closure value would clobber it on write.
       const freshSettings = useAppStore.getState().settings
       const prevSettings = freshSettings?.githubProjects ?? {
         pinned: [],
@@ -322,7 +292,6 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
         owner: activeProject.owner,
         ownerType: activeProject.ownerType,
         projectNumber: activeProject.number,
-        host: githubProjectHost(activeProject.host),
         viewId
       })
     },
@@ -333,7 +302,7 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
     if (!activeProject) {
       return null
     }
-    const key = githubProjectIdentityKey(activeProject)
+    const key = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
     const viewId = lastViewByProject[key]?.viewId
     if (!viewId) {
       return null
@@ -349,7 +318,7 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
     if (!activeProject) {
       return null
     }
-    const key = githubProjectIdentityKey(activeProject)
+    const key = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
     const viewId = lastViewByProject[key]?.viewId
     if (!viewId) {
       return null
@@ -360,8 +329,7 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
       activeProject.number,
       viewId,
       currentAppliedOverride,
-      projectViewSourceScope,
-      activeProject.host
+      projectViewSourceScope
     )
   }, [activeProject, lastViewByProject, currentAppliedOverride, projectViewSourceScope])
 
@@ -380,7 +348,9 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
     [table, slugIndexReady, lookupSlug, selectedRepoIds]
   )
   const lastFilteredTableRef = useRef<CachedVisibleProjectTable | null>(null)
-  // Why: ref-cache prevents a blank table while the slug index rebuilds, without forcing a second render.
+  // Why: this cache only prevents a blank table while the repo slug index
+  // rebuilds; a ref preserves the previous render value without scheduling
+  // a second render after every filtered-table change.
   lastFilteredTableRef.current = getNextVisibleProjectTableCache({
     currentCacheKey,
     selectedRepoFingerprint,
@@ -422,21 +392,27 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
     ? `${table.project.url}/views/${table.selectedView.number ?? ''}`
     : null
 
-  // Why: matched-repo rows open `GitHubItemDialog`, unmatched the slug dialog; `repoNotInOrca` drives the `repo-not-in-orca` modal.
+  // ── Row action state ────────────────────────────────────────────────
+  // Why: when a row matches a registered repo, we open the full
+  // `GitHubItemDialog` in repo-backed mode; when it doesn't, we open the
+  // simplified slug-mode dialog. `repoNotInOrca` drives the fallback modal
+  // from the design doc's `repo-not-in-orca` interaction state.
   const [dialogRepoItem, setDialogRepoItem] = useState<{
     workItem: GitHubWorkItem
     repoPath: string
     repoId: string
     origin: GitHubItemDialogProjectOrigin
   } | null>(null)
-  // Why: slug dialog only serves unregistered-repo rows; the parent (not this dialog) owns the repo-not-in-orca "Start work" flow.
+  // Why: the slug dialog is only opened for rows whose repo isn't registered
+  // in Orca (matched repos go through the full GitHubItemDialog above), so
+  // there's no `matchedRepo` to track here. The repo-not-in-orca modal —
+  // owned by this parent, not the slug dialog — handles "Start work".
   const [slugDialog, setSlugDialog] = useState<{
     origin: GitHubItemDialogProjectOrigin
   } | null>(null)
   const [repoNotInOrca, setRepoNotInOrca] = useState<{
     owner: string
     repo: string
-    host?: string
     url: string | null
   } | null>(null)
   const liveRepoIds = useMemo(() => new Set(repos.map((repo) => repo.id)), [repos])
@@ -447,7 +423,8 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
     selectedRepoIds
   )
   if (resolvedDialogRepoItem !== dialogRepoItem) {
-    // Why: clear the repo-backed dialog when its repo leaves Orca, before the modal tree gets stale repo ids.
+    // Why: repo-backed Project dialogs cannot edit after their repo leaves
+    // Orca; clear them before the modal tree receives stale repo ids.
     setDialogRepoItem(resolvedDialogRepoItem)
   }
   const resolvedDialogRepo = resolvedDialogRepoItem
@@ -469,12 +446,44 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
     selectedRepoIds
   })
   if (resolvedMissingRepoDialogs.slugDialog !== slugDialog) {
-    // Why: once a missing repo is registered, rows switch to the full repo-backed dialog, not the slug fallback.
+    // Why: once a previously missing repo is registered, Project rows should
+    // use the full repo-backed dialog instead of the slug fallback.
     setSlugDialog(resolvedMissingRepoDialogs.slugDialog)
   }
   if (resolvedMissingRepoDialogs.repoNotInOrca !== repoNotInOrca) {
     setRepoNotInOrca(resolvedMissingRepoDialogs.repoNotInOrca)
   }
+
+  const buildWorkItem = useCallback(
+    (row: GitHubProjectRow, repoId: string): GitHubWorkItem | null => {
+      if (row.itemType !== 'ISSUE' && row.itemType !== 'PULL_REQUEST') {
+        return null
+      }
+      if (row.content.number == null || !row.content.url) {
+        return null
+      }
+      return {
+        id: `${row.itemType === 'PULL_REQUEST' ? 'pr' : 'issue'}:${row.content.number}`,
+        type: row.itemType === 'PULL_REQUEST' ? 'pr' : 'issue',
+        number: row.content.number,
+        title: row.content.title,
+        state:
+          row.content.state === 'MERGED'
+            ? 'merged'
+            : row.content.state === 'CLOSED'
+              ? 'closed'
+              : row.content.isDraft
+                ? 'draft'
+                : 'open',
+        url: row.content.url,
+        labels: row.content.labels.map((l) => l.name),
+        updatedAt: row.updatedAt,
+        author: null,
+        repoId
+      }
+    },
+    []
+  )
 
   const buildOrigin = useCallback(
     (
@@ -495,7 +504,6 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
       return {
         owner,
         repo,
-        host: githubProjectHost(table.project.host),
         number: row.content.number,
         type: row.itemType === 'PULL_REQUEST' ? 'pr' : 'issue',
         projectId: table.project.id,
@@ -529,7 +537,6 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
       const resolution = resolveSelectedProjectRowRepo({
         row,
         lookupSlug,
-        host: table.project.host,
         slugIndexReady,
         selectedRepoIds
       })
@@ -544,7 +551,7 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
         return
       }
       if (resolution.status === 'selected_match') {
-        const workItem = buildProjectWorkItem(row, resolution.repo.id, table.project.host)
+        const workItem = buildWorkItem(row, resolution.repo.id)
         if (workItem) {
           setDialogRepoItem({
             workItem,
@@ -587,7 +594,8 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
       lookupSlug,
       slugIndexReady,
       selectedRepoIds,
-      openProjectRowUrlWithToast
+      openProjectRowUrlWithToast,
+      buildWorkItem
     ]
   )
 
@@ -603,7 +611,6 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
       const resolution = resolveSelectedProjectRowRepo({
         row,
         lookupSlug,
-        host: table.project.host,
         slugIndexReady,
         selectedRepoIds
       })
@@ -621,7 +628,6 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
         setRepoNotInOrca({
           owner: origin.owner,
           repo: origin.repo,
-          host: origin.host,
           url: row.content.url ?? null
         })
         return
@@ -649,18 +655,22 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
       if (resolution.status !== 'selected_match') {
         return
       }
-      const workItem = buildProjectWorkItem(row, resolution.repo.id, table.project.host)
+      const workItem = buildWorkItem(row, resolution.repo.id)
       if (!workItem) {
         return
       }
-      // Why: issue #4756 changed only TaskPage's "Create workspace"; Project view stays on direct "start work now" launch.
+      // Why: issue #4756 changes the TaskPage "Create workspace" path only.
+      // Project view still means "start work now", so it stays on direct launch.
       void launchWorkItemDirect({
         item: workItem,
         repoId: resolution.repo.id,
         launchSource: 'task_page',
         telemetrySource: 'sidebar',
         openModalFallback: () => {
-          // Why: Project mode lacks the new-workspace composer, so when launch needs user input, open the URL instead of a silent no-op.
+          // Why: Project mode does not own the new-workspace composer modal.
+          // When `launchWorkItemDirect` wants user input (setupRunPolicy:'ask'
+          // or agent detection fails), fall back to opening the URL so the
+          // user keeps a path forward rather than a silent no-op.
           if (row.content.url) {
             void window.api.shell.openUrl(row.content.url)
           }
@@ -674,7 +684,8 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
       lookupSlug,
       slugIndexReady,
       selectedRepoIds,
-      openProjectRowUrlWithToast
+      openProjectRowUrlWithToast,
+      buildWorkItem
     ]
   )
 
@@ -753,22 +764,24 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
                   owner: activeProject.owner,
                   ownerType: activeProject.ownerType,
                   number: activeProject.number,
-                  host: githubProjectHost(activeProject.host),
                   title: table.project.title
                 }
               : activeProject
                 ? {
                     owner: activeProject.owner,
                     ownerType: activeProject.ownerType,
-                    number: activeProject.number,
-                    host: githubProjectHost(activeProject.host)
+                    number: activeProject.number
                   }
                 : null
           }
           onSelect={handleSelect}
         />
         {currentProjectViewKey ? (
-          // Why: keep search box mounted through refetches so it doesn't vanish; `key` resets input per (project, view).
+          // Why: render the search input whenever a view is selected — even
+          // while a refetch is in flight and `table` has briefly cleared for
+          // the new cache key. Hiding the search box mid-search would make
+          // it look like the search vanished. `key` keeps the local input
+          // state stable across (project, view) changes only.
           <ProjectSearchInput
             key={currentProjectViewKey}
             viewFilter={table?.selectedView.filter ?? ''}
@@ -777,7 +790,7 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
               if (!activeProject) {
                 return
               }
-              const key = githubProjectIdentityKey(activeProject)
+              const key = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
               const viewId = lastViewByProject[key]?.viewId
               if (!viewId) {
                 return
@@ -791,13 +804,14 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
                 }
                 return next
               })
-              // Why: force-fetch on user apply so a re-typed or TTL-cached query doesn't silently no-op.
+              // Why: force-fetch on user-initiated apply so the same
+              // query re-typed (or cache-stale entries within TTL) does
+              // not silently no-op.
               void doFetch(
                 {
                   owner: activeProject.owner,
                   ownerType: activeProject.ownerType,
                   projectNumber: activeProject.number,
-                  host: githubProjectHost(activeProject.host),
                   viewId
                 },
                 true,
@@ -833,7 +847,7 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
                 if (!activeProject || !currentCacheKey) {
                   return
                 }
-                const key = githubProjectIdentityKey(activeProject)
+                const key = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
                 const viewId = lastViewByProject[key]?.viewId
                 if (!viewId) {
                   return
@@ -843,7 +857,6 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
                     owner: activeProject.owner,
                     ownerType: activeProject.ownerType,
                     projectNumber: activeProject.number,
-                    host: githubProjectHost(activeProject.host),
                     viewId
                   },
                   true,
@@ -883,7 +896,7 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
 
       {activeProject
         ? (() => {
-            const projectKey = githubProjectIdentityKey(activeProject)
+            const projectKey = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
             const scopedProjectKey = `${projectViewSourceScope}:${projectKey}`
             const views = viewListByProject[scopedProjectKey] ?? []
             const activeViewId = lastViewByProject[projectKey]?.viewId ?? null
@@ -910,7 +923,6 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
         <ErrorState
           error={error.error}
           totalCount={error.totalCount}
-          host={activeProject.host}
           onOpenInGitHub={() => {
             if (selectedViewUrl) {
               void window.api.shell.openUrl(selectedViewUrl)
@@ -931,7 +943,8 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
           onUse={(item) => {
             const current = resolvedDialogRepoItem
             setDialogRepoItem(null)
-            // Why: issue #4756 keeps project-view actions on the direct "start work now" path, not the TaskPage background-create flow.
+            // Why: issue #4756 keeps project-view actions on the direct
+            // "start work now" path instead of the TaskPage background-create flow.
             void launchWorkItemDirect({
               item,
               repoId: current.workItem.repoId,
@@ -964,7 +977,11 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
         />
       ) : null}
 
-      {/* Slug-only dialog for unadded-repo rows; Start-work lives in the parent's `repoNotInOrca` modal, not here (avoids a confusing duplicate button). */}
+      {/* Slug-only simplified dialog for rows whose repo isn't added to Orca.
+          Why: no Start-work affordance lives inside the slug dialog — the
+          parent's `handleStartWork`/`repoNotInOrca` modal owns that flow, so
+          having a duplicate (always-disabled or always-routing-to-fallback)
+          button here would only confuse the user. */}
       <ProjectItemSlugDialog
         projectOrigin={resolvedMissingRepoDialogs.slugDialog?.origin ?? null}
         sourceSettings={settings}
@@ -1019,7 +1036,11 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
             ) : null}
             <Button
               onClick={async () => {
-                // Why: `addRepo` opens the OS folder picker (auto-clone is out of v1 scope); close the modal regardless so a cancelled picker doesn't trap the user.
+                // Why: `addRepo` opens the OS folder picker — it's the only
+                // non-destructive way to register a repo today. Auto-cloning
+                // from a row click is out of v1 scope (design doc §Row
+                // actions). Close the modal regardless so the user isn't
+                // trapped if they cancel the picker.
                 setRepoNotInOrca(null)
                 await addRepoFromStore()
               }}
@@ -1036,7 +1057,11 @@ export default function ProjectViewWrapper({ selectedRepoIds }: Props): React.JS
   )
 }
 
-// Why: keeps the input string local so typing doesn't re-render the parent/table; the parent only learns it on apply (Enter/blur/clear).
+// Why: owns the transient search input string locally so typing does not
+// re-render the parent (and therefore not the table). The parent only learns
+// the value when the user applies it (Enter/blur/clear), which is the only
+// moment that should trigger a refetch. Pre-populated from the view's stored
+// filter and remounted (via `key`) when the active project/view changes.
 function ProjectSearchInput({
   viewFilter,
   appliedOverride,
@@ -1053,7 +1078,8 @@ function ProjectSearchInput({
   const dirty = value !== applied
 
   const apply = (next: string): void => {
-    // Why: reverting to the view's stored filter drops the override so the cache key collapses to the unfiltered entry.
+    // Why: when the user reverts to the view's stored filter, drop the
+    // override so the cache key collapses back onto the unfiltered entry.
     onApply(next === viewFilter ? undefined : next)
   }
 
@@ -1169,7 +1195,10 @@ function ViewTabStrip({
   activeViewId: string | null
   onPick: (viewId: string) => void
 }): React.JSX.Element {
-  // Why: emulate GitHub Projects' tab strip; non-table layouts stay visible but disabled.
+  // Why: emulate GitHub Projects' tab strip — pill-shaped active tab with
+  // layout icon, sitting on a muted base bar with a bottom border. Inactive
+  // tabs are flat text; active gets a card background + outline. Disabled
+  // (non-table) layouts stay visible at low opacity.
   return (
     <div className="project-view-tab-strip flex min-h-[41px] min-w-0 flex-none items-end gap-1 overflow-x-auto overflow-y-hidden border-b border-border/50 bg-muted/20 px-3 pt-3">
       {views.map((v) => {
@@ -1267,21 +1296,20 @@ function ViewTabStrip({
 function ErrorState({
   error,
   totalCount,
-  host,
   onOpenInGitHub
 }: {
   error: GitHubProjectViewError
   totalCount?: number
-  host?: string
   onOpenInGitHub: () => void
 }): React.JSX.Element {
-  // Auth/scope errors get a richer `gh auth status` remediation UI; bail early before the generic block.
+  // Auth/scope errors get a richer remediation UI driven by `gh auth
+  // status`. Bail early so the generic `command`/`copy` block below is
+  // only computed for non-auth error types.
   if (error.type === 'auth_required' || error.type === 'scope_missing') {
     return (
       <div className="flex flex-1 flex-col items-start gap-3 p-6 text-sm">
         <GhAuthErrorHelp
           error={error as GitHubProjectViewError & { type: 'auth_required' | 'scope_missing' }}
-          host={host}
         />
         <Button size="sm" variant="outline" onClick={onOpenInGitHub}>
           <ExternalLink className="mr-1 size-3.5" />{' '}
@@ -1319,7 +1347,9 @@ function ErrorState({
   )
 }
 
-// Why: mirror ProjectViewList's header + 12 rows so the table doesn't jump in height when real data lands.
+// Why: matches the shape of ProjectViewList's header + rows so the table
+// doesn't visibly jump in height when real data lands. A 12-row stub fills
+// a typical viewport at the table's min-h-10 row height.
 function ProjectTableSkeleton(): React.JSX.Element {
   const headerCols = 6
   const bodyCols = 5

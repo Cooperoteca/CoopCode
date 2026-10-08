@@ -3,13 +3,7 @@ import type { LucideProps } from 'lucide-react'
 import type { SettingsSearchEntry } from '@/components/settings/settings-search'
 
 export type SettingsNavIcon = ComponentType<LucideProps>
-export type SettingsNavInstallStatus =
-  | 'install'
-  | 'installed'
-  | 'up-to-date'
-  | 'update-available'
-  | 'needs-attention'
-  | 'checking'
+export type SettingsNavInstallStatus = 'install' | 'installed' | 'checking'
 
 export type SettingsNavTarget =
   | 'general'
@@ -34,10 +28,8 @@ export type SettingsNavTarget =
   | 'stats'
   | 'ssh'
   | 'experimental'
-  | 'plugins'
   | 'agents'
   | 'orchestration'
-  | 'linear'
   | 'servers'
   | 'mobile'
   | 'mobile-emulator'

@@ -15,14 +15,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const createBrowserTabMock = vi.fn()
 const setActiveWorktreeMock = vi.fn()
 const openUrlMock = vi.fn()
-const openFileUriMock = vi.fn()
-const pathExistsMock = vi.fn(async () => true)
-const connectionOwner = vi.hoisted(() => ({ value: null as string | null | undefined }))
-const targetConnectionOwners = vi.hoisted(() => new Map<string, string | null | undefined>())
-const worktreeLookup = vi.hoisted(() => ({
-  value: [] as { id: string; path: string; diffComments: never[] }[]
-}))
-const statRuntimePathMock = vi.hoisted(() => vi.fn(async () => ({ isDirectory: false })))
 
 // Minimal store: MarkdownPreview reads settings/worktreesByRepo plus a handful
 // of action functions. None of the actions fire on the http path under test.
@@ -39,9 +31,6 @@ const storeState = {
   clearDeliveredDiffComments: vi.fn(),
   keybindings: {},
   worktreesByRepo: {},
-  repos: [],
-  folderWorkspaces: [],
-  projectGroups: [],
   openFiles: [],
   activeFileIdByWorktree: {},
   settings: { openLinksInApp: true },
@@ -55,22 +44,14 @@ vi.mock('@/store', () => {
   )
   return { useAppStore }
 })
-vi.mock('@/store/slices/worktree-helpers', () => ({
-  findWorktreeById: (_worktrees: unknown, id: string) =>
-    worktreeLookup.value.find((worktree) => worktree.id === id) ?? null
-}))
+vi.mock('@/store/slices/worktree-helpers', () => ({ findWorktreeById: () => null }))
 vi.mock('@/runtime/runtime-rpc-client', () => ({
   settingsForRuntimeOwner: (settings: unknown) => settings
 }))
 vi.mock('@/runtime/runtime-file-client', () => ({
-  statRuntimePath: statRuntimePathMock
+  statRuntimePath: vi.fn(async () => ({ isDirectory: false }))
 }))
-vi.mock('@/lib/connection-context', () => ({
-  getConnectionIdForFile: (worktreeId: string) => targetConnectionOwners.get(worktreeId)
-}))
-vi.mock('@/lib/connection-owner-resolution', () => ({
-  createConnectionIdForFileSelector: () => () => connectionOwner.value
-}))
+vi.mock('@/lib/connection-context', () => ({ getConnectionId: () => null }))
 vi.mock('@/i18n/i18n', () => ({ translate: (_key: string, fallback: string) => fallback }))
 vi.mock('./useLocalImageSrc', () => ({ useLocalImageSrc: (src?: string) => src }))
 vi.mock('./MermaidBlock', () => ({ default: () => null }))
@@ -96,8 +77,8 @@ describe('MarkdownPreview http link routing (Cmd vs Cmd+Shift click)', () => {
     ;(window as unknown as { api: unknown }).api = {
       shell: {
         openUrl: openUrlMock,
-        openFileUri: openFileUriMock,
-        pathExists: pathExistsMock
+        openFileUri: vi.fn(),
+        pathExists: vi.fn(async () => true)
       },
       ui: { writeClipboardText: vi.fn(async () => true) }
     }
@@ -110,14 +91,6 @@ describe('MarkdownPreview http link routing (Cmd vs Cmd+Shift click)', () => {
     createBrowserTabMock.mockClear()
     setActiveWorktreeMock.mockClear()
     openUrlMock.mockClear()
-    openFileUriMock.mockClear()
-    pathExistsMock.mockClear()
-    connectionOwner.value = null
-    targetConnectionOwners.clear()
-    worktreeLookup.value = []
-    storeState.worktreesByRepo = {}
-    storeState.openMarkdownPreview.mockClear()
-    statRuntimePathMock.mockClear()
   })
 
   afterEach(() => {
@@ -127,28 +100,21 @@ describe('MarkdownPreview http link routing (Cmd vs Cmd+Shift click)', () => {
     container.remove()
   })
 
-  function render(
-    content = '[example](https://example.com)',
-    expectedHref = 'https://example.com',
-    sourceWorktreeId = 'wt-1',
-    filePath = '/repo/docs/README.md'
-  ): HTMLAnchorElement {
+  function render(): HTMLAnchorElement {
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
     act(() => {
       root.render(
         <MarkdownPreview
-          content={content}
-          filePath={filePath}
-          sourceWorktreeId={sourceWorktreeId}
+          content="[example](https://example.com)"
+          filePath="/repo/docs/README.md"
+          sourceWorktreeId="wt-1"
           scrollCacheKey="test-key"
         />
       )
     })
-    const anchor = Array.from(container.querySelectorAll<HTMLAnchorElement>('a')).find(
-      (candidate) => candidate.getAttribute('href') === expectedHref
-    )
+    const anchor = container.querySelector<HTMLAnchorElement>('a[href="https://example.com"]')
     if (!anchor) {
       throw new Error('expected a rendered http anchor')
     }
@@ -177,60 +143,5 @@ describe('MarkdownPreview http link routing (Cmd vs Cmd+Shift click)', () => {
     click(anchor, { metaKey: true, shiftKey: true })
     expect(openUrlMock).toHaveBeenCalledWith('https://example.com/')
     expect(createBrowserTabMock).not.toHaveBeenCalled()
-  })
-
-  it('keeps system-browser HTTP and file links inert while ownership is unknown', () => {
-    connectionOwner.value = undefined
-    const httpAnchor = render()
-    click(httpAnchor, { metaKey: true, shiftKey: true })
-    expect(openUrlMock).not.toHaveBeenCalled()
-    expect(createBrowserTabMock).not.toHaveBeenCalled()
-
-    act(() => {
-      root.unmount()
-    })
-    container.remove()
-    const fileAnchor = render('[file](file:///tmp/example.md)', 'file:///tmp/example.md')
-    click(fileAnchor, { metaKey: true, shiftKey: true })
-    expect(pathExistsMock).not.toHaveBeenCalled()
-    expect(openFileUriMock).not.toHaveBeenCalled()
-  })
-
-  it('keeps same-path file links on the explicit SSH source worktree', async () => {
-    const localWorktree = { id: 'local-wt', path: '/srv/repo', diffComments: [] as never[] }
-    const sshWorktree = { id: 'ssh-wt', path: '/srv/repo', diffComments: [] as never[] }
-    worktreeLookup.value = [localWorktree, sshWorktree]
-    storeState.worktreesByRepo = { repo: [localWorktree, sshWorktree] }
-    connectionOwner.value = 'ssh-1'
-    targetConnectionOwners.set('local-wt', null)
-    targetConnectionOwners.set('ssh-wt', 'ssh-1')
-    const anchor = render('[child](child.md)', 'child.md', 'ssh-wt', '/srv/repo/README.md')
-
-    await act(async () => {
-      anchor.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }))
-    })
-
-    expect(statRuntimePathMock).toHaveBeenCalledWith(
-      expect.objectContaining({ worktreeId: 'ssh-wt', connectionId: 'ssh-1' }),
-      '/srv/repo/child.md'
-    )
-    expect(storeState.openMarkdownPreview).toHaveBeenCalledWith(
-      expect.objectContaining({ worktreeId: 'ssh-wt', filePath: '/srv/repo/child.md' }),
-      { anchor: null }
-    )
-  })
-
-  it('renders a raw HTML superscript citation and routes it like a Markdown link', () => {
-    const source = '<sup><a href="https://example.com">[12]</a></sup>'
-    const anchor = render(source)
-
-    expect(anchor.parentElement?.tagName).toBe('SUP')
-    expect(anchor.textContent).toBe('[12]')
-    expect(container.textContent).not.toContain('<sup>')
-    click(anchor, { metaKey: true })
-    expect(createBrowserTabMock).toHaveBeenCalledWith('wt-1', 'https://example.com/', {
-      activate: true
-    })
-    expect(openUrlMock).not.toHaveBeenCalled()
   })
 })

@@ -25,7 +25,6 @@ import {
 import { listTeams, getTeamStates, getTeamLabels, getTeamMembers } from '../linear/teams'
 import type { LinearListFilter } from '../linear/issues'
 import { clampLinearIssueListLimit } from '../../shared/linear-issue-read-limits'
-import { optionalParsedLinearIssueAttributeFilter } from '../../shared/linear-issue-attribute-filter'
 import type {
   LinearCustomViewModel,
   LinearIssueUpdate,
@@ -132,26 +131,13 @@ export function registerLinearHandlers(): void {
     'linear:listIssues',
     async (
       _event,
-      args?: {
-        filter?: LinearListFilter
-        limit?: number
-        workspaceId?: LinearWorkspaceSelection
-        attributeFilter?: unknown
-      }
+      args?: { filter?: LinearListFilter; limit?: number; workspaceId?: LinearWorkspaceSelection }
     ) => {
       const filter = VALID_FILTERS.has(args?.filter as LinearListFilter)
         ? (args!.filter as LinearListFilter)
         : undefined
       const limit = clampLinearIssueListLimit(args?.limit)
-      // Why: reject malformed filters at the trust boundary instead of
-      // normalizing them to empty (which would silently broaden results).
-      const attributeFilter =
-        args && 'attributeFilter' in args && args.attributeFilter !== undefined
-          ? optionalParsedLinearIssueAttributeFilter(args.attributeFilter)
-          : undefined
-      return listIssues(filter, limit, normalizeWorkspaceSelection(args?.workspaceId), {
-        attributeFilter
-      })
+      return listIssues(filter, limit, normalizeWorkspaceSelection(args?.workspaceId))
     }
   )
 

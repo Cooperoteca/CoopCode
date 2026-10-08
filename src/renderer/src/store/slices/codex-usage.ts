@@ -45,14 +45,7 @@ export const createCodexUsageSlice: StateCreator<AppState, [], [], CodexUsageSli
     try {
       const nextScanState = (await window.api.codexUsage.setEnabled({
         enabled
-      })) as CodexUsageScanState | undefined
-      // Why: the web client (paired runtime) does not bridge the desktop-only
-      // usage IPC; its preload fallback resolves this call to `undefined`. Bail
-      // so the toggle no-ops instead of seeding an empty scan state and then
-      // crashing on the follow-up fetch.
-      if (!nextScanState) {
-        return
-      }
+      })) as CodexUsageScanState
       set({
         codexUsageScanState: enabled
           ? {
@@ -88,16 +81,7 @@ export const createCodexUsageSlice: StateCreator<AppState, [], [], CodexUsageSli
 
   fetchCodexUsage: async (opts) => {
     try {
-      const scanState = (await window.api.codexUsage.getScanState()) as
-        | CodexUsageScanState
-        | undefined
-      // Why: in the web client the usage IPC is unavailable and the preload
-      // fallback resolves to `undefined`; reading `scanState.enabled` below would
-      // throw `Cannot read properties of undefined (reading 'enabled')`. Treat an
-      // absent scan state as "usage unavailable" and stop.
-      if (!scanState) {
-        return
-      }
+      const scanState = (await window.api.codexUsage.getScanState()) as CodexUsageScanState
       const currentScanState = get().codexUsageScanState
       const shouldPreserveLoadingState =
         opts?.forceRefresh === true &&

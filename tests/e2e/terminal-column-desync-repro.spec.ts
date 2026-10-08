@@ -134,34 +134,30 @@ test.describe('Terminal column desync repro', () => {
     await ensureTerminalVisible(orcaPage)
     const ptyId = await settleTerminal(orcaPage)
 
-    // Why: the resize chain (ResizeObserver → rAF fit → PTY resize IPC) needs
-    // longer than a fixed wait under loaded CI, and the two columns are sampled
-    // non-atomically. Poll until they converge — a genuinely dropped resize
-    // never converges and still fails, so this keeps the regression guard.
-    const expectColumnsInSync = async (label: string): Promise<void> => {
-      await expect
-        .poll(
-          async () => {
-            const snap = await readColumnSnapshot(orcaPage, ptyId)
-            return snap.ptyCols === snap.xtermCols
-              ? 'synced'
-              : `pty=${snap.ptyCols} xterm=${snap.xtermCols}`
-          },
-          { timeout: 30_000, message: `${label}: PTY cols should converge to xterm cols` }
-        )
-        .toBe('synced')
-    }
-
     // Baseline: a freshly fit terminal should agree with its PTY.
-    await expectColumnsInSync('baseline')
+    const baseline = await readColumnSnapshot(orcaPage, ptyId)
+    expect(
+      baseline.ptyCols,
+      `baseline PTY cols (${baseline.ptyCols}) should equal xterm cols (${baseline.xtermCols})`
+    ).toBe(baseline.xtermCols)
 
     // Shrink the window while the terminal is visible, then widen it. xterm
     // reflows via the ResizeObserver; the PTY must follow.
     await orcaPage.setViewportSize({ width: 760, height: 800 })
-    await expectColumnsInSync('after shrink')
+    await orcaPage.waitForTimeout(400)
+    const narrow = await readColumnSnapshot(orcaPage, ptyId)
+    expect(
+      narrow.ptyCols,
+      `after shrink, PTY cols (${narrow.ptyCols}) should equal xterm cols (${narrow.xtermCols})`
+    ).toBe(narrow.xtermCols)
 
     await orcaPage.setViewportSize({ width: 1280, height: 800 })
-    await expectColumnsInSync('after widen')
+    await orcaPage.waitForTimeout(400)
+    const wide = await readColumnSnapshot(orcaPage, ptyId)
+    expect(
+      wide.ptyCols,
+      `after widen, PTY cols (${wide.ptyCols}) should equal xterm cols (${wide.xtermCols})`
+    ).toBe(wide.xtermCols)
   })
 
   // Why: guards the applied-size IPC contract the desync fix relies on. The
@@ -179,26 +175,15 @@ test.describe('Terminal column desync repro', () => {
     const ptyId = await settleTerminal(orcaPage)
 
     await orcaPage.setViewportSize({ width: 900, height: 800 })
+    await orcaPage.waitForTimeout(500)
 
-    // Why: poll until pty:getSize converges to the real applied columns instead
-    // of sampling once after a fixed wait — the resize can still be settling on
-    // loaded CI. A getSize that reports intent (not the applied size) never
-    // converges to process.stdout.columns and still fails the guard.
-    await expect
-      .poll(
-        async () => {
-          const ptyCols = await readPtyCols(orcaPage, ptyId)
-          const reportedCols = await readReportedPtyCols(orcaPage, ptyId)
-          return reportedCols === ptyCols ? 'match' : `reported=${reportedCols} pty=${ptyCols}`
-        },
-        {
-          timeout: 30_000,
-          message:
-            'pty:getSize must converge to the applied PTY columns (process.stdout.columns) ' +
-            'so the drift-check can detect a dropped resize'
-        }
-      )
-      .toBe('match')
+    const ptyCols = await readPtyCols(orcaPage, ptyId)
+    const reportedCols = await readReportedPtyCols(orcaPage, ptyId)
+    expect(
+      reportedCols,
+      `pty:getSize reported ${reportedCols} but the PTY's process.stdout.columns is ${ptyCols}; ` +
+        `getSize must reflect the APPLIED size so the drift-check can detect a dropped resize`
+    ).toBe(ptyCols)
   })
 
   test('PTY columns re-sync after the terminal is resized while hidden', async ({ orcaPage }) => {

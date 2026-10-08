@@ -1,21 +1,6 @@
-import { getRepoExecutionHostId, type ExecutionHostId } from '../../../shared/execution-host'
-
 type RepoDisplayLabelItem = {
   path: string
   displayName: string
-  connectionId?: string | null
-  executionHostId?: ExecutionHostId | null
-}
-
-// Why: two repos can share the same absolute path across hosts (e.g. a local
-// /Users/alice and an SSH host's /Users/alice). Keying labels by raw path alone
-// lets one repo's label overwrite the other's, so scope the key by execution
-// host. getRepoExecutionHostId returns 'local' for local repos and falls back to
-// the connectionId (ssh:<id>) for SSH folder-repos that leave executionHostId unset.
-export function getRepoDisplayLabelKey(
-  item: Pick<RepoDisplayLabelItem, 'path' | 'connectionId' | 'executionHostId'>
-): string {
-  return `${getRepoExecutionHostId(item)}::${item.path}`
 }
 
 function normalizePathSegments(path: string): string[] {
@@ -44,7 +29,7 @@ export function getRepoDisplayLabelsByPath(
 
   for (const item of items) {
     const displayName = item.displayName || item.path
-    labels.set(getRepoDisplayLabelKey(item), displayName)
+    labels.set(item.path, displayName)
     const colliding = itemsByName.get(displayName) ?? []
     colliding.push({ ...item, displayName })
     itemsByName.set(displayName, colliding)
@@ -64,7 +49,7 @@ export function getRepoDisplayLabelsByPath(
       nextLabels = collidingItems.map((item) => labelForDepth(item, depth))
     }
     collidingItems.forEach((item, index) => {
-      labels.set(getRepoDisplayLabelKey(item), nextLabels[index] ?? item.displayName)
+      labels.set(item.path, nextLabels[index] ?? item.displayName)
     })
   }
 

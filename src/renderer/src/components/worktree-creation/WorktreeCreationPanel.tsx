@@ -1,7 +1,6 @@
 import React from 'react'
 import { AlertTriangle, GitBranch, Loader2, RotateCcw, X } from 'lucide-react'
 import { useAppStore } from '@/store'
-import { installWindowVisibilityInterval } from '@/lib/window-visibility-interval'
 import { retryBackgroundWorktreeCreation } from '@/lib/worktree-creation-flow'
 import { getCreationProgressLabel } from '@/lib/pending-worktree-creation'
 import { translate } from '@/i18n/i18n'
@@ -32,9 +31,8 @@ export default function WorktreeCreationPanel({
     if (entryStatus !== 'creating') {
       return
     }
-    // Pause the 1s clock while the window is hidden so a backgrounded creation
-    // panel stops re-rendering for ticks no one can see.
-    return installWindowVisibilityInterval({ run: () => setNow(Date.now()), intervalMs: 1000 })
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
   }, [entryStatus])
   if (!entry) {
     return null

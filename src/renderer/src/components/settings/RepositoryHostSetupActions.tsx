@@ -43,7 +43,7 @@ type RepositoryHostSetupActionsProps = {
     setupState: 'not-set-up'
     setupMethod: 'provisioned'
   }) => Promise<ProjectHostSetupCreateResult | null>
-  onSetupReady: (hostId: ExecutionHostId) => void
+  onOpenSetup: (repoId: string) => void
 }
 
 type SetupStep = 'choose' | 'existing' | 'clone' | 'planned'
@@ -55,7 +55,7 @@ export function RepositoryHostSetupActions({
   setupProjectExistingFolder,
   setupProjectClone,
   createProjectHostSetup,
-  onSetupReady
+  onOpenSetup
 }: RepositoryHostSetupActionsProps): React.JSX.Element | null {
   const [isOpen, setIsOpen] = useState(false)
   const [step, setStep] = useState<SetupStep>('choose')
@@ -68,16 +68,11 @@ export function RepositoryHostSetupActions({
   const [isCloning, setIsCloning] = useState(false)
   const [isCreatingPendingSetup, setIsCreatingPendingSetup] = useState(false)
   const defaultSetupHostOption =
-    setupHostOptions.find((option) => option.isAvailable && option.canUsePathActions) ??
-    setupHostOptions.find((option) => option.isAvailable) ??
-    setupHostOptions[0] ??
-    null
+    setupHostOptions.find((option) => option.isAvailable) ?? setupHostOptions[0] ?? null
   const setupTargetHostId = selectedSetupHostId ?? defaultSetupHostOption?.id ?? null
   const setupTargetHostOption =
     setupHostOptions.find((option) => option.id === setupTargetHostId) ?? null
   const canUseSetupTargetHost = setupTargetHostOption?.isAvailable ?? false
-  const canUsePathActions =
-    canUseSetupTargetHost && (setupTargetHostOption?.canUsePathActions ?? false)
 
   if (setupHostOptions.length === 0) {
     return null
@@ -93,7 +88,7 @@ export function RepositoryHostSetupActions({
   }
 
   const handleExistingFolder = async (): Promise<void> => {
-    if (!setupTargetHostId || !canUsePathActions || !setupPath.trim()) {
+    if (!setupTargetHostId || !canUseSetupTargetHost || !setupPath.trim()) {
       return
     }
     setIsSettingUp(true)
@@ -107,7 +102,7 @@ export function RepositoryHostSetupActions({
       })
       if (result) {
         resetFlow()
-        onSetupReady(setupTargetHostId)
+        onOpenSetup(result.repo.id)
       }
     } finally {
       setIsSettingUp(false)
@@ -115,7 +110,12 @@ export function RepositoryHostSetupActions({
   }
 
   const handleClone = async (): Promise<void> => {
-    if (!setupTargetHostId || !canUsePathActions || !cloneUrl.trim() || !cloneDestination.trim()) {
+    if (
+      !setupTargetHostId ||
+      !canUseSetupTargetHost ||
+      !cloneUrl.trim() ||
+      !cloneDestination.trim()
+    ) {
       return
     }
     setIsCloning(true)
@@ -129,7 +129,7 @@ export function RepositoryHostSetupActions({
       })
       if (result) {
         resetFlow()
-        onSetupReady(setupTargetHostId)
+        onOpenSetup(result.repo.id)
       }
     } finally {
       setIsCloning(false)
@@ -229,7 +229,7 @@ export function RepositoryHostSetupActions({
               <SelectItem key={option.id} value={option.id} disabled={!option.isAvailable}>
                 <span className="min-w-0">
                   <span className="block truncate">{option.label}</span>
-                  {!option.isAvailable || !option.canUsePathActions ? (
+                  {!option.isAvailable ? (
                     <span className="block truncate text-[11px] text-muted-foreground">
                       {option.detail}
                     </span>
@@ -239,15 +239,14 @@ export function RepositoryHostSetupActions({
             ))}
           </SelectContent>
         </Select>
-        {(!canUseSetupTargetHost || !canUsePathActions) && setupTargetHostOption ? (
+        {!canUseSetupTargetHost && setupTargetHostOption ? (
           <p className="text-xs text-muted-foreground">{setupTargetHostOption.detail}</p>
         ) : null}
       </div>
 
       {step === 'choose' ? (
         <HostSetupStartActions
-          pathActionsDisabled={!canUsePathActions}
-          planDisabled={!canUseSetupTargetHost}
+          disabled={!canUseSetupTargetHost}
           onBrowse={() => setStep('existing')}
           onClone={() => setStep('clone')}
           onPlan={() => setStep('planned')}
@@ -257,7 +256,7 @@ export function RepositoryHostSetupActions({
         <HostSetupExistingFolderStep
           setupPath={setupPath}
           setupKind={setupKind}
-          disabled={!canUsePathActions}
+          disabled={!canUseSetupTargetHost}
           isSettingUp={isSettingUp}
           onBack={() => setStep('choose')}
           onPathChange={setSetupPath}
@@ -269,7 +268,7 @@ export function RepositoryHostSetupActions({
         <HostSetupCloneStep
           cloneUrl={cloneUrl}
           cloneDestination={cloneDestination}
-          disabled={!canUsePathActions}
+          disabled={!canUseSetupTargetHost}
           isCloning={isCloning}
           onBack={() => setStep('choose')}
           onCloneUrlChange={setCloneUrl}

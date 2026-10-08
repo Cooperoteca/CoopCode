@@ -2,7 +2,8 @@ import type { MutableRefObject } from 'react'
 import type { Editor } from '@tiptap/react'
 import type { EditorView } from '@tiptap/pm/view'
 import { toast } from 'sonner'
-import { openHttpLink, type HttpLinkSourceOwner } from '@/lib/http-link-routing'
+import { getConnectionId } from '@/lib/connection-context'
+import { openHttpLink } from '@/lib/http-link-routing'
 import { isLocalPathOpenBlocked, showLocalPathOpenBlockedToast } from '@/lib/local-path-open-guard'
 import { settingsForRuntimeOwner } from '@/runtime/runtime-rpc-client'
 import {
@@ -13,10 +14,6 @@ import { scrollToAnchorInEditor } from './markdown-anchor-scroll'
 import { getRichMarkdownCommentAtPos } from './rich-markdown-review-annotations'
 import type { DiffComment } from '../../../../shared/types'
 import { translate } from '@/i18n/i18n'
-import {
-  classifyHtmlSuperscriptLinkAction,
-  type RichMarkdownHtmlSuperscriptLinkContext
-} from './rich-markdown-html-superscript-link-context'
 
 export type ActivateMarkdownLink = (
   href: string,
@@ -25,7 +22,6 @@ export type ActivateMarkdownLink = (
     worktreeId: string
     worktreeRoot: string | null
     runtimeEnvironmentId?: string | null
-    sourceOwner?: HttpLinkSourceOwner
   }
 ) => void | Promise<unknown>
 
@@ -37,7 +33,6 @@ type RichMarkdownEditorClickRoutingOptions = {
   event: MouseEvent
   filePath: string
   isMac: boolean
-  htmlSuperscriptLinkContext: RichMarkdownHtmlSuperscriptLinkContext
   markdownCommentsRef: MutableRefObject<DiffComment[]>
   markdownSourceLineOffsetRef: MutableRefObject<number>
   onOpenDocLinkRef: MutableRefObject<((target: string) => void) | undefined>
@@ -57,7 +52,6 @@ export function handleRichMarkdownEditorClick({
   event,
   filePath,
   isMac,
-  htmlSuperscriptLinkContext,
   markdownCommentsRef,
   markdownSourceLineOffsetRef,
   onOpenDocLinkRef,
@@ -71,8 +65,6 @@ export function handleRichMarkdownEditorClick({
   worktreeRoot
 }: RichMarkdownEditorClickRoutingOptions): boolean {
   const editor = editorRef.current
-  const sourceSnapshot = htmlSuperscriptLinkContext.getSnapshot()
-  const sourceOwner = sourceSnapshot.sourceOwner
   const modKey = isMac ? event.metaKey : event.ctrlKey
   if (!editor) {
     return false
@@ -96,7 +88,6 @@ export function handleRichMarkdownEditorClick({
       filePath,
       runtimeEnvironmentId,
       src: (clickedNode.attrs.src as string | undefined) ?? '',
-      sourceOwner,
       worktreeId,
       worktreeRoot
     })
@@ -105,16 +96,7 @@ export function handleRichMarkdownEditorClick({
     onOpenDocLinkRef.current?.(clickedNode.attrs.target as string)
     return true
   }
-  const href =
-    clickedNode?.type.name === 'richMarkdownHtmlSuperscriptLink'
-      ? String(clickedNode.attrs.href ?? '')
-      : getClickedLinkHref(view, pos)
-  if (
-    clickedNode?.type.name === 'richMarkdownHtmlSuperscriptLink' &&
-    !classifyHtmlSuperscriptLinkAction(href, sourceSnapshot)
-  ) {
-    return true
-  }
+  const href = getClickedLinkHref(view, pos)
   if (!href) {
     return false
   }
@@ -127,8 +109,8 @@ export function handleRichMarkdownEditorClick({
       href,
       filePath,
       runtimeEnvironmentId,
-      sourceOwner,
       settings,
+      worktreeId,
       worktreeRoot
     })
     return true
@@ -137,8 +119,7 @@ export function handleRichMarkdownEditorClick({
     sourceFilePath: filePath,
     worktreeId,
     worktreeRoot,
-    runtimeEnvironmentId,
-    sourceOwner
+    runtimeEnvironmentId
   })
   return true
 }
@@ -147,7 +128,6 @@ function activateMarkdownImageClick({
   activateMarkdownLink,
   filePath,
   runtimeEnvironmentId,
-  sourceOwner,
   src,
   worktreeId,
   worktreeRoot
@@ -155,7 +135,6 @@ function activateMarkdownImageClick({
   activateMarkdownLink: ActivateMarkdownLink
   filePath: string
   runtimeEnvironmentId?: string | null
-  sourceOwner?: HttpLinkSourceOwner
   src: string
   worktreeId: string
   worktreeRoot: string | null
@@ -167,8 +146,7 @@ function activateMarkdownImageClick({
     sourceFilePath: filePath,
     worktreeId,
     worktreeRoot,
-    runtimeEnvironmentId,
-    sourceOwner
+    runtimeEnvironmentId
   })
   return true
 }
@@ -184,27 +162,24 @@ function getClickedLinkHref(view: EditorView, pos: number): string {
 function openMarkdownLinkInClientOs({
   href,
   filePath,
+  worktreeId,
   worktreeRoot,
   runtimeEnvironmentId,
-  sourceOwner,
   settings
 }: {
   href: string
   filePath: string
+  worktreeId: string
   worktreeRoot: string | null
   runtimeEnvironmentId?: string | null
-  sourceOwner: HttpLinkSourceOwner
   settings: RichMarkdownRuntimeSettings
 }): void {
-  if (sourceOwner.kind === 'unknown') {
-    return
-  }
   const classified = resolveMarkdownLinkTarget(href, filePath, worktreeRoot)
   if (!classified) {
     return
   }
   if (classified.kind === 'external') {
-    openHttpLink(classified.url, { forceSystemBrowser: true, sourceOwner })
+    openHttpLink(classified.url, { forceSystemBrowser: true })
     return
   }
   if (classified.kind === 'anchor') {
@@ -212,7 +187,7 @@ function openMarkdownLinkInClientOs({
   }
   if (
     isLocalPathOpenBlocked(settingsForRuntimeOwner(settings, runtimeEnvironmentId), {
-      connectionId: sourceOwner.kind === 'ssh' ? sourceOwner.connectionId : undefined
+      connectionId: getConnectionId(worktreeId)
     })
   ) {
     // Why: Shift-click opens through the client OS, which cannot safely resolve

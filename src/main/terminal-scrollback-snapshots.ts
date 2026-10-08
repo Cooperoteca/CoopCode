@@ -9,7 +9,7 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { app } from 'electron'
 import type { WorkspaceSessionState } from '../shared/types'
 import {
@@ -20,21 +20,8 @@ import {
 const SNAPSHOT_DIR_NAME = 'terminal-scrollback'
 const REF_PREFIX = 'v1'
 
-export type TerminalScrollbackSnapshotStorage = {
-  snapshotRoot?: string
-  fallbackSnapshotRoot?: string | null
-}
-
-function getLegacySnapshotRoot(): string {
+function getSnapshotRoot(): string {
   return join(app.getPath('userData'), SNAPSHOT_DIR_NAME)
-}
-
-export function getProfileTerminalScrollbackSnapshotRoot(dataFile: string): string {
-  return join(dirname(dataFile), SNAPSHOT_DIR_NAME)
-}
-
-function getSnapshotRoot(storage?: TerminalScrollbackSnapshotStorage): string {
-  return storage?.snapshotRoot ?? getLegacySnapshotRoot()
 }
 
 export function makeTerminalScrollbackSnapshotRef(tabId: string, leafId: string): string {
@@ -42,25 +29,11 @@ export function makeTerminalScrollbackSnapshotRef(tabId: string, leafId: string)
   return `${REF_PREFIX}-${hash}`
 }
 
-function snapshotPath(ref: string, snapshotRoot: string): string | null {
+function snapshotPath(ref: string): string | null {
   if (!/^v1-[0-9a-f]{32}$/.test(ref)) {
     return null
   }
-  return join(snapshotRoot, `${ref}.bin`)
-}
-
-function snapshotReadPaths(ref: string, storage?: TerminalScrollbackSnapshotStorage): string[] {
-  const primaryRoot = getSnapshotRoot(storage)
-  const primaryPath = snapshotPath(ref, primaryRoot)
-  if (!primaryPath) {
-    return []
-  }
-  const fallbackRoot = storage?.fallbackSnapshotRoot ?? null
-  if (!fallbackRoot || fallbackRoot === primaryRoot) {
-    return [primaryPath]
-  }
-  const fallbackPath = snapshotPath(ref, fallbackRoot)
-  return fallbackPath ? [primaryPath, fallbackPath] : [primaryPath]
+  return join(getSnapshotRoot(), `${ref}.bin`)
 }
 
 function trailingUtf8Bytes(value: string, maxBytes: number): Buffer {
@@ -99,19 +72,17 @@ export function writeTerminalScrollbackSnapshotSync(args: {
   tabId: string
   leafId: string
   buffer: string
-  storage?: TerminalScrollbackSnapshotStorage
 }): string | null {
   if (!args.buffer) {
     return null
   }
   const ref = makeTerminalScrollbackSnapshotRef(args.tabId, args.leafId)
-  const snapshotRoot = getSnapshotRoot(args.storage)
-  const path = snapshotPath(ref, snapshotRoot)
+  const path = snapshotPath(ref)
   if (!path) {
     return null
   }
   try {
-    mkdirSync(snapshotRoot, { recursive: true, mode: 0o700 })
+    mkdirSync(getSnapshotRoot(), { recursive: true, mode: 0o700 })
     const tmpPath = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
     const bytes = trailingUtf8Bytes(args.buffer, TERMINAL_SCROLLBACK_STORE_BYTE_LIMIT)
     let renamed = false
@@ -133,30 +104,27 @@ export function writeTerminalScrollbackSnapshotSync(args: {
   }
 }
 
-export function readTerminalScrollbackSnapshotSync(
-  ref: string,
-  storage?: TerminalScrollbackSnapshotStorage
-): string | null {
-  for (const path of snapshotReadPaths(ref, storage)) {
-    try {
-      return readTrailingUtf8(path, TERMINAL_SCROLLBACK_REPLAY_BYTE_LIMIT)
-    } catch {
-      // Try the legacy/global fallback when a profile-local snapshot is absent.
-    }
+export function readTerminalScrollbackSnapshotSync(ref: string): string | null {
+  const path = snapshotPath(ref)
+  if (!path) {
+    return null
   }
-  return null
+  try {
+    return readTrailingUtf8(path, TERMINAL_SCROLLBACK_REPLAY_BYTE_LIMIT)
+  } catch {
+    return null
+  }
 }
 
-export function deleteTerminalScrollbackSnapshotSync(
-  ref: string,
-  storage?: TerminalScrollbackSnapshotStorage
-): void {
-  for (const path of snapshotReadPaths(ref, storage)) {
-    try {
-      rmSync(path, { force: true })
-    } catch {
-      // Best-effort cleanup; stale refs are harmless and bounded by per-file caps.
-    }
+export function deleteTerminalScrollbackSnapshotSync(ref: string): void {
+  const path = snapshotPath(ref)
+  if (!path) {
+    return
+  }
+  try {
+    rmSync(path, { force: true })
+  } catch {
+    // Best-effort cleanup; stale refs are harmless and bounded by per-file caps.
   }
 }
 
@@ -171,8 +139,7 @@ export function collectTerminalScrollbackSnapshotRefs(session: WorkspaceSessionS
 }
 
 export function migrateWorkspaceSessionTerminalScrollbackSnapshots(
-  session: WorkspaceSessionState,
-  storage?: TerminalScrollbackSnapshotStorage
+  session: WorkspaceSessionState
 ): { session: WorkspaceSessionState; changed: boolean } {
   let terminalLayoutsByTabId: WorkspaceSessionState['terminalLayoutsByTabId'] | null = null
   for (const [tabId, layout] of Object.entries(session.terminalLayoutsByTabId ?? {})) {
@@ -184,7 +151,7 @@ export function migrateWorkspaceSessionTerminalScrollbackSnapshots(
     const remainingBuffers: Record<string, string> = {}
     let layoutChanged = false
     for (const [leafId, buffer] of Object.entries(buffers)) {
-      const ref = writeTerminalScrollbackSnapshotSync({ tabId, leafId, buffer, storage })
+      const ref = writeTerminalScrollbackSnapshotSync({ tabId, leafId, buffer })
       if (ref) {
         refs[leafId] = ref
         layoutChanged = true

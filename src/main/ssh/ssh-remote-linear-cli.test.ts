@@ -29,6 +29,7 @@ function createRuntime() {
       meta: {
         requested: {
           current: true,
+          include: { comments: true, children: true, attachments: true, relations: true },
           depth: 2
         },
         resolved: {
@@ -213,7 +214,7 @@ describe('runRemoteOrcaCli Linear commands', () => {
     expect(payload.ok).toBe(true)
     expect(payload.result.request).toMatchObject({
       current: true,
-      include: expect.objectContaining({ activity: true }),
+      include: { comments: true, children: true, attachments: true, relations: true },
       context: {
         remote: true,
         terminalHandle: 'term_ssh',
@@ -240,7 +241,7 @@ describe('runRemoteOrcaCli Linear commands', () => {
     expect(payload.ok).toBe(true)
     expect(payload.result.request).toMatchObject({
       input: 'ENG-123',
-      include: expect.objectContaining({ activity: true })
+      include: { comments: true, children: true, attachments: true, relations: true }
     })
   })
 

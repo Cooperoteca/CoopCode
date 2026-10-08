@@ -1,5 +1,3 @@
-import { relativePathInsideRoot } from '../../../shared/cross-platform-path'
-
 function stripTrailingSeparators(path: string): string {
   return path.replace(/[\\/]+$/, '')
 }
@@ -16,6 +14,26 @@ export function normalizeRelativePath(path: string): string {
   return stripLeadingSeparators(path).replace(/[\\/]+/g, '/')
 }
 
+function normalizeAbsolutePath(path: string): string {
+  const isUncPath = /^[\\/]{2}[^\\/]/.test(path)
+  const normalized = path.replace(/[\\/]+/g, '/')
+  return isUncPath && !normalized.startsWith('//') ? `/${normalized}` : normalized
+}
+
+function stripTrailingAbsoluteSeparators(path: string): string {
+  if (path === '/') {
+    return path
+  }
+  if (/^[A-Za-z]:\/$/.test(path)) {
+    return path
+  }
+  return path.replace(/\/+$/, '')
+}
+
+function isCaseInsensitiveAbsolutePath(path: string): boolean {
+  return /^[A-Za-z]:(?:\/|$)/.test(path) || path.startsWith('//')
+}
+
 export function getRelativePathInsideRoot(
   filePath: string,
   rootPath: string | null
@@ -23,9 +41,29 @@ export function getRelativePathInsideRoot(
   if (!rootPath) {
     return null
   }
-  // Why: delegate so renderer containment folds Unicode the same way the rest of
-  // the app does — a local copy silently missed NFD-vs-NFC matches (#10832).
-  return relativePathInsideRoot(rootPath, filePath)
+
+  const normalizedFilePath = normalizeAbsolutePath(filePath)
+  const normalizedRoot = stripTrailingAbsoluteSeparators(normalizeAbsolutePath(rootPath))
+  const comparisonFilePath = isCaseInsensitiveAbsolutePath(normalizedFilePath)
+    ? normalizedFilePath.toLowerCase()
+    : normalizedFilePath
+  const comparisonRoot = isCaseInsensitiveAbsolutePath(normalizedRoot)
+    ? normalizedRoot.toLowerCase()
+    : normalizedRoot
+
+  if (comparisonFilePath === comparisonRoot) {
+    return ''
+  }
+
+  // Why: POSIX and Windows drive roots already include their trailing separator.
+  const isRootPath = normalizedRoot === '/' || /^[A-Za-z]:\/$/.test(normalizedRoot)
+  const rootPrefix = isRootPath ? comparisonRoot : `${comparisonRoot}/`
+  if (!comparisonFilePath.startsWith(rootPrefix)) {
+    return null
+  }
+
+  const sliceStart = isRootPath ? normalizedRoot.length : normalizedRoot.length + 1
+  return normalizeRelativePath(normalizedFilePath.slice(sliceStart))
 }
 
 export function basename(path: string): string {

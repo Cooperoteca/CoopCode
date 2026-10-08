@@ -12,11 +12,6 @@ import { normalizeAbsolutePathForComparison } from '@/components/right-sidebar/f
 // path, bounded by a short TTL so a genuinely external edit that lands after
 // the window still gets picked up.
 const SELF_WRITE_TTL_MS = 750
-// Why: SSH/runtime watcher echoes travel a poll-plus-network path and can
-// land seconds after the write. A local-sized TTL lets the echo arrive after
-// the stamp expired, which raises a false changed-on-disk banner on remote
-// tabs while typing with autosave on.
-export const SELF_WRITE_REMOTE_TTL_MS = 3000
 const SELF_WRITE_MAX_STAMPS = 256
 
 export type RecentSelfWrite = {
@@ -54,8 +49,7 @@ function enforceSelfWriteStampLimit(): void {
 export function recordSelfWrite(
   absolutePath: string,
   content?: string,
-  runtimeEnvironmentId?: string | null,
-  ttlMs: number = SELF_WRITE_TTL_MS
+  runtimeEnvironmentId?: string | null
 ): void {
   const now = Date.now()
   pruneExpiredSelfWrites(now)
@@ -65,7 +59,7 @@ export function recordSelfWrite(
   stamps.delete(key)
   stamps.set(key, {
     content: content ?? null,
-    expiresAt: now + ttlMs
+    expiresAt: now + SELF_WRITE_TTL_MS
   })
   enforceSelfWriteStampLimit()
 }

@@ -1,24 +1,6 @@
 import { spawn as spawnProcess, type SpawnOptions } from 'node:child_process'
-import { resolve } from 'node:path'
-import { StringDecoder } from 'node:string_decoder'
-import {
-  SERVE_UPDATE_HANDOFF_PATH_ENV,
-  getServeUpdateHandoffPath
-} from '../../shared/serve-update-handoff'
-import {
-  getEphemeralVmRecipeResultConnection,
-  parseEphemeralVmRecipeResult
-} from '../../shared/ephemeral-vm-recipes'
-import { getDefaultUserDataPath } from './metadata'
-import { getMacAppBundlePath } from './mac-app-update-bundle'
-import {
-  readServeUpdateHandoffSync,
-  resumeInterruptedServeUpdate,
-  superviseForegroundServe
-} from './serve-update-supervisor'
+import { dirname, resolve } from 'node:path'
 import { RuntimeClientError } from './types'
-
-const IGNORED_NON_RECIPE_STDOUT = '[serve] ignored non-recipe stdout'
 
 export function launchOrcaApp(): void {
   const overrideCommand = process.env.ORCA_OPEN_COMMAND
@@ -86,11 +68,7 @@ export function serveOrcaApp(
   } = {}
 ): Promise<number> {
   const executable = resolveForegroundOrcaExecutable()
-  const childArgs = [...getExecutableAppArgs()]
-  if (process.env.ORCA_APPIMAGE_NO_SANDBOX === '1') {
-    childArgs.push('--no-sandbox')
-  }
-  childArgs.push('--serve')
+  const childArgs = [...getExecutableAppArgs(), '--serve']
   if (args.json) {
     childArgs.push('--serve-json')
   }
@@ -116,52 +94,48 @@ export function serveOrcaApp(
     childArgs.push('--serve-recipe-json', '--serve-project-root', args.projectRoot)
   }
 
-  const handoffPath =
-    args.recipeJson !== true && getMacAppBundlePath(executable)
-      ? getServeUpdateHandoffPath(getDefaultUserDataPath())
-      : null
-  const childEnv = stripElectronRunAsNode(process.env)
-  delete childEnv.ORCA_APPIMAGE_NO_SANDBOX
-  if (handoffPath) {
-    childEnv[SERVE_UPDATE_HANDOFF_PATH_ENV] = handoffPath
-  }
-  const spawnOptions: SpawnOptions = {
+  const child = spawnProcess(executable, childArgs, {
     detached: args.recipeJson === true,
     cwd: resolveAppRoot(),
-    stdio:
-      args.recipeJson === true
-        ? ['ignore', 'pipe', 'inherit']
-        : handoffPath
-          ? ['inherit', 'inherit', 'inherit', 'ipc']
-          : 'inherit',
+    stdio: args.recipeJson === true ? ['ignore', 'pipe', 'inherit'] : 'inherit',
     ...getExecutableSpawnOptions(executable),
-    env: childEnv
-  }
-  const interruptedHandoff = handoffPath ? readServeUpdateHandoffSync(handoffPath) : null
-  if (interruptedHandoff?.phase === 'install-requested') {
-    // Why: the node-mode CLI is not an NSRunningApplication, so it can retain launchd ownership while ShipIt swaps the app.
-    return resumeInterruptedServeUpdate({
-      executable,
-      childArgs,
-      spawnOptions,
-      spawnChild: spawnProcess,
-      handoffPath: handoffPath!,
-      handoff: interruptedHandoff
-    })
-  }
-  const child = spawnProcess(executable, childArgs, spawnOptions)
+    env: stripElectronRunAsNode(process.env)
+  })
 
   if (args.recipeJson) {
     return waitForRecipeJson(child)
   }
-  return superviseForegroundServe({
-    executable,
-    childArgs,
-    spawnOptions,
-    spawnChild: spawnProcess,
-    child,
-    handoffPath,
-    expectedHandoff: null
+
+  return new Promise((resolve, reject) => {
+    let forceKillTimer: ReturnType<typeof setTimeout> | null = null
+    const forwardSignal = (signal: NodeJS.Signals): void => {
+      child.kill(signal)
+      forceKillTimer ??= setTimeout(() => {
+        child.kill('SIGKILL')
+      }, 5000)
+    }
+    const cleanup = (): void => {
+      process.off('SIGINT', forwardSignal)
+      process.off('SIGTERM', forwardSignal)
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer)
+        forceKillTimer = null
+      }
+    }
+    process.on('SIGINT', forwardSignal)
+    process.on('SIGTERM', forwardSignal)
+    child.once('error', (error) => {
+      cleanup()
+      reject(error)
+    })
+    child.once('exit', (code, signal) => {
+      cleanup()
+      if (typeof code === 'number') {
+        resolve(code)
+        return
+      }
+      reject(new RuntimeClientError('runtime_serve_failed', `Orca serve exited via ${signal}`))
+    })
   })
 }
 
@@ -181,7 +155,7 @@ function waitForRecipeJson(child: ReturnType<typeof spawnProcess>): Promise<numb
       clearTimeout(timeout)
       child.stdout?.off('data', onData)
       child.off('error', onError)
-      child.off('close', onClose)
+      child.off('exit', onExit)
       if (error) {
         reject(error)
         return
@@ -190,69 +164,42 @@ function waitForRecipeJson(child: ReturnType<typeof spawnProcess>): Promise<numb
       child.unref()
       resolve(0)
     }
-    const writeIgnoredRecipeStdout = (): void => {
-      // Why: non-readiness child stdout is untrusted and cannot be safely
-      // redacted, including schema-valid results with arbitrary user data.
-      process.stderr.write(`${IGNORED_NON_RECIPE_STDOUT}\n`)
-    }
-    const processRecipeOutputLine = (line: string): void => {
-      const normalizedLine = line.endsWith('\r') ? line.slice(0, -1) : line
-      if (!normalizedLine.trim()) {
-        return
-      }
-      const parsed = parseEphemeralVmRecipeResult(normalizedLine)
-      if (!parsed.ok) {
-        writeIgnoredRecipeStdout()
-        return
-      }
-      if (getEphemeralVmRecipeResultConnection(parsed.result).type !== 'orca-server') {
-        writeIgnoredRecipeStdout()
-        return
-      }
-      process.stdout.write(`${normalizedLine.trim()}\n`)
+    const emitLine = (line: string): void => {
+      process.stdout.write(`${line}\n`)
       finish()
     }
-    const stdoutDecoder = new StringDecoder('utf8')
     const onData = (chunk: Buffer | string): void => {
-      output += typeof chunk === 'string' ? chunk : stdoutDecoder.write(chunk)
-      while (!settled) {
-        const newlineIndex = output.indexOf('\n')
-        if (newlineIndex === -1) {
-          return
-        }
-        const line = output.slice(0, newlineIndex)
-        output = output.slice(newlineIndex + 1)
-        processRecipeOutputLine(line)
+      output += chunk.toString()
+      const newlineIndex = output.indexOf('\n')
+      if (newlineIndex === -1) {
+        return
       }
+      emitLine(output.slice(0, newlineIndex))
     }
     const onError = (error: Error): void => {
       finish(error)
     }
-    const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
       if (settled) {
         return
       }
-      output += stdoutDecoder.end()
-      if (output.trim()) {
-        processRecipeOutputLine(output)
-      }
-      if (settled) {
+      const trimmed = output.trim()
+      if (trimmed) {
+        emitLine(trimmed)
         return
       }
       finish(
         new RuntimeClientError(
           'runtime_serve_failed',
           typeof code === 'number'
-            ? `Orca serve exited before printing valid recipe JSON with code ${code}.`
-            : `Orca serve exited before printing valid recipe JSON via ${signal}.`
+            ? `Orca serve exited before printing recipe JSON with code ${code}.`
+            : `Orca serve exited before printing recipe JSON via ${signal}.`
         )
       )
     }
     child.stdout?.on('data', onData)
     child.once('error', onError)
-    // Why: `exit` can precede the final piped stdout data. `close` waits until
-    // stdio closes so a last recipe chunk is not mistaken for missing output.
-    child.once('close', onClose)
+    child.once('exit', onExit)
   })
 }
 
@@ -285,8 +232,18 @@ function resolveForegroundOrcaExecutable(): string {
   )
 }
 
-export function stripElectronRunAsNode(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function stripElectronRunAsNode(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const next = { ...env }
   delete next.ELECTRON_RUN_AS_NODE
   return next
+}
+
+function getMacAppBundlePath(execPath: string): string | null {
+  if (process.platform !== 'darwin') {
+    return null
+  }
+  const macOsDir = dirname(execPath)
+  const contentsDir = dirname(macOsDir)
+  const appBundlePath = dirname(contentsDir)
+  return appBundlePath.endsWith('.app') ? appBundlePath : null
 }

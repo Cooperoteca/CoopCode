@@ -10,8 +10,7 @@
 // still answers protocol, so a regression that widened it to wedged daemons
 // would silently strand fresh terminals on a daemon that cannot serve them.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { DaemonServer } from './daemon-server'
@@ -108,31 +107,10 @@ describe('issue #6814 repro: daemon failure-mode classification', () => {
       const health = await checkDaemonHealth(socketPath, tokenPath)
       // This is the key finding: wedged != degraded. #6830's degraded fallback
       // does NOT engage here; recovery still depends on the unreachable-path
-      // (grace-bounded preserve-if-live-else-replace) logic, not the degraded
-      // provider.
+      // (preserve-if-live-else-replace) logic, not the degraded provider.
       expect(health).toBe('unreachable')
     } finally {
       await server.shutdown()
-    }
-  }, 15000)
-
-  // #8689: a daemon whose socket accepts connections but never answers the
-  // hello handshake (event loop wedged before the protocol reply) also
-  // classifies as 'unreachable' — the launcher's grace-bounded path must
-  // eventually replace it rather than preserve it forever.
-  it('WEDGED-HELLO: a daemon that accepts connections but never answers hello classifies as unreachable (#8689)', async () => {
-    const wedged = createServer((sock) => {
-      // Swallow the hello bytes but never write a response — the exact wedge.
-      sock.on('data', () => {})
-    })
-    await new Promise<void>((resolve) => wedged.listen(socketPath, () => resolve()))
-    // The health check reads the token before connecting, so it must exist.
-    writeFileSync(tokenPath, 'wedged-token')
-    try {
-      const health = await checkDaemonHealth(socketPath, tokenPath)
-      expect(health).toBe('unreachable')
-    } finally {
-      await new Promise<void>((resolve) => wedged.close(() => resolve()))
     }
   }, 15000)
 

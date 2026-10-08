@@ -7,10 +7,6 @@ import type { SshPortForwardManager } from './ssh-port-forward'
 import { RelayVersionMismatchError } from './ssh-relay-version-mismatch-error'
 import type { BrowserWindow } from 'electron'
 
-const { filesystemProviderConstructorMock } = vi.hoisted(() => ({
-  filesystemProviderConstructorMock: vi.fn()
-}))
-
 vi.mock('./ssh-relay-deploy', () => ({
   deployAndLaunchRelay: vi.fn()
 }))
@@ -43,9 +39,6 @@ vi.mock('../providers/ssh-pty-provider', () => ({
 
 vi.mock('../providers/ssh-filesystem-provider', () => ({
   SshFilesystemProvider: class MockSshFilesystemProvider {
-    constructor(...args: unknown[]) {
-      filesystemProviderConstructorMock(...args)
-    }
     dispose = vi.fn()
   }
 }))
@@ -65,7 +58,8 @@ vi.mock('../ipc/pty', () => ({
   clearPtyOwnershipForConnection: vi.fn(),
   clearProviderPtyState: vi.fn(),
   deletePtyOwnership: vi.fn(),
-  setPtyOwnership: vi.fn()
+  setPtyOwnership: vi.fn(),
+  answerStartupTerminalColorQueriesForPty: vi.fn((_id: string, data: string) => data)
 }))
 
 vi.mock('../providers/ssh-filesystem-dispatch', () => ({
@@ -120,26 +114,7 @@ function mockDeploySuccess(): void {
 describe('SshRelaySession terminal relay error (RelayVersionMismatchError)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    filesystemProviderConstructorMock.mockReset()
     mockDeploySuccess()
-  })
-
-  it('omits the SFTP folder factory while retaining raw transfer on system SSH', async () => {
-    const { mockStore, mockPortForward, getMainWindow } = createMockDeps()
-    const mockConn = {
-      usesSystemSshTransport: vi.fn(() => true)
-    } as unknown as SshConnection
-    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
-
-    await session.establish(mockConn)
-
-    expect(filesystemProviderConstructorMock).toHaveBeenCalledWith(
-      'target-1',
-      expect.anything(),
-      undefined,
-      expect.objectContaining({ downloadFile: expect.any(Function) }),
-      undefined
-    )
   })
 
   it('fires onTerminalRelayError on initial establish() and rethrows', async () => {

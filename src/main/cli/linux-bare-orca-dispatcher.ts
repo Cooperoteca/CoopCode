@@ -60,39 +60,28 @@ export async function installLinuxBareOrcaDispatcher(
   return { state: 'installed', dispatcherPath, target: resolved.target }
 }
 
-/** Bare-`orca` script that execs the Orca CLI: the stable AppImage when running
- *  from one, otherwise the bundled `orca-ide` launcher. Shared by the serve
- *  dispatcher and the managed-terminal PATH shim. */
-export function buildBareOrcaCliScript(
+function resolveDispatcherScript(
   resourcesPath: string,
   appImagePath: string | null
 ): { script: string; target: string } | null {
   if (appImagePath) {
     // Why: an AppImage mounts resources under an ephemeral FUSE path per launch,
-    // so the script must exec the stable outer AppImage — reuse the same
+    // so the dispatcher must exec the stable outer AppImage — reuse the same
     // wrapper CliInstaller installs for the AppImage command.
-    return { script: buildAppImageCliWrapper(appImagePath), target: appImagePath }
+    return { script: withMarker(buildAppImageCliWrapper(appImagePath)), target: appImagePath }
   }
 
   const launcher = getBundledLauncherPath('linux', resourcesPath)
   // Why: getBundledLauncherPath only joins the path; guard existence so we never
-  // write a script pointing at a missing launcher (which would fail at exec
+  // write a dispatcher pointing at a missing launcher (which would fail at exec
   // time with a confusing error instead of the command-not-found we fix).
   if (!launcher || !existsSync(launcher)) {
     return null
   }
   return {
-    script: `#!/usr/bin/env bash\nexec ${quoteShell(launcher)} "$@"\n`,
+    script: `#!/usr/bin/env bash\n${DISPATCHER_MARKER}\nexec ${quoteShell(launcher)} "$@"\n`,
     target: launcher
   }
-}
-
-function resolveDispatcherScript(
-  resourcesPath: string,
-  appImagePath: string | null
-): { script: string; target: string } | null {
-  const resolved = buildBareOrcaCliScript(resourcesPath, appImagePath)
-  return resolved && { script: withMarker(resolved.script), target: resolved.target }
 }
 
 function withMarker(script: string): string {

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Why: file CLI coverage shares one mocked runtime setup across command contracts. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const callMock = vi.fn()

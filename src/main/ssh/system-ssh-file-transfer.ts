@@ -13,7 +13,7 @@ import {
 } from './system-ssh-args'
 import { spawnSystemSshCommand } from './system-ssh-command'
 import { isWindowsRemoteHost, joinRemotePath, type RemoteHostPlatform } from './ssh-remote-platform'
-import { powerShellCommand } from './ssh-remote-powershell'
+import { powerShellCommand, powerShellLiteral } from './ssh-remote-powershell'
 import {
   awaitWithSystemSshAbort,
   killProcess,
@@ -22,7 +22,6 @@ import {
   waitForProcess,
   type ProcessResult
 } from './system-ssh-operation-lifecycle'
-import { writeBufferViaSystemSsh } from './system-ssh-file-binary-transfer'
 
 type SystemSshOperationOptions = SystemSshBuildArgsOptions & {
   signal?: AbortSignal
@@ -96,7 +95,30 @@ export async function writeFileViaSystemSsh(
   options?: SystemSshOperationOptions
 ): Promise<void> {
   throwIfAborted(options?.signal)
-  await writeBufferViaSystemSsh(target, remotePath, Buffer.from(contents, 'utf-8'), options)
+  if (options?.hostPlatform && isWindowsRemoteHost(options.hostPlatform)) {
+    await writeBufferViaSystemSshWindows(
+      target,
+      remotePath,
+      Buffer.from(contents, 'utf-8'),
+      options
+    )
+    return
+  }
+
+  const channel = spawnSystemSshCommand(
+    target,
+    `cat > ${shellEscape(remotePath)}`,
+    getSystemSshBuildArgsFromOperationOptions(options)
+  )
+  const closePromise = awaitWithSystemSshAbort(
+    options?.signal,
+    () => channel.close(),
+    waitForChannelClose(channel, `write ${remotePath}`)
+  )
+  if (!options?.signal?.aborted) {
+    channel.stdin.end(contents)
+  }
+  await closePromise
 }
 
 async function uploadDirectoryViaSystemSshWindows(
@@ -197,6 +219,42 @@ async function readLocalUploadFile(
   } finally {
     await handle.close()
   }
+}
+
+async function writeBufferViaSystemSshWindows(
+  target: SshTarget,
+  remotePath: string,
+  contents: Buffer,
+  options: SystemSshOperationOptions
+): Promise<void> {
+  throwIfAborted(options.signal)
+  const channel = spawnSystemSshCommand(target, makeWindowsWriteFileCommand(remotePath), {
+    wrapCommand: false,
+    ...getSystemSshBuildArgsFromOperationOptions(options)
+  })
+  const closePromise = awaitWithSystemSshAbort(
+    options.signal,
+    () => channel.close(),
+    waitForChannelClose(channel, `write ${remotePath}`)
+  )
+  if (!options.signal?.aborted) {
+    channel.stdin.end(contents)
+  }
+  await closePromise
+}
+
+function makeWindowsWriteFileCommand(remotePath: string): string {
+  return powerShellCommand(
+    [
+      '$ErrorActionPreference = "Stop"',
+      `$path = ${powerShellLiteral(remotePath)}`,
+      '$parent = [System.IO.Path]::GetDirectoryName($path)',
+      'if ($parent) { $null = [System.IO.Directory]::CreateDirectory($parent) }',
+      '$inputStream = [Console]::OpenStandardInput()',
+      '$outputStream = [System.IO.File]::Open($path, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)',
+      'try { $inputStream.CopyTo($outputStream) } finally { $outputStream.Dispose() }'
+    ].join('; ')
+  )
 }
 
 function makeWindowsUploadPackageCommand(): string {

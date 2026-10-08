@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: this integration spec keeps the SSH relay,
+agent-hook server, and replay/interrupt ordering fixtures together so regressions
+cover the full mux-to-main path. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Store } from '../persistence'
@@ -210,7 +213,6 @@ describe('SshRelaySession agent hooks over a fake relay transport', () => {
     session = null
     relay = null
     agentHookServer.setListener(null)
-    agentHookServer.setPaneStatusClearListener(null)
     agentHookInternals.resetCachesForTests()
     warnSpy.mockRestore()
     if (previousRemoteHooksFlag === undefined) {
@@ -271,34 +273,6 @@ describe('SshRelaySession agent hooks over a fake relay transport', () => {
         toolName: undefined
       }
     })
-  })
-
-  it('clears stamped status on reconnect loss but not final shutdown', async () => {
-    const initialRelay = createFakeRelay()
-    relay = createFakeRelay()
-    vi.mocked(deployAndLaunchRelay)
-      .mockResolvedValueOnce({ transport: initialRelay.transport, platform: 'linux-x64' })
-      .mockResolvedValueOnce({ transport: relay.transport, platform: 'linux-x64' })
-    const clearListener = vi.fn()
-    agentHookServer.setPaneStatusClearListener(clearListener)
-    session = createSession('conn-clear')
-    await session.establish({} as SshConnection)
-    initialRelay.notifyAgentHook(makeEnvelope())
-    await vi.waitFor(() => expect(agentHookServer.getStatusSnapshot()).toHaveLength(1))
-
-    await session.reconnect({} as SshConnection)
-    initialRelay.dispose()
-
-    expect(agentHookServer.getStatusSnapshot()).toEqual([])
-    expect(clearListener).toHaveBeenCalledOnce()
-    expect(clearListener).toHaveBeenCalledWith({
-      transient: true,
-      connectionId: 'conn-clear',
-      clearedAt: expect.any(Number)
-    })
-    session.dispose()
-    session = null
-    expect(clearListener).toHaveBeenCalledOnce()
   })
 
   it('asks the fake relay for cached hook replay after the session wires its listener', async () => {
@@ -443,22 +417,19 @@ describe('SshRelaySession agent hooks over a fake relay transport', () => {
 
     relay.notifyAgentHook(
       makeEnvelope({
-        source: 'pi',
-        hookEventName: 'session_start',
+        source: 'claude',
+        hookEventName: 'PreToolUse',
         promptInteractionKey: 'command-code-transcript-user-3',
         toolUseId: 'toolu-1',
         toolAgentId: 'agent-subagent-a',
         toolAgentType: 'Review',
-        providerSessionOnly: true,
-        providerSession: {
-          key: 'session_id',
-          id: 'ssh-relay-session-1',
-          transcriptPath: '/tmp/ssh-relay-session-1.jsonl'
-        },
+        providerSession: { key: 'session_id', id: 'ssh-relay-session-1' },
         payload: {
-          state: 'done',
-          prompt: '',
-          agentType: 'pi'
+          state: 'working',
+          prompt: 'remote prompt',
+          agentType: 'claude',
+          toolName: 'Bash',
+          toolInput: 'pnpm test'
         }
       })
     )
@@ -466,17 +437,12 @@ describe('SshRelaySession agent hooks over a fake relay transport', () => {
     await vi.waitFor(() =>
       expect(ingestSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          hookEventName: 'session_start',
+          hookEventName: 'PreToolUse',
           promptInteractionKey: 'command-code-transcript-user-3',
           toolUseId: 'toolu-1',
           toolAgentId: 'agent-subagent-a',
           toolAgentType: 'Review',
-          providerSessionOnly: true,
-          providerSession: {
-            key: 'session_id',
-            id: 'ssh-relay-session-1',
-            transcriptPath: '/tmp/ssh-relay-session-1.jsonl'
-          }
+          providerSession: { key: 'session_id', id: 'ssh-relay-session-1' }
         }),
         'conn-hook-metadata'
       )

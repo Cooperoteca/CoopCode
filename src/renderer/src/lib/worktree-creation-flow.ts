@@ -8,7 +8,7 @@ import {
   type WorktreeStartupPayload
 } from '@/lib/worktree-activation'
 import { ensureAgentStartupInTerminal } from '@/lib/new-workspace'
-import { queueWorkspaceActivationTerminalFocus } from '@/lib/workspace-activation-terminal-focus'
+import { queueNewWorkspaceTerminalFocus } from '@/lib/new-workspace-terminal-focus'
 import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import {
   attachEphemeralVmRuntimeToWorkspace,
@@ -25,7 +25,6 @@ import type {
   WorktreeCreationRequest
 } from '@/lib/pending-worktree-creation'
 import { createBrowserUuid } from '@/lib/browser-uuid'
-import { seedNativeChatAppliedSessionOptions } from '@/components/native-chat/native-chat-session-option-cache'
 
 type ContinueBackgroundWorktreeCreationOptions = {
   revealCreationSurface?: boolean
@@ -215,20 +214,13 @@ async function executeWorktreeCreation(
     await preflightAgentTrust(preparedRequest, worktree.path, repoConnectionId)
   }
 
-  // `createWorktree` already inserted the real worktree row. Leaving for an app
-  // view keeps the create in the background, while selecting another workspace
-  // means the user still expects this task-launch handoff when it becomes ready;
-  // the entry guard prevents a late trust preflight from reviving a cancelled create.
-  const completionState = useAppStore.getState()
-  const shouldActivateOnCompletion =
-    completionState.pendingWorktreeCreations[creationId] !== undefined &&
-    (isPendingCreationSurfaceVisible(creationId) ||
-      (completionState.activeView === 'terminal' &&
-        completionState.activePendingCreationId === null))
+  // `createWorktree` already inserted the real worktree row. Whether we steal
+  // the view depends on whether the user is still watching this creation.
+  const stillActive = isPendingCreationSurfaceVisible(creationId)
 
   let activation: ActivateAndRevealResult | false = false
   let primaryTabId: string | null
-  if (shouldActivateOnCompletion) {
+  if (stillActive) {
     activation = activateAndRevealWorktree(worktree.id, {
       sidebarRevealBehavior: 'auto',
       ...(result.setup ? { setup: result.setup } : {}),
@@ -255,16 +247,6 @@ async function executeWorktreeCreation(
   // Why: clearing synchronously right after activation lets React commit the
   // panel→terminal swap in one frame — no two-row flicker, no empty-terminal flash.
   useAppStore.getState().removePendingWorktreeCreation(creationId, { cleanupVm: false })
-  if (preparedRequest.startupPlan && preparedRequest.agent) {
-    const optionScopeKey = primaryTabId ?? result.startupTerminal?.tabId
-    if (optionScopeKey) {
-      seedNativeChatAppliedSessionOptions(
-        optionScopeKey,
-        preparedRequest.agent,
-        preparedRequest.startupPlan.sessionOptions
-      )
-    }
-  }
   if (preparedRequest.startupPlan && !backendSpawned) {
     void ensureAgentStartupInTerminal({
       worktreeId: worktree.id,
@@ -272,8 +254,8 @@ async function executeWorktreeCreation(
       startup: preparedRequest.startupPlan
     })
   }
-  if (shouldActivateOnCompletion && !preparedRequest.suppressTerminalFocusOnCompletion) {
-    queueWorkspaceActivationTerminalFocus(worktree.id, activation)
+  if (stillActive && !preparedRequest.suppressTerminalFocusOnCompletion) {
+    queueNewWorkspaceTerminalFocus(worktree.id, activation)
   }
 
   // Why: awaiting the note IPC before the swap would add a visible round-trip to

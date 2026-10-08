@@ -3,7 +3,8 @@ import { toast } from 'sonner'
 import { basename, dirname, joinPath } from '@/lib/path'
 import type { TreeNode } from './file-explorer-types'
 import { copyRuntimePath, runtimePathExists } from '@/runtime/runtime-file-client'
-import { captureFileExplorerOperationGuard } from './file-explorer-operation-owner'
+import { getConnectionId } from '@/lib/connection-context'
+import { getRightSidebarWorktreeRuntimeSettings } from './file-explorer-runtime-owner'
 
 /**
  * Electron's ipcRenderer.invoke wraps errors as:
@@ -41,21 +42,11 @@ export function useFileDuplicate({
       const ext = dotIndex > 0 ? name.slice(dotIndex) : ''
 
       const run = async (): Promise<void> => {
-        let operationGuard
-        try {
-          operationGuard = captureFileExplorerOperationGuard(activeWorktreeId, node.operationOwner)
-        } catch (err) {
-          toast.error(extractIpcErrorMessage(err, `Failed to duplicate '${name}'.`))
-          return
-        }
         const context = {
-          settings: operationGuard.route.settings,
+          settings: getRightSidebarWorktreeRuntimeSettings(activeWorktreeId),
           worktreeId: activeWorktreeId,
           worktreePath,
-          connectionId: operationGuard.route.connectionId,
-          expectedExecutionHostId: operationGuard.route.expectedExecutionHostId,
-          expectedSshTargetId: operationGuard.route.expectedSshTargetId,
-          expectedSshConnectionGeneration: operationGuard.route.expectedSshConnectionGeneration
+          connectionId: getConnectionId(activeWorktreeId) ?? undefined
         }
         // Why: generate a unique "stem copy.ext", "stem copy 2.ext", … name
         // so we never collide with an existing file. pathExists checks are
@@ -78,7 +69,6 @@ export function useFileDuplicate({
         // eslint-disable-next-line no-constant-condition
         while (true) {
           try {
-            operationGuard.assertCurrent()
             await copyRuntimePath(context, node.path, candidate)
             break
           } catch (err) {

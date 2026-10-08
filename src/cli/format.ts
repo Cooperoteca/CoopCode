@@ -2,7 +2,7 @@ import type { CliStatusResult } from '../shared/runtime-types'
 import { computerUseErrorRecoveryData } from '../shared/computer-use-error-recovery'
 import { prepareComputerCliJsonResult } from './computer-format'
 import type { RuntimeRpcFailure, RuntimeRpcSuccess } from './runtime-client'
-import { RuntimeClientError, RuntimeRpcFailureError } from './runtime/types'
+import { RuntimeClientError, RuntimeRpcFailureError } from './runtime-client'
 
 export {
   formatBrowserProfileList,
@@ -80,18 +80,15 @@ export function formatCliError(error: unknown, context: CliErrorContext = {}): s
   if (error instanceof RuntimeClientError && error.code === 'runtime_unavailable') {
     return `${message}\nOrca is not running. Run 'orca open' first.`
   }
-  // Why: error-specific recovery must win over the generic computer fallback.
-  if (error instanceof RuntimeClientError) {
-    const nextSteps = nextStepsFromData(error.data)
-    if (nextSteps.length > 0) {
-      return formatMessageWithNextSteps(message, nextSteps)
-    }
-    if (error.code === 'invalid_argument' && context.commandPath?.[0] === 'computer') {
-      return formatMessageWithNextSteps(
-        message,
-        computerUseErrorRecoveryData('invalid_argument')?.nextSteps ?? []
-      )
-    }
+  if (
+    error instanceof RuntimeClientError &&
+    error.code === 'invalid_argument' &&
+    context.commandPath?.[0] === 'computer'
+  ) {
+    return formatMessageWithNextSteps(
+      message,
+      computerUseErrorRecoveryData('invalid_argument')?.nextSteps ?? []
+    )
   }
   if (
     error instanceof RuntimeRpcFailureError &&
@@ -100,7 +97,14 @@ export function formatCliError(error: unknown, context: CliErrorContext = {}): s
     return `${message}\nOrca is not running. Run 'orca open' first.`
   }
   if (error instanceof RuntimeRpcFailureError) {
-    return formatMessageWithNextSteps(message, nextStepsFromData(error.response.error.data))
+    const data = error.response.error.data
+    const nextSteps =
+      data && typeof data === 'object' && Array.isArray((data as { nextSteps?: unknown }).nextSteps)
+        ? (data as { nextSteps: unknown[] }).nextSteps.filter(
+            (step): step is string => typeof step === 'string'
+          )
+        : []
+    return formatMessageWithNextSteps(message, nextSteps)
   }
   return message
 }
@@ -136,24 +140,7 @@ function formatMessageWithNextSteps(message: string, nextSteps: readonly string[
   return `${message}\n${nextSteps.map((step) => `Next step: ${step}`).join('\n')}`
 }
 
-function nextStepsFromData(data: unknown): string[] {
-  if (
-    data &&
-    typeof data === 'object' &&
-    Array.isArray((data as { nextSteps?: unknown }).nextSteps)
-  ) {
-    return (data as { nextSteps: unknown[] }).nextSteps.filter(
-      (step): step is string => typeof step === 'string'
-    )
-  }
-  return []
-}
-
 function localCliErrorData(error: unknown, context: CliErrorContext): unknown {
-  // Why: error-specific recovery must win over the generic computer fallback.
-  if (error instanceof RuntimeClientError && error.data !== undefined) {
-    return error.data
-  }
   if (
     error instanceof RuntimeClientError &&
     error.code === 'invalid_argument' &&
@@ -168,7 +155,6 @@ export function formatCliStatus(status: CliStatusResult): string {
   return [
     `appRunning: ${status.app.running}`,
     `pid: ${status.app.pid ?? 'none'}`,
-    `desktopWindowStatus: ${status.app.desktopWindowStatus ?? 'unknown'}`,
     `runtimeState: ${status.runtime.state}`,
     `runtimeReachable: ${status.runtime.reachable}`,
     `runtimeId: ${status.runtime.runtimeId ?? 'none'}`,

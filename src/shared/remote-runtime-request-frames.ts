@@ -3,18 +3,7 @@ import {
   type RuntimeRpcResponse,
   isKeepaliveFrame
 } from './runtime-rpc-envelope'
-import { RemoteRuntimeClientError } from './remote-runtime-client-error'
-import { assertJsonTextStructureWithinLimits } from './json-text-structure-limit'
-
-export const REMOTE_RUNTIME_JSON_STRUCTURE_LIMITS = {
-  structuralTokens: 256 * 1024,
-  nestingDepth: 64
-} as const
-
-export function parseRemoteRuntimeJsonText(content: string): unknown {
-  assertJsonTextStructureWithinLimits(content, REMOTE_RUNTIME_JSON_STRUCTURE_LIMITS)
-  return JSON.parse(content) as unknown
-}
+import { RemoteRuntimeClientError } from './remote-runtime-client'
 
 export type ParsedRemoteRuntimeFrame =
   | { type: 'keepalive' }
@@ -41,7 +30,7 @@ export function invalidRemoteRuntimeResponseError(message: string): RemoteRuntim
 export function parseReadyFrame(frame: string): RemoteRuntimeClientError | null {
   let ready: unknown
   try {
-    ready = parseRemoteRuntimeJsonText(frame)
+    ready = JSON.parse(frame)
   } catch {
     return invalidRemoteRuntimeResponseError(
       'Remote Orca runtime returned an invalid E2EE handshake frame.'
@@ -62,7 +51,7 @@ export function parseReadyFrame(frame: string): RemoteRuntimeClientError | null 
 export function parseAuthenticatedFrame(plaintext: string): RemoteRuntimeClientError | null {
   let authenticated: unknown
   try {
-    authenticated = parseRemoteRuntimeJsonText(plaintext)
+    authenticated = JSON.parse(plaintext)
   } catch {
     return invalidRemoteRuntimeResponseError(
       'Remote Orca runtime returned an invalid E2EE auth frame.'
@@ -84,7 +73,7 @@ export function parseAuthenticatedFrame(plaintext: string): RemoteRuntimeClientE
 export function parseRemoteRuntimeRpcFrame(plaintext: string): ParsedRemoteRuntimeFrame {
   let raw: unknown
   try {
-    raw = parseRemoteRuntimeJsonText(plaintext)
+    raw = JSON.parse(plaintext)
   } catch {
     return {
       type: 'error',

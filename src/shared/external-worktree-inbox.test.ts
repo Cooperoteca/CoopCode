@@ -10,7 +10,6 @@ import type {
 import {
   getHiddenExternalWorktrees,
   getNewExternalWorktreeInboxWorktrees,
-  getVisibleExternalWorktrees,
   mergeExternalWorktreeInboxPaths,
   shouldOfferNewExternalWorktreeInbox
 } from './external-worktree-inbox'
@@ -161,17 +160,6 @@ describe('external worktree inbox', () => {
         externalWorktreeInboxBaselinePaths: ['/scratch/old-one']
       })
     ).toEqual([hidden])
-  })
-
-  it('excludes explicitly visible agent scratch from visibility-control counts', () => {
-    const visible = detectedWorktree({ id: 'visible', visible: true })
-    const scratch = detectedWorktree({
-      id: 'agent-scratch',
-      ownership: 'agent-scratch',
-      visible: true
-    })
-
-    expect(getVisibleExternalWorktrees(detectedResult([visible, scratch]))).toEqual([visible])
   })
 
   it('offers metadata-free nested Orca workspace worktrees through the inbox', () => {

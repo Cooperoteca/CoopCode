@@ -2,13 +2,8 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import type { AgentType } from '../../shared/native-chat-types'
-import { resolveNativeChatTranscriptAgent } from '../../shared/native-chat-agent-support'
 import { walkSessionFiles } from '../ai-vault/session-scanner-discovery'
 import { getOrcaManagedCodexHomePath } from '../codex/codex-home-paths'
-import {
-  findGrokChatHistoryBySessionId,
-  resolveGrokSessionsDir
-} from '../../shared/grok-session-paths'
 
 // Why: these mirror the path constants in ai-vault/session-scanner.ts. Reads
 // run in the main process against the runtime's own home directory; over SSH
@@ -33,18 +28,12 @@ function codexSessionsDirs(): string[] {
   return candidates.filter((dir, index) => candidates.indexOf(dir) === index)
 }
 
-function grokSessionsDir(): string {
-  return resolveGrokSessionsDir(process.env, homedir())
-}
-
 export type ResolveSessionFileOptions = {
   /** Override the Claude projects root (used by tests / isolated scans). */
   claudeProjectsDir?: string
   /** Override the Codex sessions roots, searched in order (tests / isolated
    *  scans). Defaults to the orca-managed home then CODEX_HOME/~/.codex. */
   codexSessionsDirs?: string[]
-  /** Override the Grok sessions root (`~/.grok/sessions`). */
-  grokSessionsDir?: string
   /** Authoritative transcript path reported by the agent hook
    *  (`providerSession.transcriptPath`). When set and the file exists, it is used
    *  directly — recent Claude Code names the transcript with a UUID that differs
@@ -67,10 +56,6 @@ export async function resolveSessionFilePath(
   sessionId: string,
   options: ResolveSessionFileOptions = {}
 ): Promise<string | null> {
-  const transcriptAgent = resolveNativeChatTranscriptAgent(agent)
-  if (!transcriptAgent) {
-    return null
-  }
   // Why: the hook's transcript_path is the exact file the agent is writing, so it
   // beats reconstructing a path from the session id. Guard with existsSync so a
   // stale/remote path falls through to the id-based search rather than returning
@@ -85,14 +70,11 @@ export async function resolveSessionFilePath(
     return null
   }
 
-  if (transcriptAgent === 'claude') {
+  if (agent === 'claude') {
     return resolveClaudeSessionFile(trimmedId, options.claudeProjectsDir ?? claudeProjectsDir())
   }
-  if (transcriptAgent === 'codex') {
+  if (agent === 'codex') {
     return resolveCodexSessionFile(trimmedId, options.codexSessionsDirs ?? codexSessionsDirs())
-  }
-  if (transcriptAgent === 'grok') {
-    return resolveGrokSessionFile(trimmedId, options.grokSessionsDir ?? grokSessionsDir())
   }
   return null
 }
@@ -132,14 +114,4 @@ async function resolveCodexSessionFile(
     }
   }
   return null
-}
-
-async function resolveGrokSessionFile(
-  sessionId: string,
-  sessionsDir: string
-): Promise<string | null> {
-  // Why: Native Chat runs on the main thread; use the bounded async direct-layout
-  // lookup instead of blocking, then repeating, a recursive full-tree scan.
-  const history = await findGrokChatHistoryBySessionId(sessionsDir, sessionId)
-  return history
 }

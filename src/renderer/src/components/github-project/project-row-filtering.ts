@@ -1,10 +1,7 @@
 import type { GitHubProjectRow, GitHubProjectTable } from '../../../../shared/github-project-types'
 import type { Repo } from '../../../../shared/types'
 
-export type ProjectRowSlugLookup = (
-  slug: string | null | undefined,
-  host?: string
-) => readonly Repo[]
+export type ProjectRowSlugLookup = (slug: string | null | undefined) => readonly Repo[]
 
 export type SelectedProjectRowResolution =
   | { status: 'loading' }
@@ -21,7 +18,6 @@ export type SelectedProjectRowResolution =
 export function resolveSelectedProjectRowRepo(input: {
   row: GitHubProjectRow
   lookupSlug: ProjectRowSlugLookup
-  host?: string
   slugIndexReady: boolean
   selectedRepoIds: ReadonlySet<string>
 }): SelectedProjectRowResolution {
@@ -38,7 +34,7 @@ export function resolveSelectedProjectRowRepo(input: {
     return { status: 'invalid_slug' }
   }
 
-  const globalMatches = input.lookupSlug(repository, input.host)
+  const globalMatches = input.lookupSlug(repository)
   if (globalMatches.length === 0) {
     return { status: 'no_global_match' }
   }
@@ -55,19 +51,16 @@ export function resolveSelectedProjectRowRepo(input: {
 
 export function projectRowHasOpenRepo(
   row: GitHubProjectRow,
-  lookupSlug: ProjectRowSlugLookup,
-  host?: string
+  lookupSlug: ProjectRowSlugLookup
 ): boolean {
-  return lookupSlug(row.content.repository, host).length > 0
+  return lookupSlug(row.content.repository).length > 0
 }
 
 export function filterProjectTableRowsByOpenRepos(
   table: GitHubProjectTable,
   lookupSlug: ProjectRowSlugLookup
 ): GitHubProjectTable {
-  const rows = table.rows.filter((row) =>
-    projectRowHasOpenRepo(row, lookupSlug, table.project.host)
-  )
+  const rows = table.rows.filter((row) => projectRowHasOpenRepo(row, lookupSlug))
   if (rows.length === table.rows.length && table.totalCount === rows.length) {
     return table
   }
@@ -84,7 +77,6 @@ export function filterProjectTableRowsBySelectedRepos(
     const resolution = resolveSelectedProjectRowRepo({
       row,
       lookupSlug,
-      host: table.project.host,
       slugIndexReady,
       selectedRepoIds
     })

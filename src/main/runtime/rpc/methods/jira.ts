@@ -1,9 +1,5 @@
 import { z } from 'zod'
-import {
-  JIRA_PAYLOAD_CHUNK_CHARS,
-  JIRA_PAYLOAD_MAX_CHARS
-} from '../../../../shared/jira-payload-stream'
-import { defineMethod, defineStreamingMethod, type RpcAnyMethod } from '../core'
+import { defineMethod, type RpcMethod } from '../core'
 import {
   OptionalFiniteNumber,
   OptionalPlainString,
@@ -21,10 +17,8 @@ const SiteSelection = z
 
 const Connect = z.object({
   siteUrl: requiredString('Site URL is required'),
-  // Self-hosted PAT auth needs no email; connect() enforces it for Cloud.
-  email: OptionalPlainString,
-  apiToken: requiredString('API token is required'),
-  authType: z.enum(['cloud', 'server']).optional()
+  email: requiredString('Email is required'),
+  apiToken: requiredString('API token is required')
 })
 
 const SelectSite = z.object({
@@ -94,34 +88,15 @@ const AssignableUsers = z.object({
   siteId: OptionalString
 })
 
-const ProjectStatusOrder = z.object({
-  projectKey: requiredString('Project key is required'),
-  siteId: OptionalString
-})
-
-function emitJiraPayload(value: unknown, emit: (result: unknown) => void): void {
-  const payload = JSON.stringify(value)
-  if (payload.length > JIRA_PAYLOAD_MAX_CHARS) {
-    throw new Error('Jira payload exceeded the transfer limit.')
-  }
-  // Why: remote runtime WebSocket messages are capped at 1 MiB; chunking keeps
-  // authenticated inline images usable over SSH without raising that safety cap.
-  for (let offset = 0; offset < payload.length; offset += JIRA_PAYLOAD_CHUNK_CHARS) {
-    emit({ type: 'chunk', content: payload.slice(offset, offset + JIRA_PAYLOAD_CHUNK_CHARS) })
-  }
-  emit({ type: 'end' })
-}
-
-export const JIRA_METHODS: RpcAnyMethod[] = [
+export const JIRA_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'jira.connect',
     params: Connect,
     handler: async (params, { runtime }) =>
       runtime.jiraConnect({
         siteUrl: params.siteUrl.trim(),
-        email: params.email?.trim() ?? '',
-        apiToken: params.apiToken.trim(),
-        authType: params.authType
+        email: params.email.trim(),
+        apiToken: params.apiToken.trim()
       })
   }),
   defineMethod({
@@ -161,13 +136,6 @@ export const JIRA_METHODS: RpcAnyMethod[] = [
     params: IssueKey,
     handler: async (params, { runtime }) => runtime.jiraGetIssue(params.key.trim(), params.siteId)
   }),
-  defineStreamingMethod({
-    name: 'jira.getIssueStream',
-    params: IssueKey,
-    handler: async (params, { runtime }, emit) => {
-      emitJiraPayload(await runtime.jiraGetIssue(params.key.trim(), params.siteId), emit)
-    }
-  }),
   defineMethod({
     name: 'jira.createIssue',
     params: CreateIssue,
@@ -198,13 +166,6 @@ export const JIRA_METHODS: RpcAnyMethod[] = [
     params: IssueKey,
     handler: async (params, { runtime }) =>
       runtime.jiraIssueComments(params.key.trim(), params.siteId)
-  }),
-  defineStreamingMethod({
-    name: 'jira.issueCommentsStream',
-    params: IssueKey,
-    handler: async (params, { runtime }, emit) => {
-      emitJiraPayload(await runtime.jiraIssueComments(params.key.trim(), params.siteId), emit)
-    }
   }),
   defineMethod({
     name: 'jira.listProjects',
@@ -243,11 +204,5 @@ export const JIRA_METHODS: RpcAnyMethod[] = [
     params: IssueKey,
     handler: async (params, { runtime }) =>
       runtime.jiraListTransitions(params.key.trim(), params.siteId)
-  }),
-  defineMethod({
-    name: 'jira.getProjectStatusOrder',
-    params: ProjectStatusOrder,
-    handler: async (params, { runtime }) =>
-      runtime.jiraGetProjectStatusOrder(params.projectKey.trim(), params.siteId)
   })
 ]

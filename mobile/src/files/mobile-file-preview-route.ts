@@ -111,5 +111,5 @@ export function createMobileFilePreviewHref(
 }
 
 export function displayNameFromPreviewPath(relativePath: string): string {
-  return relativePath.split(/[\\/]/).findLast(Boolean) ?? relativePath
+  return relativePath.split(/[\\/]/).filter(Boolean).at(-1) ?? relativePath
 }

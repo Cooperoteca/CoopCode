@@ -16,15 +16,11 @@ export function decideInitialAgentTabViewMode(args: {
   openAgentTabsInChatByDefault?: boolean
   agent?: TuiAgent | null
   promptDelivery?: NativeChatLaunchPromptDelivery
-  nativeChatTranscriptIsLocalReadable?: boolean
 }): Tab['viewMode'] {
   if (args.experimentalNativeChat !== true || args.openAgentTabsInChatByDefault !== true) {
     return undefined
   }
   if (!isNativeChatSupportedAgent(args.agent)) {
-    return undefined
-  }
-  if (args.agent === 'grok' && args.nativeChatTranscriptIsLocalReadable !== true) {
     return undefined
   }
   if (args.promptDelivery === 'draft') {
@@ -41,15 +37,13 @@ export function initialAgentTabViewModeProps(
   options: {
     agent?: TuiAgent | null
     promptDelivery?: NativeChatLaunchPromptDelivery
-    nativeChatTranscriptIsLocalReadable?: boolean
   } = {}
 ): { viewMode?: Tab['viewMode'] } {
   const viewMode = decideInitialAgentTabViewMode({
     experimentalNativeChat: settings?.experimentalNativeChat,
     openAgentTabsInChatByDefault: settings?.openAgentTabsInChatByDefault,
     agent: options.agent,
-    promptDelivery: options.promptDelivery,
-    nativeChatTranscriptIsLocalReadable: options.nativeChatTranscriptIsLocalReadable
+    promptDelivery: options.promptDelivery
   })
   return viewMode ? { viewMode } : {}
 }

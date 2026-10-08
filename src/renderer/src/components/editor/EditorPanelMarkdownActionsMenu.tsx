@@ -13,16 +13,12 @@ import { translate } from '@/i18n/i18n'
 type EditorPanelMarkdownActionsMenuProps = {
   isMarkdown: boolean
   isDiffSurface: boolean
-  /** Diff-only wrap preference; ignored for normal file tabs. */
   diffWordWrap: boolean
-  /** File editor wrap preference (`settings.editorWordWrap`). */
-  editorWordWrap: boolean
   shouldShowMarkdownExportAction: boolean
   canExportMarkdownToPdf: boolean
   canShowMarkdownFrontmatterToggle: boolean
   markdownFrontmatterVisible: boolean
   onToggleDiffWordWrap: () => void
-  onToggleEditorWordWrap: () => void
   onToggleMarkdownFrontmatter: () => void
   onExportMarkdownToPdf: () => void
 }
@@ -31,21 +27,19 @@ export function EditorPanelMarkdownActionsMenu({
   isMarkdown,
   isDiffSurface,
   diffWordWrap,
-  editorWordWrap,
   shouldShowMarkdownExportAction,
   canExportMarkdownToPdf,
   canShowMarkdownFrontmatterToggle,
   markdownFrontmatterVisible,
   onToggleDiffWordWrap,
-  onToggleEditorWordWrap,
   onToggleMarkdownFrontmatter,
   onExportMarkdownToPdf
 }: EditorPanelMarkdownActionsMenuProps): React.JSX.Element | null {
   const hasMarkdownActions =
     isMarkdown && (shouldShowMarkdownExportAction || canShowMarkdownFrontmatterToggle)
-  // Why: normal files always get Word Wrap so long/structured lines can unwrap without Settings (#9974).
-  const wordWrapChecked = isDiffSurface ? diffWordWrap : editorWordWrap
-  const onToggleWordWrap = isDiffSurface ? onToggleDiffWordWrap : onToggleEditorWordWrap
+  if (!isDiffSurface && !hasMarkdownActions) {
+    return null
+  }
 
   return (
     <DropdownMenu>
@@ -66,13 +60,17 @@ export function EditorPanelMarkdownActionsMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={4}>
-        <DropdownMenuCheckboxItem checked={wordWrapChecked} onCheckedChange={onToggleWordWrap}>
-          {translate(
-            'auto.components.editor.EditorPanelMarkdownActionsMenu.1eef809708',
-            'Word Wrap'
-          )}
-        </DropdownMenuCheckboxItem>
-        {hasMarkdownActions ? <DropdownMenuSeparator /> : null}
+        {isDiffSurface ? (
+          <>
+            <DropdownMenuCheckboxItem checked={diffWordWrap} onCheckedChange={onToggleDiffWordWrap}>
+              {translate(
+                'auto.components.editor.EditorPanelMarkdownActionsMenu.1eef809708',
+                'Word Wrap'
+              )}
+            </DropdownMenuCheckboxItem>
+            {hasMarkdownActions ? <DropdownMenuSeparator /> : null}
+          </>
+        ) : null}
         {canShowMarkdownFrontmatterToggle ? (
           <>
             <DropdownMenuItem

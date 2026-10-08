@@ -4,16 +4,14 @@ import { toast } from 'sonner'
 import { useAppStore } from '@/store'
 import { detectLanguage } from '@/lib/language-detect'
 import { dirname, joinPath } from '@/lib/path'
+import { getConnectionId } from '@/lib/connection-context'
 import { extractIpcErrorMessage, renameFileOnDisk } from '@/lib/rename-file'
 import type { InlineInput } from './FileExplorerRow'
 import type { TreeNode } from './file-explorer-types'
 import type { FileExplorerRowProjection } from './file-explorer-row-projection'
 import { commitFileExplorerOp } from './fileExplorerUndoRedo'
 import { createRuntimePath, deleteRuntimePath } from '@/runtime/runtime-file-client'
-import {
-  captureFileExplorerOperationGuard,
-  getFileExplorerOperationOwner
-} from './file-explorer-operation-owner'
+import { getRightSidebarWorktreeRuntimeSettings } from './file-explorer-runtime-owner'
 
 type UseFileExplorerInlineInputParams = {
   activeWorktreeId: string | null
@@ -76,12 +74,7 @@ export function useFileExplorerInlineInput({
       if (activeWorktreeId && parentPath !== worktreePath && !expanded.has(parentPath)) {
         toggleDir(activeWorktreeId, parentPath)
       }
-      setInlineInput({
-        parentPath,
-        type,
-        depth,
-        operationOwner: getFileExplorerOperationOwner(activeWorktreeId)
-      })
+      setInlineInput({ parentPath, type, depth })
     },
     [activeWorktreeId, worktreePath, expanded, toggleDir]
   )
@@ -93,8 +86,7 @@ export function useFileExplorerInlineInput({
         type: 'rename',
         depth: node.depth,
         existingName: node.name,
-        existingPath: node.path,
-        operationOwner: node.operationOwner
+        existingPath: node.path
       }),
     []
   )
@@ -117,33 +109,24 @@ export function useFileExplorerInlineInput({
         return
       }
       const run = async (): Promise<void> => {
+        const connectionId = getConnectionId(activeWorktreeId ?? null) ?? undefined
+        const fileContext = {
+          settings: getRightSidebarWorktreeRuntimeSettings(activeWorktreeId),
+          worktreeId: activeWorktreeId,
+          worktreePath,
+          connectionId
+        }
         if (inlineInput.type === 'rename' && inlineInput.existingPath) {
           await renameFileOnDisk({
             oldPath: inlineInput.existingPath,
             newName: name,
             worktreeId: activeWorktreeId,
             worktreePath,
-            operationOwner: inlineInput.operationOwner,
             refreshDir
           })
         } else {
           const fullPath = joinPath(inlineInput.parentPath, name)
           try {
-            const operationGuard = captureFileExplorerOperationGuard(
-              activeWorktreeId,
-              inlineInput.operationOwner
-            )
-            const operationRoute = operationGuard.route
-            const fileContext = {
-              settings: operationRoute.settings,
-              worktreeId: activeWorktreeId,
-              worktreePath,
-              connectionId: operationRoute.connectionId,
-              expectedExecutionHostId: operationRoute.expectedExecutionHostId,
-              expectedSshTargetId: operationRoute.expectedSshTargetId,
-              expectedSshConnectionGeneration: operationRoute.expectedSshConnectionGeneration
-            }
-            operationGuard.assertCurrent()
             await createRuntimePath(
               fileContext,
               fullPath,
@@ -153,57 +136,22 @@ export function useFileExplorerInlineInput({
             if (inlineInput.type === 'folder') {
               commitFileExplorerOp({
                 undo: async () => {
-                  const currentRoute = operationGuard.assertCurrent()
-                  await deleteRuntimePath(
-                    {
-                      ...fileContext,
-                      settings: currentRoute.settings,
-                      connectionId: currentRoute.connectionId
-                    },
-                    fullPath,
-                    true
-                  )
+                  await deleteRuntimePath(fileContext, fullPath, true)
                   await refreshDir(parentForRefresh)
                 },
                 redo: async () => {
-                  const currentRoute = operationGuard.assertCurrent()
-                  await createRuntimePath(
-                    {
-                      ...fileContext,
-                      settings: currentRoute.settings,
-                      connectionId: currentRoute.connectionId
-                    },
-                    fullPath,
-                    'directory'
-                  )
+                  await createRuntimePath(fileContext, fullPath, 'directory')
                   await refreshDir(parentForRefresh)
                 }
               })
             } else {
               commitFileExplorerOp({
                 undo: async () => {
-                  const currentRoute = operationGuard.assertCurrent()
-                  await deleteRuntimePath(
-                    {
-                      ...fileContext,
-                      settings: currentRoute.settings,
-                      connectionId: currentRoute.connectionId
-                    },
-                    fullPath
-                  )
+                  await deleteRuntimePath(fileContext, fullPath)
                   await refreshDir(parentForRefresh)
                 },
                 redo: async () => {
-                  const currentRoute = operationGuard.assertCurrent()
-                  await createRuntimePath(
-                    {
-                      ...fileContext,
-                      settings: currentRoute.settings,
-                      connectionId: currentRoute.connectionId
-                    },
-                    fullPath,
-                    'file'
-                  )
+                  await createRuntimePath(fileContext, fullPath, 'file')
                   await refreshDir(parentForRefresh)
                 }
               })

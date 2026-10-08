@@ -22,14 +22,7 @@ function seedActiveWorkspace(store: ReturnType<typeof createTestStore>): void {
     activeWorktreeId: 'wt-1',
     settings: { activeRuntimeEnvironmentId: 'runtime-1' } as AppState['settings'],
     worktreesByRepo: {
-      [TEST_REPO.id]: [
-        makeWorktree({
-          id: 'wt-1',
-          repoId: TEST_REPO.id,
-          hostId: 'runtime:runtime-1',
-          runtimeOwnerEnvironmentId: 'runtime-1'
-        })
-      ]
+      [TEST_REPO.id]: [makeWorktree({ id: 'wt-1', repoId: TEST_REPO.id })]
     },
     groupsByWorktree: {
       'wt-1': [{ id: 'group-1', worktreeId: 'wt-1', activeTabId: null, tabOrder: [] }]
@@ -75,16 +68,6 @@ describe('Cmd+J lifted creation actions', () => {
     seedActiveWorkspace(store)
     store.setState({
       repos: [{ ...TEST_REPO, executionHostId: 'runtime:owner-runtime' }],
-      worktreesByRepo: {
-        [TEST_REPO.id]: [
-          makeWorktree({
-            id: 'wt-1',
-            repoId: TEST_REPO.id,
-            hostId: 'runtime:owner-runtime',
-            runtimeOwnerEnvironmentId: 'owner-runtime'
-          })
-        ]
-      },
       settings: { activeRuntimeEnvironmentId: 'focused-runtime' } as AppState['settings']
     })
 
@@ -106,9 +89,6 @@ describe('Cmd+J lifted creation actions', () => {
     seedActiveWorkspace(store)
     store.setState({
       repos: [{ ...TEST_REPO, executionHostId: 'local' }],
-      worktreesByRepo: {
-        [TEST_REPO.id]: [makeWorktree({ id: 'wt-1', repoId: TEST_REPO.id, hostId: 'local' })]
-      },
       settings: { activeRuntimeEnvironmentId: 'focused-runtime' } as AppState['settings']
     })
 
@@ -172,16 +152,6 @@ describe('Cmd+J lifted creation actions', () => {
     seedActiveWorkspace(store)
     store.setState({
       repos: [{ ...TEST_REPO, executionHostId: 'runtime:owner-runtime' }],
-      worktreesByRepo: {
-        [TEST_REPO.id]: [
-          makeWorktree({
-            id: 'wt-1',
-            repoId: TEST_REPO.id,
-            hostId: 'runtime:owner-runtime',
-            runtimeOwnerEnvironmentId: 'owner-runtime'
-          })
-        ]
-      },
       settings: { activeRuntimeEnvironmentId: null } as AppState['settings']
     })
 
@@ -193,27 +163,6 @@ describe('Cmd+J lifted creation actions', () => {
       targetGroupId: 'group-1',
       activate: true
     })
-    expect(store.getState().tabsByWorktree['wt-1'] ?? []).toEqual([])
-  })
-
-  it('fails terminal creation closed for duplicate repo IDs owned by different HUBs', async () => {
-    delete pairedWebFlag.__ORCA_WEB_CLIENT__
-    const store = createTestStore()
-    seedActiveWorkspace(store)
-    store.setState({
-      repos: [
-        { ...TEST_REPO, executionHostId: 'runtime:hub-a' },
-        { ...TEST_REPO, executionHostId: 'runtime:hub-b' }
-      ],
-      worktreesByRepo: {
-        [TEST_REPO.id]: [makeWorktree({ id: 'wt-1', repoId: TEST_REPO.id })]
-      },
-      settings: { activeRuntimeEnvironmentId: 'hub-b' } as AppState['settings']
-    })
-
-    await store.getState().openNewTerminalTabInActiveWorkspace('group-1')
-
-    expect(createWebRuntimeSessionTerminalMock).not.toHaveBeenCalled()
     expect(store.getState().tabsByWorktree['wt-1'] ?? []).toEqual([])
   })
 

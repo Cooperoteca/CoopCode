@@ -33,20 +33,12 @@ export function AddRemoteHostDialog({
   onOpenChange
 }: AddRemoteHostDialogProps): React.JSX.Element {
   const open = mode !== null
-  // Why: `mode` drives both open-state and which form renders. On close it goes null while the
-  // dialog is still animating out, so the title/fields would flash to the SSH default. Latch the
-  // last non-null mode for rendering so the closing dialog keeps showing what the user saw.
-  const [renderMode, setRenderMode] = useState<AddRemoteHostMode>(mode ?? 'ssh')
-  if (mode !== null && mode !== renderMode) {
-    setRenderMode(mode)
-  }
   const [sshForm, setSshForm] = useState<EditingTarget>(EMPTY_FORM)
   const [serverName, setServerName] = useState('')
   const [pairingCode, setPairingCode] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const setSshTargetsMetadata = useAppStore((s) => s.setSshTargetsMetadata)
-  const recordSshRepoReadoptions = useAppStore((s) => s.recordSshRepoReadoptions)
   const setRuntimeEnvironments = useAppStore((s) => s.setRuntimeEnvironments)
   const refreshRuntimeEnvironmentStatus = useAppStore((s) => s.refreshRuntimeEnvironmentStatus)
   const recordFeatureInteraction = useAppStore((s) => s.recordFeatureInteraction)
@@ -80,7 +72,7 @@ export function AddRemoteHostDialog({
       )
       return
     }
-    if (Number.isNaN(port) || port < 1 || port > 65535) {
+    if (isNaN(port) || port < 1 || port > 65535) {
       toast.error(
         translate(
           'auto.components.sidebar.AddRemoteHostDialog.sshPortInvalid',
@@ -102,9 +94,6 @@ export function AddRemoteHostDialog({
     }
 
     const identityFile = sshForm.identityFile.trim() || undefined
-    const proxyCommand = sshForm.proxyCommand.trim() || undefined
-    const jumpHost = sshForm.jumpHost.trim() || undefined
-    const systemSshConnectionReuse = sshForm.systemSshConnectionReuse ? undefined : false
     const target = {
       label: sshForm.label.trim() || (username ? `${username}@${host}` : configHost),
       configHost,
@@ -112,16 +101,12 @@ export function AddRemoteHostDialog({
       port,
       username,
       relayGracePeriodSeconds: graceSeconds,
-      ...(identityFile ? { identityFile } : {}),
-      ...(proxyCommand ? { proxyCommand } : {}),
-      ...(jumpHost ? { jumpHost } : {}),
-      ...(systemSshConnectionReuse === false ? { systemSshConnectionReuse } : {})
+      ...(identityFile ? { identityFile } : {})
     }
 
     setIsSaving(true)
     try {
-      const result = await window.api.ssh.addTarget({ target })
-      recordSshRepoReadoptions(result.repoReadoptions)
+      await window.api.ssh.addTarget({ target })
       await refreshSshTargetMetadata()
       recordFeatureInteraction('ssh')
       toast.success(
@@ -146,9 +131,7 @@ export function AddRemoteHostDialog({
   const importSshConfig = async () => {
     setIsImporting(true)
     try {
-      const result = await window.api.ssh.importConfig()
-      const synced = result.targets
-      recordSshRepoReadoptions(result.repoReadoptions)
+      const synced = (await window.api.ssh.importConfig()) as SshTarget[]
       await refreshSshTargetMetadata()
       recordFeatureInteraction('ssh')
       if (synced.length === 0) {
@@ -236,7 +219,7 @@ export function AddRemoteHostDialog({
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>
-            {renderMode === 'server'
+            {mode === 'server'
               ? translate(
                   'auto.components.sidebar.AddRemoteHostDialog.serverTitle',
                   'Add remote server'
@@ -244,7 +227,7 @@ export function AddRemoteHostDialog({
               : translate('auto.components.sidebar.AddRemoteHostDialog.sshTitle', 'Add SSH host')}
           </DialogTitle>
           <DialogDescription>
-            {renderMode === 'server'
+            {mode === 'server'
               ? translate(
                   'auto.components.sidebar.AddRemoteHostDialog.serverDescription',
                   'Pair with Orca running on another computer.'
@@ -256,7 +239,7 @@ export function AddRemoteHostDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {renderMode === 'server' ? (
+        {mode === 'server' ? (
           <RemoteServerFields
             name={serverName}
             pairingCode={pairingCode}
@@ -275,7 +258,7 @@ export function AddRemoteHostDialog({
         )}
 
         <DialogFooter className="sm:justify-between">
-          {renderMode === 'ssh' ? (
+          {mode === 'ssh' ? (
             <button
               type="button"
               className="self-center text-left text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50"
@@ -303,9 +286,7 @@ export function AddRemoteHostDialog({
             </Button>
             <Button
               type="button"
-              onClick={
-                renderMode === 'server' ? () => void saveRemoteServer() : () => void saveSshHost()
-              }
+              onClick={mode === 'server' ? () => void saveRemoteServer() : () => void saveSshHost()}
               disabled={isSaving || isImporting}
             >
               {isSaving

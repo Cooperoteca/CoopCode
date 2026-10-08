@@ -3,16 +3,11 @@ import { toast } from 'sonner'
 import { useAppStore } from '@/store'
 import { useConfirmationDialog } from '@/components/confirmation-dialog'
 import { dirname } from '@/lib/path'
+import { getConnectionId } from '@/lib/connection-context'
 import { useShortcutLabel } from '@/hooks/useShortcutLabel'
+import { findWorktreeById } from '@/store/slices/worktree-helpers'
 import { isPathEqualOrDescendant } from './file-explorer-paths'
-import { runBatchDeletion, selectDeletionRoots } from './file-explorer-batch-deletion'
 import type { TreeNode } from './file-explorer-types'
-import { captureFileExplorerOperationGuard } from './file-explorer-operation-owner'
-import {
-  getFileDeleteErrorMessage,
-  isLocalDeleteNode,
-  needsRemoteDeleteConfirmation
-} from './file-explorer-delete-classification'
 import {
   requestEditorFileSave,
   requestEditorSaveQuiesce
@@ -20,6 +15,7 @@ import {
 import { commitFileExplorerOp } from './fileExplorerUndoRedo'
 import {
   deleteRuntimePath,
+  isRemoteRuntimeFileOperation,
   readRuntimeFileContent,
   writeRuntimeFile
 } from '@/runtime/runtime-file-client'
@@ -59,27 +55,30 @@ export function useFileDeletion({
   const inFlightRef = useRef<Set<string>>(new Set())
 
   const runDelete = useCallback(
-    async (node: TreeNode, options?: { skipConfirmation?: boolean }): Promise<boolean> => {
+    async (node: TreeNode): Promise<boolean> => {
       if (inFlightRef.current.has(node.path)) {
         return false
       }
       inFlightRef.current.add(node.path)
 
-      const operationOwner = node.operationOwner ?? { kind: 'unresolved' as const }
-      // Why: treat every non-local owner (ssh, runtime, unresolved) as remote
-      // for confirm/error copy, then fail closed below when the route is null
-      // so an unresolved owner never reaches local filesystem authorization.
-      const isRemote = operationOwner.kind !== 'local'
+      const connectionId = getConnectionId(activeWorktreeId ?? null) ?? undefined
+      const state = useAppStore.getState()
+      const worktree = activeWorktreeId
+        ? findWorktreeById(state.worktreesByRepo, activeWorktreeId)
+        : null
+      const fileContext = {
+        settings: state.settings,
+        worktreeId: activeWorktreeId,
+        worktreePath: worktree?.path ?? null,
+        connectionId
+      }
+      const isRemote =
+        connectionId !== undefined || isRemoteRuntimeFileOperation(fileContext, node.path)
 
       try {
-        const operationGuard = captureFileExplorerOperationGuard(
-          activeWorktreeId,
-          node.operationOwner
-        )
         // Why: remote deletes bypass OS Trash, and undo cannot recover
-        // directories or unreadable files. Batch deletes confirm once up
-        // front instead, so they skip the per-node prompt.
-        if (isRemote && !options?.skipConfirmation) {
+        // directories or unreadable files.
+        if (isRemote) {
           const confirmed = await confirm({
             title: translate(
               'auto.components.right.sidebar.useFileDeletion.d979a4fbb5',
@@ -121,20 +120,6 @@ export function useFileDeletion({
         // writes cannot recreate the file after it's been trashed.
         await Promise.all(filesToClose.map((file) => requestEditorSaveQuiesce({ fileId: file.id })))
 
-        // Why: confirmation and autosave can outlive a reconnect or graph replacement; mutations require the owner generation that produced the row.
-        const operationRoute = operationGuard.assertCurrent()
-        const state = useAppStore.getState()
-        const worktree = activeWorktreeId ? state.getKnownWorktreeById(activeWorktreeId) : null
-        const fileContext = {
-          settings: operationRoute.settings,
-          worktreeId: activeWorktreeId,
-          worktreePath: worktree?.path ?? null,
-          connectionId: operationRoute.connectionId,
-          expectedExecutionHostId: operationRoute.expectedExecutionHostId,
-          expectedSshTargetId: operationRoute.expectedSshTargetId,
-          expectedSshConnectionGeneration: operationRoute.expectedSshConnectionGeneration
-        }
-
         const parentDir = dirname(node.path)
         // Why: read file content before deleting so undo can restore it.
         // We capture content first but only commit the undo entry after the
@@ -147,7 +132,7 @@ export function useFileDeletion({
               filePath: node.path,
               relativePath: node.relativePath,
               worktreeId: activeWorktreeId ?? undefined,
-              connectionId: operationRoute.connectionId
+              connectionId
             })
             if (!rf.isBinary) {
               undoContent = rf.content
@@ -158,35 +143,16 @@ export function useFileDeletion({
           }
         }
 
-        operationGuard.assertCurrent()
         await deleteRuntimePath(fileContext, node.path, node.isDirectory)
 
         if (undoContent !== undefined) {
           commitFileExplorerOp({
             undo: async () => {
-              const currentRoute = operationGuard.assertCurrent()
-              await writeRuntimeFile(
-                {
-                  ...fileContext,
-                  settings: currentRoute.settings,
-                  connectionId: currentRoute.connectionId
-                },
-                node.path,
-                undoContent
-              )
+              await writeRuntimeFile(fileContext, node.path, undoContent)
               await refreshDir(parentDir)
             },
             redo: async () => {
-              const currentRoute = operationGuard.assertCurrent()
-              await deleteRuntimePath(
-                {
-                  ...fileContext,
-                  settings: currentRoute.settings,
-                  connectionId: currentRoute.connectionId
-                },
-                node.path,
-                node.isDirectory
-              )
+              await deleteRuntimePath(fileContext, node.path, node.isDirectory)
               await refreshDir(parentDir)
             }
           })
@@ -226,10 +192,9 @@ export function useFileDeletion({
         return true
       } catch (error) {
         const action = isRemote ? 'delete' : isWindows ? 'move to Recycle Bin' : 'move to Trash'
-        const errorMessage = getFileDeleteErrorMessage(error)
         toast.error(
-          errorMessage
-            ? errorMessage
+          error instanceof Error
+            ? error.message
             : translate(
                 'auto.components.right.sidebar.useFileDeletion.72691dfebc',
                 "Failed to {{value0}} '{{value1}}'.",
@@ -265,56 +230,29 @@ export function useFileDeletion({
         requestDelete(nodes[0])
         return
       }
-      const roots = selectDeletionRoots(nodes)
-      // Why: the batch confirms whenever any root is a permanent remote delete,
-      // but the selection can also include local roots that only go to the
-      // Trash — so a mixed batch needs copy that keeps that distinction.
-      const hasLocalDelete = roots.some(isLocalDeleteNode)
-      const trashName = isWindows ? 'Recycle Bin' : 'Trash'
-      // Why: selection is cleared once after the entire batch settles rather
-      // than per-node, so no concurrent completion can restore a partial
-      // stale set.
+      // Why: skip descendants of other selected directories — deleting a parent
+      // already removes the child, and issuing both requests races on the
+      // now-missing path and produces spurious errors.
+      const roots = nodes.filter(
+        (n) =>
+          !nodes.some(
+            (other) =>
+              other !== n && other.isDirectory && isPathEqualOrDescendant(n.path, other.path)
+          )
+      )
+      // Why: process sequentially in the caller's tree order so each delete
+      // fully settles before the next begins — this avoids concurrent writes
+      // to the same parent directory and makes failure toasts deterministic.
+      // Selection is cleared once after the entire batch settles rather than
+      // per-node, so no concurrent completion can restore a partial stale set.
       void (async () => {
-        const deletedRoots = await runBatchDeletion({
-          roots,
-          // Why: only remote deletes confirm at all — local deletes go to the
-          // OS Trash and stay prompt-free in batches too.
-          needsConfirmation: roots.some(needsRemoteDeleteConfirmation),
-          confirmBatch: () =>
-            confirm({
-              // Why: count the full selection, not the filtered roots —
-              // deleting a folder still deletes the selected children inside
-              // it, and the prompt should match what the user sees selected.
-              title: hasLocalDelete
-                ? translate(
-                    'auto.components.right.sidebar.useFileDeletion.77fdc36183',
-                    'Delete {{count}} items?',
-                    { count: nodes.length }
-                  )
-                : translate(
-                    'auto.components.right.sidebar.useFileDeletion.af1270b90d',
-                    'Permanently delete {{count}} items?',
-                    { count: nodes.length }
-                  ),
-              description: hasLocalDelete
-                ? translate(
-                    'auto.components.right.sidebar.useFileDeletion.fca915a67a',
-                    'Remote items are permanently deleted and cannot be undone. Local items move to the {{value0}}.',
-                    { value0: trashName }
-                  )
-                : translate(
-                    'auto.components.right.sidebar.useFileDeletion.dd029aa5cd',
-                    'This permanently deletes the selected items and any directory contents on the remote host. This cannot be undone.'
-                  ),
-              confirmLabel: translate(
-                'auto.components.right.sidebar.useFileDeletion.92276aceb7',
-                'Delete'
-              ),
-              confirmVariant: 'destructive'
-            }),
-          deleteNode: (node) => runDelete(node, { skipConfirmation: true })
-        })
-        if (deletedRoots === null || deletedRoots.length === 0) {
+        const deletedRoots: TreeNode[] = []
+        for (const node of roots) {
+          if (await runDelete(node)) {
+            deletedRoots.push(node)
+          }
+        }
+        if (deletedRoots.length === 0) {
           return
         }
         setSelectedPaths(
@@ -329,7 +267,7 @@ export function useFileDeletion({
         )
       })()
     },
-    [confirm, isWindows, runDelete, requestDelete, setSelectedPaths]
+    [runDelete, requestDelete, setSelectedPaths]
   )
 
   return useMemo(

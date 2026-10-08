@@ -23,10 +23,10 @@ export function NativeChatExperimentalSetting({
 
   return (
     <SearchableSetting
-      title={translate('auto.components.settings.ExperimentalPane.nativeChat.title', 'Chat UI')}
+      title={translate('auto.components.settings.ExperimentalPane.nativeChat.title', 'Native chat')}
       description={translate(
         'auto.components.settings.ExperimentalPane.nativeChat.description',
-        'Preview the desktop chat surface for supported agent terminal sessions.'
+        'Preview the desktop chat surface for Claude and Codex terminal sessions.'
       )}
       keywords={getExperimentalSearchEntry().nativeChat.keywords}
       className="space-y-3 py-2"
@@ -35,12 +35,12 @@ export function NativeChatExperimentalSetting({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 shrink space-y-0.5">
           <Label>
-            {translate('auto.components.settings.ExperimentalPane.nativeChat.title', 'Chat UI')}
+            {translate('auto.components.settings.ExperimentalPane.nativeChat.title', 'Native chat')}
           </Label>
           <p className="text-xs text-muted-foreground">
             {translate(
               'auto.components.settings.ExperimentalPane.nativeChat.copy',
-              'Adds a Chat UI view you can switch to from supported agent terminal panes. Experimental while we tune transcript fidelity, streaming, and terminal parity.'
+              'Adds a native chat view you can switch to from supported Claude and Codex terminal panes. Experimental while we tune transcript fidelity, streaming, and terminal parity.'
             )}
           </p>
         </div>
@@ -48,7 +48,7 @@ export function NativeChatExperimentalSetting({
           checked={nativeChatEnabled}
           ariaLabel={translate(
             'auto.components.settings.ExperimentalPane.nativeChat.toggleLabel',
-            'Toggle Chat UI'
+            'Toggle native chat'
           )}
           onChange={() =>
             updateSettings({
@@ -70,7 +70,7 @@ export function NativeChatExperimentalSetting({
               <p className="text-xs text-muted-foreground">
                 {translate(
                   'auto.components.settings.ExperimentalPane.nativeChat.defaultCopy',
-                  'Choose how new supported agent terminal tabs open.'
+                  'Choose how new Claude and Codex terminal tabs open.'
                 )}
               </p>
             </div>
@@ -85,7 +85,7 @@ export function NativeChatExperimentalSetting({
               <SelectTrigger
                 aria-label={translate(
                   'auto.components.settings.ExperimentalPane.nativeChat.defaultViewLabel',
-                  'Default Chat UI view'
+                  'Default native chat view'
                 )}
                 className="w-36"
                 size="sm"
@@ -102,7 +102,7 @@ export function NativeChatExperimentalSetting({
                 <SelectItem value="native-chat">
                   {translate(
                     'auto.components.settings.ExperimentalPane.nativeChat.defaultViewNative',
-                    'Chat UI'
+                    'Native chat'
                   )}
                 </SelectItem>
               </SelectContent>
